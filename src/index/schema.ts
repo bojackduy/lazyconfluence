@@ -1,0 +1,77 @@
+import type { Database } from "bun:sqlite"
+
+export const INDEX_SCHEMA_VERSION = 1
+
+export function applyIndexSchema(database: Database) {
+  database.run("PRAGMA foreign_keys = ON")
+
+  const currentVersion = readUserVersion(database)
+  if (currentVersion > INDEX_SCHEMA_VERSION) {
+    throw new Error(`Unsupported lazyconfluence index schema version: ${currentVersion}`)
+  }
+
+  database.exec(INDEX_SCHEMA_SQL)
+
+  if (currentVersion < INDEX_SCHEMA_VERSION) {
+    database.run(`PRAGMA user_version = ${INDEX_SCHEMA_VERSION}`)
+  }
+}
+
+function readUserVersion(database: Database) {
+  const row = database.query("PRAGMA user_version").get() as { user_version: number } | null
+
+  return Number(row?.user_version ?? 0)
+}
+
+const INDEX_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS spaces (
+  key TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  last_synced_at TEXT,
+  sync_state TEXT NOT NULL CHECK(sync_state IN ('fresh', 'stale', 'not-synced'))
+);
+
+CREATE TABLE IF NOT EXISTS pages (
+  page_id TEXT PRIMARY KEY,
+  space_key TEXT NOT NULL REFERENCES spaces(key) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  url TEXT NOT NULL,
+  url_key TEXT NOT NULL,
+  parent_id TEXT,
+  path_json TEXT NOT NULL,
+  path_text TEXT NOT NULL,
+  owner TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  content_markdown TEXT NOT NULL,
+  snippet TEXT NOT NULL,
+  indexed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS pages_url_key_idx ON pages(url_key);
+CREATE INDEX IF NOT EXISTS pages_space_parent_idx ON pages(space_key, parent_id, title COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS pages_space_path_idx ON pages(space_key, path_text COLLATE NOCASE);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS page_fts USING fts5(
+  title,
+  path,
+  snippet,
+  content,
+  page_id UNINDEXED,
+  tokenize = 'unicode61'
+);
+
+CREATE TABLE IF NOT EXISTS links (
+  id INTEGER PRIMARY KEY,
+  from_page_id TEXT NOT NULL REFERENCES pages(page_id) ON DELETE CASCADE,
+  target_url TEXT NOT NULL,
+  target_url_key TEXT NOT NULL,
+  target_page_id TEXT,
+  title TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK(kind IN ('internal', 'external')),
+  UNIQUE(from_page_id, target_url)
+);
+
+CREATE INDEX IF NOT EXISTS links_from_page_idx ON links(from_page_id, title COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS links_target_page_idx ON links(target_page_id);
+CREATE INDEX IF NOT EXISTS links_target_url_key_idx ON links(target_url_key);
+`

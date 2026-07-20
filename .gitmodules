@@ -1,0 +1,3 @@
+[submodule "lazylens"]
+	path = lazylens
+	url = git@khaclbit:richlee/lazylens.git

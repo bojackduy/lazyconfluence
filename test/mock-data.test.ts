@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { extractOutline, getDefaultPageId, getPagesForSpace, getReaderPage, mockPages, mockSpaces, searchPagesInSpace } from "../src/mock-data"
+import { extractOutline, getDefaultPageId, getPagesForSpace, getReaderPage, mockPages, mockSpaces, searchPagesInSpace, searchSpaces } from "../src/mock-data"
 
 describe("mock data", () => {
   test("has a default page for the active space", () => {
@@ -19,6 +19,15 @@ describe("mock data", () => {
       expect(space.pageCount).toBe(getPagesForSpace(space.key).length)
       expect(getDefaultPageId(space.key)).toBe(getPagesForSpace(space.key)[0]?.pageId)
     }
+  })
+
+  test("searches spaces by key and name", () => {
+    expect(searchSpaces("plat")[0]?.space.key).toBe("PLAT")
+    expect(searchSpaces("architecture")[0]?.space.key).toBe("ARCH")
+  })
+
+  test("empty space search returns all spaces in switcher order", () => {
+    expect(searchSpaces("").map((result) => result.space.key)).toEqual(["ENG", "OPS", "ARCH", "PLAT", "TEAM"])
   })
 
   test("searches pages inside one active space", () => {

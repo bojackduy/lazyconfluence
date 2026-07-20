@@ -1,0 +1,21 @@
+{
+  "name": "lazyconfluence",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/main.tsx",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "lint": "bun run typecheck"
+  },
+  "dependencies": {
+    "@opentui/core": "latest",
+    "@opentui/solid": "latest",
+    "solid-js": "latest"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "latest"
+  }
+}

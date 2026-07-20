@@ -1,0 +1,201 @@
+import { mkdtemp, rm, stat } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { describe, expect, test } from "bun:test"
+import type { IndexedPage, PageLink, SpaceSummary } from "../src/model"
+import { resolveIndexDatabasePath } from "../src/index/db"
+import { openIndexRepository } from "../src/index/repository"
+
+type Repository = ReturnType<typeof openIndexRepository>
+
+describe("local index repository", () => {
+  test("opens and creates a configured local database path", async () => {
+    const dataHome = await mkdtemp(join(tmpdir(), "lazyconfluence-index-home-"))
+    const dbPath = resolveIndexDatabasePath({ LAZYCONFLUENCE_DATA_HOME: dataHome } as NodeJS.ProcessEnv)
+    const repository = openIndexRepository({ path: dbPath })
+
+    try {
+      const info = await stat(dbPath)
+
+      expect(info.isFile()).toBe(true)
+      expect(repository.path).toBe(dbPath)
+    } finally {
+      repository.close()
+      await rm(dataHome, { recursive: true, force: true })
+    }
+  })
+
+  test("upserts spaces, pages, links, and relationship queries", async () => {
+    await withSeededRepository((repository) => {
+      expect(repository.getSpace("ENG")?.pageCount).toBe(3)
+      expect(repository.getPage("architecture")?.title).toBe("Project Architecture")
+      expect(repository.getChildren("eng-home").map((page) => page.pageId)).toEqual(["architecture", "release-checklist"])
+
+      const outgoing = repository.getOutgoingLinks("eng-home")
+      const internal = outgoing.find((link) => link.title === "Project Architecture")
+      const external = outgoing.find((link) => link.title === "Atlassian docs")
+
+      expect(internal?.kind).toBe("internal")
+      expect(internal?.targetPageId).toBe("architecture")
+      expect(external?.kind).toBe("external")
+      expect(external?.targetPageId).toBeNull()
+
+      const backlinks = repository.getIncomingLinks("architecture")
+
+      expect(backlinks.map((link) => link.fromPageId).sort()).toEqual(["eng-home", "ops-runbook"])
+    })
+  })
+
+  test("searches pages in one active space and across all spaces", async () => {
+    await withSeededRepository((repository) => {
+      const activeSpaceResults = repository.searchPagesInSpace("ENG", "release")
+
+      expect(activeSpaceResults[0]?.page.pageId).toBe("release-checklist")
+      expect(activeSpaceResults.every((result) => result.page.spaceKey === "ENG")).toBe(true)
+      expect(repository.searchPagesInSpace("ENG", "observability")).toEqual([])
+
+      const allSpaceResults = repository.searchPagesAcrossSpaces("observability")
+
+      expect(allSpaceResults[0]?.page.pageId).toBe("observability")
+      expect(allSpaceResults[0]?.page.spaceKey).toBe("OPS")
+      expect(allSpaceResults[0]?.page.title).toBe("Observability Guide")
+      expect(allSpaceResults[0]?.page.path).toEqual(["Operations Home", "Observability Guide"])
+      expect(allSpaceResults[0]?.page.snippet).toContain("Dashboards")
+    })
+  })
+
+  test("matches Confluence URLs back to indexed pages", async () => {
+    await withSeededRepository((repository) => {
+      const matched = repository.matchPageUrl("https://example.atlassian.net/wiki/spaces/ENG/pages/101/Project+Architecture?focusedCommentId=123#decision-context")
+
+      expect(matched?.pageId).toBe("architecture")
+      expect(repository.matchPageUrl("https://example.atlassian.net/wiki/spaces/ENG/pages/999/Missing")).toBeNull()
+    })
+  })
+})
+
+async function withSeededRepository(callback: (repository: Repository) => void | Promise<void>) {
+  const dir = await mkdtemp(join(tmpdir(), "lazyconfluence-index-"))
+  const repository = openIndexRepository({ path: join(dir, "index.sqlite3") })
+
+  try {
+    seedRepository(repository)
+    await callback(repository)
+  } finally {
+    repository.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
+function seedRepository(repository: Repository) {
+  repository.upsertSpaces(spaces)
+  repository.upsertPages([engHome, opsRunbook])
+  repository.upsertLinks([homeToArchitecture, homeToExternal, opsToArchitecture])
+  repository.upsertPages([architecture, releaseChecklist, observability])
+}
+
+const spaces: SpaceSummary[] = [
+  {
+    key: "ENG",
+    name: "Engineering Handbook",
+    lastSyncedAt: "2026-07-21T09:30:00Z",
+    pageCount: 0,
+    syncState: "fresh",
+  },
+  {
+    key: "OPS",
+    name: "Operations Runbooks",
+    lastSyncedAt: "2026-07-18T16:10:00Z",
+    pageCount: 0,
+    syncState: "stale",
+  },
+]
+
+const engHome: IndexedPage = {
+  pageId: "eng-home",
+  spaceKey: "ENG",
+  title: "Engineering Home",
+  url: "https://example.atlassian.net/wiki/spaces/ENG/pages/100/Engineering+Home",
+  parentId: null,
+  path: ["Engineering Home"],
+  owner: "Platform Team",
+  updatedAt: "2026-07-20T14:22:00Z",
+  snippet: "Start here for engineering norms and current programs.",
+  contentMarkdown: "# Engineering Home\n\nRead Project Architecture before changing service boundaries.",
+}
+
+const architecture: IndexedPage = {
+  pageId: "architecture",
+  spaceKey: "ENG",
+  title: "Project Architecture",
+  url: "https://example.atlassian.net/wiki/spaces/ENG/pages/101/Project+Architecture",
+  parentId: "eng-home",
+  path: ["Engineering Home", "Project Architecture"],
+  owner: "Architecture Guild",
+  updatedAt: "2026-07-19T11:05:00Z",
+  snippet: "How lazyconfluence separates UI, local data, sync, and Confluence mapping.",
+  contentMarkdown: "# Project Architecture\n\nThe application is local-first after explicit sync.",
+}
+
+const releaseChecklist: IndexedPage = {
+  pageId: "release-checklist",
+  spaceKey: "ENG",
+  title: "Release Checklist",
+  url: "https://example.atlassian.net/wiki/spaces/ENG/pages/102/Release+Checklist",
+  parentId: "eng-home",
+  path: ["Engineering Home", "Release Checklist"],
+  owner: "Release Managers",
+  updatedAt: "2026-07-17T18:40:00Z",
+  snippet: "A compact checklist for production releases and rollback readiness.",
+  contentMarkdown: "# Release Checklist\n\nConfirm tests, owners, dashboards, and rollback notes.",
+}
+
+const opsRunbook: IndexedPage = {
+  pageId: "ops-runbook",
+  spaceKey: "OPS",
+  title: "Architecture Reference Runbook",
+  url: "https://example.atlassian.net/wiki/spaces/OPS/pages/200/Architecture+Reference+Runbook",
+  parentId: null,
+  path: ["Architecture Reference Runbook"],
+  owner: "Operations",
+  updatedAt: "2026-07-18T09:00:00Z",
+  snippet: "Operational page that links back to architecture.",
+  contentMarkdown: "# Architecture Reference Runbook\n\nUse the architecture page during incidents.",
+}
+
+const observability: IndexedPage = {
+  pageId: "observability",
+  spaceKey: "OPS",
+  title: "Observability Guide",
+  url: "https://example.atlassian.net/wiki/spaces/OPS/pages/201/Observability+Guide",
+  parentId: "ops-runbook",
+  path: ["Operations Home", "Observability Guide"],
+  owner: "Operations",
+  updatedAt: "2026-07-18T09:20:00Z",
+  snippet: "Dashboards, alerts, and traces for production services.",
+  contentMarkdown: "# Observability Guide\n\nUse dashboards and alerts to inspect production health.",
+}
+
+const homeToArchitecture: PageLink = {
+  fromPageId: "eng-home",
+  targetUrl: "https://example.atlassian.net/wiki/spaces/ENG/pages/101/Project+Architecture?focusedCommentId=abc#context",
+  targetPageId: null,
+  title: "Project Architecture",
+  kind: "external",
+}
+
+const homeToExternal: PageLink = {
+  fromPageId: "eng-home",
+  targetUrl: "https://developer.atlassian.com/cloud/confluence/rest/v2/",
+  targetPageId: null,
+  title: "Atlassian docs",
+  kind: "external",
+}
+
+const opsToArchitecture: PageLink = {
+  fromPageId: "ops-runbook",
+  targetUrl: "https://example.atlassian.net/wiki/spaces/ENG/pages/101/Project+Architecture",
+  targetPageId: null,
+  title: "Project Architecture",
+  kind: "internal",
+}

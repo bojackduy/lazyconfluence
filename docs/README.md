@@ -1,38 +1,38 @@
-# Product Plan
+# lazyconfluence Planning Docs
 
-This document captures the current product path for `lazyconfluence` without choosing implementation details.
+This directory is the current source of truth for the product and build plan.
+
+Root-level notes may contain stale implementation direction. Start here unless the user explicitly says otherwise.
 
 ## Product Goal
 
 Build a terminal-first Confluence document browser that feels fast, readable, and keyboard-native.
 
-The app should not feel like a generic search tool. It should feel like a focused Confluence reader: choose a space, browse the page tree, read a document with rich formatting, follow related pages, and open the canonical page in the browser when needed.
+The app should feel like a focused Confluence reader, not a generic search tool. The user should choose a space, browse the page tree, read a richly rendered document, follow related pages, and open the canonical page in the browser when needed.
 
 ## Core Experience
 
 The main experience is centered on one active Confluence space.
 
-Within that active space, the user can:
+Within that space, the user can:
 
 - Browse the space tree.
 - Search pages in that space.
 - Read a selected page in a rich terminal document view.
-- See page metadata such as space, parent path, owner, and updated time.
+- See metadata such as space, parent path, owner, and updated time.
 - See child pages, outgoing links, and backlinks.
 - Follow internal links when the target page is indexed.
 - Open the selected page in the browser.
 - Move backward through navigation history.
 
-Multiple spaces are supported, but they should not permanently crowd the main reading view. Space browsing should happen through a fast overlay or overview.
+Multiple spaces are supported, but they should not permanently crowd the main reading view. Space browsing should happen through a fast overlay or all-spaces overview.
 
 ## Main Screen Shape
-
-The main screen should be document-first.
 
 ```text
 +-- ACTIVE SPACE / Parent / Current Page -------------------------------------+
 | Page title                                                    sync status     |
-| Space name · parent path · owner · updated time                               |
+| Space name . parent path . owner . updated time                               |
 +-----------------------------+------------------------------------------------+
 | NAVIGATOR                   | DOCUMENT                                       |
 |                             |                                                |
@@ -61,7 +61,7 @@ The navigator and document are the primary panes. Related links and outline supp
 
 ## Narrow Screen Shape
 
-On small terminals, the app should switch to a mode-based layout instead of squeezing every pane at once.
+On small terminals, switch to a mode-based layout instead of squeezing every pane at once.
 
 ```text
 +-- Current Page -------------------------------------------------------------+
@@ -76,13 +76,19 @@ On small terminals, the app should switch to a mode-based layout instead of sque
 +------------------------------------------------------------------------------+
 ```
 
-The user should be able to switch between document, navigator, links, outline, and search modes.
+## Search Lenses
 
-## Space Browsing
+Search is intent-specific. Do not rely on one global search bar for everything.
 
-The app is one-space-first, but it must make switching spaces fast.
+Planned lenses:
 
-Space switcher shape:
+- Page search in the active space.
+- Page search across all configured spaces.
+- Find text inside the current document.
+- Action or command discovery.
+- Space switcher search.
+
+## Space Switcher Shape
 
 ```text
 +-- Switch Space -------------------------------------------------------------+
@@ -97,49 +103,9 @@ Space switcher shape:
 +------------------------------------------------------------------------------+
 ```
 
-There should also be an all-spaces overview for users who do not remember which space owns a page.
-
-## Search Lenses
-
-Search should be intent-specific. One global search bar is not enough.
-
-The planned lenses are:
-
-- Page search in the active space.
-- Page search across all configured spaces.
-- Find text inside the current document.
-- Action or command discovery.
-- Space switcher search.
-
-Page search in active space:
-
-```text
-+-- Search Pages In Active Space --------------------------------------------+
-| Query: auth token_                                             scope: space   |
-+------------------------------------------------------------------------------+
-| > Auth Model                         Platform / Auth                         |
-|   Token Rotation Runbook             Platform / Runbooks                     |
-|   API Decision                       Platform                                |
-|   Troubleshooting                    Operations                              |
-+------------------------------------------------------------------------------+
-| enter open | tab change scope | esc close                                    |
-+------------------------------------------------------------------------------+
-```
-
-Find inside current document:
-
-```text
-+-- Find In Document ---------------------------------------------------------+
-| token_                                                     7 matches          |
-| n next | N previous | esc close                                              |
-+------------------------------------------------------------------------------+
-```
-
 ## Keyboard Intent
 
-Use lazy-family keyboard muscle memory, but only where it serves document browsing.
-
-Important shortcuts:
+Use lazy-family keyboard muscle memory only where it serves document browsing.
 
 - `q` quits.
 - `?` opens help.
@@ -160,7 +126,7 @@ Important shortcuts:
 
 ## First Useful Milestone
 
-The first useful product milestone is not feature-complete. It should let a user:
+The first useful product milestone should let a user:
 
 - Set up access to selected spaces.
 - Sync content explicitly.
@@ -172,21 +138,16 @@ The first useful product milestone is not feature-complete. It should let a user
 - Follow indexed internal links.
 - Return using history.
 
-That is enough to validate the core product.
+## Doc Map
 
-## Product Constraints
+- `BUILD_PLAN.md` explains the implementation architecture and integration order.
+- `OPENTUI_REFERENCE.md` explains how future agents should use the `opentui` skill and OpenCode reference material.
+- `TASK_TRACKER.md` tracks task state and integration order.
+- `subagents/*.md` are copy-pasteable task briefs for parallel agents.
 
-- Normal navigation must not require live remote calls.
-- Sync and refresh must be explicit user actions.
-- The reader should prioritize useful rendered content over raw source details.
-- Store enough local content to make document reading useful.
-- Do not store secrets in project files or plain user config examples.
-- Do not expand into unrelated collaboration products before the Confluence reader is good.
-- Keep the interface calm by default and put power features in overlays.
+## Read-Only References
 
-## Open Questions
+- `lazylens/` is read-only reference material for Confluence behavior and local indexing.
+- `~/Code/opencode` is read-only reference material for a polished OpenTUI application.
 
-- How much page content should be stored locally by default?
-- Should pinned or favorite pages be local-only, synced from Confluence metadata, or both?
-- What is the default first screen after sync: last page, active space home, or recent pages?
-- Should all-space search be a separate shortcut or a scope toggle inside page search?
+Never edit either reference while working on this project.

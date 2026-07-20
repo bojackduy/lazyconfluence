@@ -38,4 +38,10 @@ export interface ReaderPage extends IndexedPage {
   outline: string[]
 }
 
+export interface SearchResult {
+  page: IndexedPage
+  score: number
+  matchedIn: "title" | "path" | "snippet" | "content" | "all"
+}
+
 export type FocusPane = "navigator" | "document"

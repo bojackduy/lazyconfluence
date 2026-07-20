@@ -6,9 +6,11 @@ Guidance for agents working in this repository.
 
 Read these files first, in order:
 
-1. `PRODUCT_PLAN.md` for the product and UX direction.
-2. `BUILD_PLAN.md` for the current implementation direction.
-3. `TASK_BREAKDOWN.md` for parallel task ownership and checklists.
+1. `docs/README.md` for the product and UX direction.
+2. `docs/BUILD_PLAN.md` for the current implementation direction.
+3. `docs/OPENTUI_REFERENCE.md` before any terminal UI work.
+4. `docs/TASK_TRACKER.md` for current task status.
+5. The relevant `docs/subagents/*.md` task brief.
 
 This repository is still early. Older notes may contain stale implementation direction. Prefer the files above unless the user explicitly says otherwise.
 
@@ -67,7 +69,7 @@ Use that skill's docs for renderer setup, Solid bindings, layout, keyboard handl
 
 ## Future-Agent Expectations
 
-- Preserve the user-approved product direction in `PRODUCT_PLAN.md`.
+- Preserve the user-approved product direction in `docs/README.md`.
 - Make surgical changes that directly support the current requested phase.
 - Avoid speculative abstractions and broad refactors.
 - Ask when product intent is unclear instead of silently choosing.

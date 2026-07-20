@@ -141,6 +141,7 @@ The first useful product milestone should let a user:
 ## Doc Map
 
 - `BUILD_PLAN.md` explains the implementation architecture and integration order.
+- `HANDOFF.md` summarizes the current implementation state and next execution order.
 - `OPENTUI_REFERENCE.md` explains how future agents should use the `opentui` skill and OpenCode reference material.
 - `TASK_TRACKER.md` tracks task state and integration order.
 - `subagents/*.md` are copy-pasteable task briefs for parallel agents.

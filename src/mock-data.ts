@@ -1,4 +1,4 @@
-import type { IndexedPage, PageLink, ReaderPage, SearchResult, SpaceSummary } from "./model"
+import type { IndexedPage, PageLink, ReaderPage, SearchResult, SpaceSearchResult, SpaceSummary } from "./model"
 
 const readerScrollStressSections = Array.from({ length: 12 }, (_, index) => {
   const section = String(index + 1).padStart(2, "0")
@@ -681,6 +681,19 @@ export function searchPagesInSpace(spaceKey: string, query: string): SearchResul
     .sort((a, b) => b.score - a.score || a.page.title.localeCompare(b.page.title))
 }
 
+export function searchSpaces(query: string): SpaceSearchResult[] {
+  const normalizedQuery = normalizeSearchText(query)
+
+  if (!normalizedQuery) {
+    return mockSpaces.map((space, index) => ({ space, score: mockSpaces.length - index, matchedIn: "all" }))
+  }
+
+  return mockSpaces
+    .map((space) => scoreSpace(space, normalizedQuery))
+    .filter((result): result is SpaceSearchResult => result !== null)
+    .sort((a, b) => b.score - a.score || a.space.key.localeCompare(b.space.key))
+}
+
 export function getReaderPage(pageId: string): ReaderPage {
   const page = mockPages.find((candidate) => candidate.pageId === pageId)
 
@@ -724,6 +737,20 @@ function scorePage(page: IndexedPage, normalizedQuery: string): SearchResult | n
   if (path.includes(normalizedQuery)) return { page, score: 60, matchedIn: "path" }
   if (snippet.includes(normalizedQuery)) return { page, score: 40, matchedIn: "snippet" }
   if (content.includes(normalizedQuery)) return { page, score: 20, matchedIn: "content" }
+
+  return null
+}
+
+function scoreSpace(space: SpaceSummary, normalizedQuery: string): SpaceSearchResult | null {
+  const key = normalizeSearchText(space.key)
+  const name = normalizeSearchText(space.name)
+  const sync = normalizeSearchText(space.syncState)
+
+  if (key === normalizedQuery) return { space, score: 100, matchedIn: "key" }
+  if (key.startsWith(normalizedQuery)) return { space, score: 90, matchedIn: "key" }
+  if (name === normalizedQuery) return { space, score: 80, matchedIn: "name" }
+  if (name.includes(normalizedQuery)) return { space, score: 70, matchedIn: "name" }
+  if (sync.includes(normalizedQuery)) return { space, score: 30, matchedIn: "sync" }
 
   return null
 }

@@ -15,6 +15,7 @@ describe("main TUI layout", () => {
     expect(frame).toContain("DOCUMENT")
     expect(frame).toContain("j/k move")
     expect(frame).toContain("h/l fold")
+    expect(frame).toContain("s spaces")
     expect(frame).toContain("d/u scroll doc")
     expect(frame).toContain("▾ Engineering Home")
     expect(frame).toContain("▸ Project Architecture")

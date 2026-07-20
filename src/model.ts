@@ -44,4 +44,10 @@ export interface SearchResult {
   matchedIn: "title" | "path" | "snippet" | "content" | "all"
 }
 
+export interface SpaceSearchResult {
+  space: SpaceSummary
+  score: number
+  matchedIn: "key" | "name" | "sync" | "all"
+}
+
 export type FocusPane = "navigator" | "document"

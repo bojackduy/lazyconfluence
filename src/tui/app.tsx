@@ -1,8 +1,8 @@
 import { render, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import type { ScrollBoxRenderable } from "@opentui/core"
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js"
-import type { IndexedPage, ReaderPage, SearchResult } from "../model"
-import { getDefaultPageId, getPagesForSpace, getReaderPage, mockSpaces, searchPagesInSpace } from "../mock-data"
+import type { IndexedPage, ReaderPage, SearchResult, SpaceSearchResult } from "../model"
+import { getDefaultPageId, getPagesForSpace, getReaderPage, mockSpaces, searchPagesInSpace, searchSpaces } from "../mock-data"
 import { markdownStyle, theme } from "./theme"
 
 type TreeRow = {
@@ -33,13 +33,16 @@ export async function renderTui() {
 export function App() {
   const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
-  const [activeSpaceKey] = createSignal("ENG")
+  const [activeSpaceKey, setActiveSpaceKey] = createSignal("ENG")
   const [selectedPageId, setSelectedPageId] = createSignal(getDefaultPageId())
   const [expandedPageIds, setExpandedPageIds] = createSignal(new Set([getDefaultPageId()]))
   const [focusPane, setFocusPane] = createSignal<"navigator" | "document">("navigator")
   const [pageSearchOpen, setPageSearchOpen] = createSignal(false)
   const [pageSearchQuery, setPageSearchQuery] = createSignal("")
   const [pageSearchSelectedIndex, setPageSearchSelectedIndex] = createSignal(0)
+  const [spaceSwitcherOpen, setSpaceSwitcherOpen] = createSignal(false)
+  const [spaceSwitcherQuery, setSpaceSwitcherQuery] = createSignal("")
+  const [spaceSwitcherSelectedIndex, setSpaceSwitcherSelectedIndex] = createSignal(0)
   let documentScrollbox: ScrollBoxRenderable | undefined
 
   const space = createMemo(() => mockSpaces.find((candidate) => candidate.key === activeSpaceKey()) ?? mockSpaces[0])
@@ -50,6 +53,7 @@ export function App() {
   const selectedRow = createMemo(() => treeRows().find((row) => row.page.pageId === selectedPageId()))
   const readerPage = createMemo(() => getReaderPage(selectedPageId()))
   const pageSearchResults = createMemo(() => searchPagesInSpace(activeSpaceKey(), pageSearchQuery()))
+  const spaceSwitcherResults = createMemo(() => searchSpaces(spaceSwitcherQuery()))
   const isNarrow = createMemo(() => dimensions().width < 96)
   const halfPageScrollAmount = createMemo(() => Math.max(6, Math.floor((dimensions().height - 9) / 2)))
 
@@ -72,7 +76,14 @@ export function App() {
     if (pageSearchSelectedIndex() > maxIndex) setPageSearchSelectedIndex(maxIndex)
   })
 
+  createEffect(() => {
+    const maxIndex = Math.max(0, spaceSwitcherResults().length - 1)
+
+    if (spaceSwitcherSelectedIndex() > maxIndex) setSpaceSwitcherSelectedIndex(maxIndex)
+  })
+
   const openPageSearch = () => {
+    setSpaceSwitcherOpen(false)
     setPageSearchOpen(true)
     setPageSearchQuery("")
     setPageSearchSelectedIndex(0)
@@ -82,6 +93,19 @@ export function App() {
     setPageSearchOpen(false)
     setPageSearchQuery("")
     setPageSearchSelectedIndex(0)
+  }
+
+  const openSpaceSwitcher = () => {
+    setPageSearchOpen(false)
+    setSpaceSwitcherOpen(true)
+    setSpaceSwitcherQuery("")
+    setSpaceSwitcherSelectedIndex(Math.max(0, searchSpaces("").findIndex((result) => result.space.key === activeSpaceKey())))
+  }
+
+  const closeSpaceSwitcher = () => {
+    setSpaceSwitcherOpen(false)
+    setSpaceSwitcherQuery("")
+    setSpaceSwitcherSelectedIndex(0)
   }
 
   const selectPageSearchResult = () => {
@@ -96,6 +120,24 @@ export function App() {
 
   const movePageSearchSelection = (direction: number) => {
     setPageSearchSelectedIndex((current) => Math.max(0, Math.min(pageSearchResults().length - 1, current + direction)))
+  }
+
+  const selectSpaceSwitcherResult = () => {
+    const result = spaceSwitcherResults()[spaceSwitcherSelectedIndex()]
+
+    if (!result) return
+
+    const defaultPageId = getDefaultPageId(result.space.key)
+    setActiveSpaceKey(result.space.key)
+    setSelectedPageId(defaultPageId)
+    setExpandedPageIds(new Set([defaultPageId]))
+    documentScrollbox?.scrollTo(0)
+    setFocusPane("navigator")
+    closeSpaceSwitcher()
+  }
+
+  const moveSpaceSwitcherSelection = (direction: number) => {
+    setSpaceSwitcherSelectedIndex((current) => Math.max(0, Math.min(spaceSwitcherResults().length - 1, current + direction)))
   }
 
   const scrollDocumentBy = (lines: number) => {
@@ -147,6 +189,18 @@ export function App() {
       return
     }
 
+    if (spaceSwitcherOpen()) {
+      const action = pageSearchKeyAction(key)
+
+      if (action === "close") closeSpaceSwitcher()
+      else if (action === "submit") selectSpaceSwitcherResult()
+      else if (action === "next") moveSpaceSwitcherSelection(1)
+      else if (action === "previous") moveSpaceSwitcherSelection(-1)
+      else if (action === "delete") setSpaceSwitcherQuery((query) => query.slice(0, -1))
+      else if (action === "append") setSpaceSwitcherQuery((query) => query + key.sequence)
+      return
+    }
+
     if (key.name === "q" || key.name === "escape") {
       renderer.destroy()
       return
@@ -154,6 +208,11 @@ export function App() {
 
     if (key.name === "/") {
       openPageSearch()
+      return
+    }
+
+    if (key.name === "s") {
+      openSpaceSwitcher()
       return
     }
 
@@ -208,6 +267,16 @@ export function App() {
         left={dimensions().width < 72 ? 2 : 8}
         width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 4 : 16))}
         height={Math.min(18, Math.max(10, dimensions().height - 8))}
+      />
+      <SpaceSwitcherOverlay
+        visible={spaceSwitcherOpen()}
+        query={spaceSwitcherQuery()}
+        results={spaceSwitcherResults()}
+        selectedIndex={spaceSwitcherSelectedIndex()}
+        activeSpaceKey={activeSpaceKey()}
+        left={dimensions().width < 72 ? 2 : 8}
+        width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 4 : 16))}
+        height={Math.min(16, Math.max(10, dimensions().height - 8))}
       />
     </box>
   )
@@ -327,8 +396,8 @@ function InfoPanel(props: { title: string; items: string[]; empty: string }) {
 
 function StatusBar(props: { focusPane: string }) {
   const hint = () => {
-    if (props.focusPane === "document") return "/ page search | j/k scroll line | d/u scroll doc | h navigator | q quit"
-    return "/ page search | j/k move | h/l fold tree | d/u scroll doc | q quit"
+    if (props.focusPane === "document") return "/ page search | s spaces | j/k scroll line | d/u scroll doc | h navigator | q quit"
+    return "/ page search | s spaces | j/k move | h/l fold tree | d/u scroll doc | q quit"
   }
 
   return (
@@ -377,6 +446,44 @@ function PageSearchOverlay(props: { visible: boolean; query: string; results: Se
   )
 }
 
+function SpaceSwitcherOverlay(props: { visible: boolean; query: string; results: SpaceSearchResult[]; selectedIndex: number; activeSpaceKey: string; left: number; width: number; height: number }) {
+  return (
+    <box
+      visible={props.visible}
+      position="absolute"
+      left={props.left}
+      top={5}
+      width={props.width}
+      height={props.height}
+      border
+      borderStyle="rounded"
+      borderColor={theme.borderActive}
+      backgroundColor="#08111f"
+      paddingX={2}
+      paddingY={1}
+      flexDirection="column"
+      zIndex={30}
+    >
+      <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
+        <text height={1} fg={theme.accent} attributes={1}>SWITCH SPACE</text>
+        <text height={1} fg={theme.muted}>active: {props.activeSpaceKey}</text>
+      </box>
+      <text height={1} fg={theme.text}>s {props.query || "type space key or name"}_</text>
+      <text height={1} fg={theme.subtle}>{props.results.length} space{props.results.length === 1 ? "" : "s"}  type to filter  up/down move  enter switch  esc close</text>
+      <box height={1} />
+      <Show when={props.results.length > 0} fallback={<EmptySpaceState query={props.query} />}>
+        <scrollbox flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
+          <box flexDirection="column" width="100%">
+            <For each={props.results.slice(0, 8)}>
+              {(result, index) => <SpaceResultRow result={result} selected={index() === props.selectedIndex} active={result.space.key === props.activeSpaceKey} />}
+            </For>
+          </box>
+        </scrollbox>
+      </Show>
+    </box>
+  )
+}
+
 function SearchResultRow(props: { result: SearchResult; selected: boolean }) {
   const marker = () => (props.selected ? "▶" : " ")
 
@@ -393,6 +500,27 @@ function EmptySearchState(props: { query: string }) {
   return (
     <box flexGrow={1} alignItems="center" justifyContent="center">
       <text fg={theme.muted}>No pages match "{props.query}" in this space.</text>
+    </box>
+  )
+}
+
+function SpaceResultRow(props: { result: SpaceSearchResult; selected: boolean; active: boolean }) {
+  const marker = () => (props.selected ? "▶" : props.active ? "●" : " ")
+  const syncColor = () => (props.result.space.syncState === "fresh" ? theme.good : props.result.space.syncState === "stale" ? theme.warn : theme.danger)
+
+  return (
+    <box height={3} width="100%" backgroundColor={props.selected ? theme.accentSoft : undefined} paddingX={1} flexDirection="column">
+      <text height={1} fg={props.selected ? theme.text : theme.muted}>{marker()} {props.result.space.key}  ·  {props.result.space.name}</text>
+      <text height={1} fg={syncColor()}>  {props.result.space.syncState}  ·  {props.result.space.pageCount} pages  ·  matched {props.result.matchedIn}</text>
+      <text height={1} fg={theme.subtle}>  last synced {formatOptionalDate(props.result.space.lastSyncedAt)}</text>
+    </box>
+  )
+}
+
+function EmptySpaceState(props: { query: string }) {
+  return (
+    <box flexGrow={1} alignItems="center" justifyContent="center">
+      <text fg={theme.muted}>No spaces match "{props.query}".</text>
     </box>
   )
 }
@@ -472,4 +600,8 @@ function relatedItems(page: ReaderPage) {
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en", { month: "short", day: "2-digit", year: "numeric" }).format(new Date(value))
+}
+
+function formatOptionalDate(value: string | null) {
+  return value ? formatDate(value) : "never"
 }

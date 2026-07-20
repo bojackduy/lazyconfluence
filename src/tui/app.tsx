@@ -1,7 +1,8 @@
 import { render, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import type { ScrollBoxRenderable } from "@opentui/core"
-import { For, Show, createEffect, createMemo, createSignal } from "solid-js"
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import type { IndexedPage, ReaderPage, SearchResult, SpaceSearchResult } from "../model"
+import { loadCredentialStatus, type CredentialStatus } from "../config"
 import { getDefaultPageId, getPagesForSpace, getReaderPage, mockSpaces, searchPagesInSpace, searchSpaces } from "../mock-data"
 import { markdownStyle, theme } from "./theme"
 
@@ -19,6 +20,8 @@ type SearchKeyLike = {
   meta: boolean
 }
 
+type CredentialWarning = Exclude<CredentialStatus, { kind: "ready" }>
+
 export type PageSearchKeyAction = "append" | "delete" | "submit" | "close" | "next" | "previous" | "ignore"
 
 export async function renderTui() {
@@ -30,9 +33,10 @@ export async function renderTui() {
   })
 }
 
-export function App() {
+export function App(props: { credentialStatus?: CredentialStatus } = {}) {
   const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
+  const [credentialStatus, setCredentialStatus] = createSignal<CredentialStatus | null>(props.credentialStatus ?? null)
   const [activeSpaceKey, setActiveSpaceKey] = createSignal("ENG")
   const [selectedPageId, setSelectedPageId] = createSignal(getDefaultPageId())
   const [expandedPageIds, setExpandedPageIds] = createSignal(new Set([getDefaultPageId()]))
@@ -56,6 +60,24 @@ export function App() {
   const spaceSwitcherResults = createMemo(() => searchSpaces(spaceSwitcherQuery()))
   const isNarrow = createMemo(() => dimensions().width < 96)
   const halfPageScrollAmount = createMemo(() => Math.max(6, Math.floor((dimensions().height - 9) / 2)))
+  const credentialWarning = createMemo<CredentialWarning | null>(() => {
+    const status = credentialStatus()
+    if (!status || status.kind === "ready") return null
+    return status
+  })
+
+  onMount(() => {
+    if (props.credentialStatus) return
+
+    let cancelled = false
+    void loadCredentialStatus().then((status) => {
+      if (!cancelled) setCredentialStatus(status)
+    })
+
+    onCleanup(() => {
+      cancelled = true
+    })
+  })
 
   createEffect(() => {
     const ancestors = getAncestorPageIds(selectedPageId(), pageById())
@@ -253,6 +275,7 @@ export function App() {
   return (
     <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.bg}>
       <Header page={readerPage()} spaceName={space().name} syncState={space().syncState} />
+      <Show when={credentialWarning()}>{(status) => <CredentialNotice status={status()} />}</Show>
       <box flexGrow={1} minHeight={0} flexDirection={isNarrow() ? "column" : "row"} paddingX={1}>
         <Navigator rows={treeRows()} selectedPageId={selectedPageId()} focused={focusPane() === "navigator"} />
         <Reader page={readerPage()} focused={focusPane() === "document"} narrow={isNarrow()} setDocumentScrollbox={(scrollbox) => { documentScrollbox = scrollbox }} />
@@ -278,6 +301,16 @@ export function App() {
         width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 4 : 16))}
         height={Math.min(16, Math.max(10, dimensions().height - 8))}
       />
+    </box>
+  )
+}
+
+function CredentialNotice(props: { status: CredentialWarning }) {
+  return (
+    <box height={4} backgroundColor="#1f1607" paddingX={1} flexDirection="column">
+      <text height={1} fg={theme.warn} attributes={1}>{props.status.title}</text>
+      <text height={1} fg={theme.text}>{props.status.detail}</text>
+      <For each={props.status.help.slice(0, 2)}>{(item) => <text height={1} fg={theme.subtle}>{item}</text>}</For>
     </box>
   )
 }

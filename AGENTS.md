@@ -4,9 +4,13 @@ Guidance for agents working in this repository.
 
 ## Current Catch-Up Path
 
-Read `PRODUCT_PLAN.md` first. It is the current product and UX direction discussed with the user.
+Read these files first, in order:
 
-This repository is still early. Do not assume implementation details from older notes without confirming them with the user. The immediate goal is to preserve the product direction clearly before choosing how to build it.
+1. `PRODUCT_PLAN.md` for the product and UX direction.
+2. `BUILD_PLAN.md` for the current implementation direction.
+3. `TASK_BREAKDOWN.md` for parallel task ownership and checklists.
+
+This repository is still early. Older notes may contain stale implementation direction. Prefer the files above unless the user explicitly says otherwise.
 
 ## Project Purpose
 
@@ -54,6 +58,12 @@ If a task seems to require changing `lazylens/`, stop and ask the user. The inte
 - Make search intent-specific: page search, all-space search, in-document find, and command/action discovery are separate workflows.
 - Keep secrets out of repository files and user-visible config examples.
 - Do not add unrelated product areas such as issue tracking, generic provider support, or a web app unless the user explicitly changes the scope.
+
+## OpenTUI Guidance
+
+When working on terminal UI code, load and follow the `opentui` skill before editing.
+
+Use that skill's docs for renderer setup, Solid bindings, layout, keyboard handling, keymap layers, markdown rendering, scrollboxes, lifecycle cleanup, and UI testing. Do not guess OpenTUI APIs from memory.
 
 ## Future-Agent Expectations
 

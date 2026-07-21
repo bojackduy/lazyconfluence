@@ -75,7 +75,7 @@ describe("sync service", () => {
             _links: {},
           },
           "/wiki/api/v2/pages/100/direct-children?limit=250": {
-            results: [{ id: "900", title: "Design Notes", type: "folder" }],
+            results: [{ id: "900", title: "Design Notes", type: "folder" }, pagePayload("101", "Project Architecture", "100")],
             _links: {},
           },
           "/wiki/api/v2/pages/101/direct-children?limit=250": { results: [], _links: {} },
@@ -118,7 +118,7 @@ describe("sync service", () => {
       try {
         expect(repository.getSpace("ENG")?.pageCount).toBe(4)
         expect(repository.getPage("101")?.path).toEqual(["Engineering Home", "Project Architecture"])
-        expect(repository.getChildren("100").map((page) => page.pageId).sort()).toEqual(["101", "900"])
+        expect(repository.getChildren("100").map((page) => page.pageId)).toEqual(["900", "101"])
         expect(repository.getChildren("900").map((page) => page.pageId)).toEqual(["901"])
         expect(repository.getOutgoingLinks("101").map((link) => link.kind).sort()).toEqual(["external", "internal"])
         expect(repository.getIncomingLinks("100").map((link) => link.fromPageId)).toEqual(["101"])

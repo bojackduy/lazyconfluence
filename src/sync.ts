@@ -154,13 +154,15 @@ async function syncSpace(input: {
   const listedPages = await input.client.fetchPagesBySpace(input.space.id, { bodyFormat: "storage", limit: input.pageLimit })
   emitProgress(input.onProgress, { type: "fetched-space-pages", message: `Fetched ${listedPages.length} page${listedPages.length === 1 ? "" : "s"} for ${input.space.key}.`, spaceKey: input.space.key, spaceName: input.space.name, count: listedPages.length })
   const nodeById = new Map<string, ConfluencePage>()
+  const treeOrderById = new Map<string, number>()
   const pageFailures: SyncFailure[] = []
 
-  for (const page of listedPages) {
+  for (const [index, page] of listedPages.entries()) {
     if (page.id) nodeById.set(page.id, page)
+    if (page.id) treeOrderById.set(page.id, pageTreeOrder(page, index))
   }
 
-  await discoverPageChildren({ ...input, seedPages: listedPages, nodeById, pageFailures })
+  await discoverPageChildren({ ...input, seedPages: listedPages, nodeById, treeOrderById, pageFailures })
 
   const pages: IndexedPage[] = []
   const links: PageLink[] = []
@@ -170,7 +172,7 @@ async function syncSpace(input: {
     const ancestors = ancestorsFor(page, nodeById)
 
     if (page.type === "folder") {
-      pages.push(mapConfluenceFolder({ page, space: input.space, baseUrl: input.baseUrl, ancestors, syncedAt: input.syncedAt }))
+      pages.push(mapConfluenceFolder({ page, space: input.space, baseUrl: input.baseUrl, ancestors, syncedAt: input.syncedAt, treeOrder: treeOrderById.get(page.id) ?? 0 }))
       emitProgress(input.onProgress, { type: "indexed-page", message: `Indexed folder ${page.id}: ${page.title}.`, spaceKey: input.space.key, spaceName: input.space.name, pageId: page.id, title: page.title })
       continue
     }
@@ -178,7 +180,7 @@ async function syncSpace(input: {
     try {
       if (!hasStorageBody(page)) emitProgress(input.onProgress, { type: "fetching-page-body", message: `Fetching body for ${page.id}: ${page.title}.`, spaceKey: input.space.key, spaceName: input.space.name, pageId: page.id, title: page.title })
       const pageWithBody = hasStorageBody(page) ? page : await input.client.fetchPageBody(page.id)
-      const mapped = mapConfluencePage({ page: pageWithBody, space: input.space, baseUrl: input.baseUrl, ancestors, syncedAt: input.syncedAt })
+      const mapped = mapConfluencePage({ page: pageWithBody, space: input.space, baseUrl: input.baseUrl, ancestors, syncedAt: input.syncedAt, treeOrder: treeOrderById.get(page.id) ?? 0 })
 
       pages.push(mapped.indexedPage)
       links.push(...mapped.links)
@@ -198,7 +200,7 @@ async function syncSpace(input: {
     } catch (error) {
       const message = errorMessage(error)
       pageFailures.push({ scope: "page", key: page.id || page.title, message })
-      pages.push(mapUnavailableConfluencePage({ page, space: input.space, baseUrl: input.baseUrl, ancestors, syncedAt: input.syncedAt }, message))
+      pages.push(mapUnavailableConfluencePage({ page, space: input.space, baseUrl: input.baseUrl, ancestors, syncedAt: input.syncedAt, treeOrder: treeOrderById.get(page.id) ?? 0 }, message))
       emitProgress(input.onProgress, { type: "failed-page", message: `Failed page ${page.id || page.title}: ${message}`, spaceKey: input.space.key, spaceName: input.space.name, pageId: page.id, title: page.title })
     }
   }
@@ -218,6 +220,7 @@ async function discoverPageChildren(input: {
   spaceKey?: string
   seedPages: ConfluencePage[]
   nodeById: Map<string, ConfluencePage>
+  treeOrderById: Map<string, number>
   pageFailures: SyncFailure[]
   onProgress?: (event: SyncProgressEvent) => void
 }) {
@@ -241,11 +244,12 @@ async function discoverPageChildren(input: {
       continue
     }
 
-    for (const child of children) {
+    for (const [childIndex, child] of children.entries()) {
       if (!child.id) continue
 
       const childWithParent = child.parentId ? child : { ...child, parentId: page.id }
       const existing = input.nodeById.get(child.id)
+      input.treeOrderById.set(child.id, pageTreeOrder(childWithParent, childIndex))
 
       if (existing) {
         input.nodeById.set(child.id, mergeConfluencePage(existing, childWithParent))
@@ -256,6 +260,10 @@ async function discoverPageChildren(input: {
       queue.push(childWithParent)
     }
   }
+}
+
+function pageTreeOrder(page: ConfluencePage, fallback: number) {
+  return Number.isFinite(page.position) ? Number(page.position) : fallback
 }
 
 function mergeConfluencePage(existing: ConfluencePage, incoming: ConfluencePage): ConfluencePage {

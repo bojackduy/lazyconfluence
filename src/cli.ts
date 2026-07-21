@@ -2,6 +2,7 @@ import { createInterface } from "node:readline/promises"
 import { stdin as input, stdout as output } from "node:process"
 import { ATLASSIAN_API_TOKEN_URL, createLocalConfig, loadAtlassianAuth, parseSpaceKeys, saveLocalAuth } from "./config"
 import { openIndexRepository } from "./index/repository"
+import { formatRepairReport, repairBodyArtifacts, RepairServiceError } from "./repair"
 import { formatSyncReport, syncConfluence, SyncServiceError, type SyncProgressEvent, type SyncReport } from "./sync"
 import { renderTui } from "./tui/app"
 
@@ -22,12 +23,15 @@ export async function runCli(args: string[]) {
     case "sync":
       await runSyncCommand(args.slice(1))
       return
+    case "repair":
+      await runRepairCommand(args.slice(1))
+      return
     case "search":
       await runSearchCommand(args.slice(1))
       return
     default:
       console.error(`Unknown command: ${command}`)
-      console.error("Usage: lazyconfluence [tui|init|doctor|sync|search]")
+      console.error("Usage: lazyconfluence [tui|init|doctor|sync|repair|search]")
       process.exitCode = 1
   }
 }
@@ -40,6 +44,18 @@ async function runSyncCommand(args: string[]) {
     if (hasFatalSyncFailure(report)) process.exitCode = 1
   } catch (error) {
     console.error(error instanceof SyncServiceError ? error.message : error instanceof Error ? error.message : "Unknown sync error.")
+    process.exitCode = 1
+  }
+}
+
+async function runRepairCommand(args: string[]) {
+  try {
+    parseRepairArgs(args)
+    const report = await repairBodyArtifacts()
+    console.log(formatRepairReport(report))
+    if (!report.complete) process.exitCode = 1
+  } catch (error) {
+    console.error(error instanceof RepairServiceError ? error.message : error instanceof Error ? error.message : "Unknown repair error.")
     process.exitCode = 1
   }
 }
@@ -197,6 +213,12 @@ function parseSyncArgs(args: string[]) {
   }
 
   return { spaceKeys, quiet }
+}
+
+function parseRepairArgs(args: string[]) {
+  for (const arg of args) {
+    throw new Error(`Unknown repair option: ${arg}`)
+  }
 }
 
 function printSyncProgress(event: SyncProgressEvent) {

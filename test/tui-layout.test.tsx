@@ -86,6 +86,29 @@ describe("main TUI layout", () => {
       await setup.cleanup()
     }
   })
+
+  test("keeps navigator siblings in synced tree order", async () => {
+    const setup = await createTuiTestSetup({ architecture: { ...architecture, treeOrder: 1 }, extraPages: [zebraFirstChild] })
+
+    try {
+      const output = await withProcessEnv(setup.env, async () => {
+        const rendered = await testRender(() => <App credentialStatus={readyStatus} />, { width: 120, height: 36 })
+
+        await rendered.renderOnce()
+
+        const frame = rendered.captureCharFrame()
+        rendered.renderer.destroy()
+
+        return frame
+      })
+
+      expect(output.indexOf("Zebra First Child")).toBeGreaterThan(-1)
+      expect(output.indexOf("Real Synced Architecture")).toBeGreaterThan(-1)
+      expect(output.indexOf("Zebra First Child")).toBeLessThan(output.indexOf("Real Synced Architecture"))
+    } finally {
+      await setup.cleanup()
+    }
+  })
 })
 
 async function createTuiTestSetup(overrides: { home?: IndexedPage; architecture?: IndexedPage; extraPages?: IndexedPage[] } = {}) {
@@ -172,6 +195,21 @@ const architecture: IndexedPage = {
   updatedAt: "2026-07-21T09:30:00Z",
   contentMarkdown: "# Real Synced Architecture\n\nRepository-backed page.",
   snippet: "Repository-backed page.",
+  treeOrder: 0,
+}
+
+const zebraFirstChild: IndexedPage = {
+  pageId: "zebra-first-child",
+  spaceKey: "ENG",
+  title: "Zebra First Child",
+  url: "https://example.atlassian.net/wiki/spaces/ENG/pages/103/Zebra+First+Child",
+  parentId: "local-home",
+  path: ["Local Engineering Home", "Zebra First Child"],
+  owner: "Architecture Guild",
+  updatedAt: "2026-07-21T09:20:00Z",
+  contentMarkdown: "# Zebra First Child\n\nThis page comes first in Confluence order.",
+  snippet: "This page comes first in Confluence order.",
+  treeOrder: 0,
 }
 
 const orphanedRunbook: IndexedPage = {

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
 import { createLocalConfig, saveLocalAuth } from "../src/config"
-import { openIndexRepository } from "../src/index/repository"
+import { openIndexRepository, type PageBodyArtifact } from "../src/index/repository"
 import { runCli } from "../src/cli"
 import type { IndexedPage, SpaceSummary } from "../src/model"
 
@@ -19,7 +19,7 @@ describe("local CLI integration", () => {
       expect(output.stdout).toContain("lazyconfluence local config")
       expect(output.stdout).toContain("Default space: ENG")
       expect(output.stdout).toContain(`Database: ${setup.dbPath}`)
-      expect(output.stdout).toContain("Schema version: 2")
+      expect(output.stdout).toContain("Schema version: 3")
       expect(output.stdout).toContain("Spaces indexed: 2")
       expect(output.stdout).toContain("Pages indexed: 3")
       expect(output.stdout).toContain("Configured space ENG: 2 local pages")
@@ -122,6 +122,38 @@ describe("local CLI integration", () => {
       await setup.cleanup()
     }
   })
+
+  test("repair rebuilds local body artifacts and page projections without network", async () => {
+    const setup = await createCliSetup()
+
+    try {
+      seedCliRepository(setup.dbPath)
+      seedStaleMermaidBody(setup.dbPath)
+
+      const output = await captureCli(() => withProcessEnv(setup.env, () => runCli(["repair"])))
+
+      expect(output.exitCode).toBeUndefined()
+      expect(output.stdout).toContain("Repair completed.")
+      expect(output.stdout).toContain("Body artifacts scanned: 1")
+      expect(output.stdout).toContain("Body artifacts rebuilt: 1")
+      expect(output.stdout).toContain("Pages updated: 1")
+
+      const repository = openIndexRepository({ path: setup.dbPath })
+
+      try {
+        const body = repository.getPageBody("architecture")
+        const page = repository.getPage("architecture")
+
+        expect(body?.renderedMarkdown).toBe("```mermaid\nerDiagram\nretailers {\n  uuid id PK\n}\n```")
+        expect(page?.contentMarkdown).toBe(body?.renderedMarkdown)
+        expect(page?.snippet).toContain("erDiagram")
+      } finally {
+        repository.close()
+      }
+    } finally {
+      await setup.cleanup()
+    }
+  })
 })
 
 async function createCliSetup() {
@@ -148,6 +180,17 @@ function seedCliRepository(dbPath: string) {
   try {
     repository.upsertSpaces(spaces)
     repository.upsertPages(pages)
+  } finally {
+    repository.close()
+  }
+}
+
+function seedStaleMermaidBody(dbPath: string) {
+  const repository = openIndexRepository({ path: dbPath })
+
+  try {
+    repository.upsertPage({ ...pages[0], contentMarkdown: "`erDiagram retailers { uuid id PK }`", snippet: "erDiagram retailers" })
+    repository.upsertPageBody(staleMermaidBody)
   } finally {
     repository.close()
   }
@@ -298,3 +341,38 @@ const pages: IndexedPage[] = [
     snippet: "Dashboards, alerts, and traces for observability.",
   },
 ]
+
+const staleMermaidBody: PageBodyArtifact = {
+  pageId: "architecture",
+  remoteVersion: 7,
+  sourceRepresentation: "storage",
+  sourceBody: [
+    "<p><code>erDiagram</code></p>",
+    "<p><code>retailers {</code></p>",
+    "<p><code>  uuid id PK</code></p>",
+    "<p><code>}</code></p>",
+  ].join(""),
+  sourceHash: "old-hash",
+  canonicalDocument: {
+    schemaVersion: 1,
+    pageId: "architecture",
+    title: "Project Architecture",
+    blocks: [
+      {
+        type: "paragraph",
+        nodeId: "old-inline",
+        inlines: [{ type: "code", text: "erDiagram retailers { uuid id PK }" }],
+      },
+    ],
+  },
+  sidecar: {
+    schemaVersion: 1,
+    remoteVersion: 7,
+    sourceRepresentation: "storage",
+    sourceHash: "old-hash",
+    nodes: {},
+  },
+  editableMarkdown: "`erDiagram retailers { uuid id PK }`",
+  renderedMarkdown: "`erDiagram retailers { uuid id PK }`",
+  updatedAt: "2026-07-21T09:00:00Z",
+}

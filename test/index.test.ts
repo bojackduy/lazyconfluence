@@ -31,7 +31,7 @@ describe("local index repository", () => {
       expect(repository.getSpace("ENG")?.pageCount).toBe(3)
       expect(repository.getPage("architecture")?.title).toBe("Project Architecture")
       expect(repository.listPagesInSpace("ENG").map((page) => page.pageId)).toEqual(["eng-home", "architecture", "release-checklist"])
-      expect(repository.getChildren("eng-home").map((page) => page.pageId)).toEqual(["architecture", "release-checklist"])
+      expect(repository.getChildren("eng-home").map((page) => page.pageId)).toEqual(["release-checklist", "architecture"])
 
       const outgoing = repository.getOutgoingLinks("eng-home")
       const internal = outgoing.find((link) => link.title === "Project Architecture")
@@ -152,6 +152,7 @@ const architecture: IndexedPage = {
   updatedAt: "2026-07-19T11:05:00Z",
   snippet: "How lazyconfluence separates UI, local data, sync, and Confluence mapping.",
   contentMarkdown: "# Project Architecture\n\nThe application is local-first after explicit sync.",
+  treeOrder: 1,
 }
 
 const releaseChecklist: IndexedPage = {
@@ -165,6 +166,7 @@ const releaseChecklist: IndexedPage = {
   updatedAt: "2026-07-17T18:40:00Z",
   snippet: "A compact checklist for production releases and rollback readiness.",
   contentMarkdown: "# Release Checklist\n\nConfirm tests, owners, dashboards, and rollback notes.",
+  treeOrder: 0,
 }
 
 const opsRunbook: IndexedPage = {

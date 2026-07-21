@@ -65,13 +65,19 @@ function addMatchedBlock(input: ParseConfluenceStorageInput, blocks: DocumentBlo
   if (/^h[1-6]$/.test(tag)) {
     block = { type: "heading", nodeId, source: { path: sourcePath, type: tag }, level: Number(tag.slice(1)), inlines: parseInlineHtml(inner, input.baseUrl) }
   } else if (tag === "p") {
-    const inlines = parseInlineHtml(inner, input.baseUrl)
-    if (htmlToText(inner)) block = { type: "paragraph", nodeId, source: { path: sourcePath, type: tag }, inlines }
+    const codeText = standaloneParagraphCodeText(inner)
+    if (codeText !== null && shouldTreatParagraphAsCode(codeText, blocks)) {
+      block = { type: "code", nodeId, source: { path: sourcePath, type: tag }, language: inferCodeLanguage(codeText), text: codeText }
+    } else {
+      const inlines = parseInlineHtml(inner, input.baseUrl)
+      if (htmlToText(inner)) block = { type: "paragraph", nodeId, source: { path: sourcePath, type: tag }, inlines }
+    }
   } else if (tag === "ul" || tag === "ol") {
     const items = parseListItems(inner, input.baseUrl)
     if (items.length) block = { type: "list", nodeId, source: { path: sourcePath, type: tag }, ordered: tag === "ol", items }
   } else if (tag === "pre") {
-    block = { type: "code", nodeId, source: { path: sourcePath, type: tag }, language: null, text: htmlToText(inner) }
+    const codeText = blockCodeText(inner)
+    block = { type: "code", nodeId, source: { path: sourcePath, type: tag }, language: inferCodeLanguage(codeText), text: codeText }
   } else if (tag === "blockquote") {
     block = { type: "quote", nodeId, source: { path: sourcePath, type: tag }, inlines: parseInlineHtml(inner, input.baseUrl) }
   } else if (tag === "table") {
@@ -95,8 +101,35 @@ function addMatchedBlock(input: ParseConfluenceStorageInput, blocks: DocumentBlo
 
   if (!block) return
 
+  const mergedBlock = mergeAdjacentCodeParagraph(blocks, block)
+  if (mergedBlock) {
+    const mapping = nodes[mergedBlock.nodeId]
+    if (mapping) {
+      const mergedRaw = `${String(mapping.raw ?? "")}${raw}`
+      mapping.raw = mergedRaw
+      mapping.sourceHash = stableHash(mergedRaw)
+    }
+    return
+  }
+
   blocks.push(block)
   nodes[nodeId] = nodeMapping(sourcePath, sourceType, raw, roundTrip)
+}
+
+function mergeAdjacentCodeParagraph(blocks: DocumentBlock[], block: DocumentBlock) {
+  const previous = blocks[blocks.length - 1]
+  if (previous?.type !== "code" || block.type !== "code") return null
+  if (previous.source?.type !== "p" || block.source?.type !== "p") return null
+
+  previous.text = `${previous.text}\n${block.text}`
+  previous.language = previous.language ?? block.language ?? inferCodeLanguage(previous.text)
+  return previous
+}
+
+function shouldTreatParagraphAsCode(text: string, blocks: DocumentBlock[]) {
+  const previous = blocks[blocks.length - 1]
+
+  return text.includes("\n") || inferCodeLanguage(text) !== null || (previous?.type === "code" && previous.source?.type === "p")
 }
 
 function addLooseTextBlock(input: ParseConfluenceStorageInput, blocks: DocumentBlock[], nodes: Record<string, NodeMapping>, raw: string) {
@@ -176,6 +209,30 @@ function parseTableRows(value: string, baseUrl: string) {
   }
 
   return rows
+}
+
+function standaloneParagraphCodeText(value: string) {
+  const matches = [...value.matchAll(/<code\b[^>]*>([\s\S]*?)<\/code>/gi)]
+  if (!matches.length) return null
+
+  const withoutCode = value.replace(/<code\b[^>]*>[\s\S]*?<\/code>/gi, "").replace(/<br\s*\/?>/gi, "")
+  if (htmlToText(withoutCode)) return null
+
+  return matches.map((match) => blockCodeText(match[1])).filter(Boolean).join("\n") || null
+}
+
+function blockCodeText(value: string) {
+  return decodeHtml(value.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "")).replace(/\r\n?/g, "\n").replace(/^\n+|\n+$/g, "")
+}
+
+function inferCodeLanguage(text: string) {
+  const firstLine = text.trimStart().split("\n", 1)[0]?.trim() ?? ""
+
+  if (/^(erDiagram|sequenceDiagram|classDiagram|journey|gantt|pie)(\s|$)/.test(firstLine)) return "mermaid"
+  if (/^stateDiagram(?:-v2)?(\s|$)/.test(firstLine)) return "mermaid"
+  if (/^(graph|flowchart)\s+(TB|TD|BT|RL|LR)\b/.test(firstLine)) return "mermaid"
+
+  return null
 }
 
 function appendText(inlines: InlineNode[], text: string) {

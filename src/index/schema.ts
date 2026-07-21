@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite"
 
-export const INDEX_SCHEMA_VERSION = 2
+export const INDEX_SCHEMA_VERSION = 3
 
 export function applyIndexSchema(database: Database) {
   database.run("PRAGMA foreign_keys = ON")
@@ -12,9 +12,19 @@ export function applyIndexSchema(database: Database) {
 
   database.exec(INDEX_SCHEMA_SQL)
 
+  if (currentVersion < 3 && !hasColumn(database, "pages", "tree_order")) {
+    database.run("ALTER TABLE pages ADD COLUMN tree_order INTEGER NOT NULL DEFAULT 0")
+  }
+
   if (currentVersion < INDEX_SCHEMA_VERSION) {
     database.run(`PRAGMA user_version = ${INDEX_SCHEMA_VERSION}`)
   }
+}
+
+function hasColumn(database: Database, table: string, column: string) {
+  const rows = database.query(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+
+  return rows.some((row) => row.name === column)
 }
 
 function readUserVersion(database: Database) {
@@ -44,6 +54,7 @@ CREATE TABLE IF NOT EXISTS pages (
   updated_at TEXT NOT NULL,
   content_markdown TEXT NOT NULL,
   snippet TEXT NOT NULL,
+  tree_order INTEGER NOT NULL DEFAULT 0,
   indexed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

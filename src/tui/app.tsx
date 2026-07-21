@@ -691,14 +691,14 @@ function buildTreeRows(pages: IndexedPage[], expandedPageIds: Set<string>) {
   }
 
   for (const siblings of byParent.values()) {
-    siblings.sort((a, b) => a.title.localeCompare(b.title))
+    siblings.sort(compareTreePages)
   }
 
   const rows: TreeRow[] = []
   const visited = new Set<string>()
   const rootPages = pages
     .filter((page) => page.parentId === null || !pageIds.has(page.parentId))
-    .sort((a, b) => a.title.localeCompare(b.title))
+    .sort(compareTreePages)
   const reachablePageIds = new Set<string>()
 
   const markReachable = (page: IndexedPage) => {
@@ -728,6 +728,10 @@ function buildTreeRows(pages: IndexedPage[], expandedPageIds: Set<string>) {
   }
 
   return rows
+}
+
+function compareTreePages(left: IndexedPage, right: IndexedPage) {
+  return (left.treeOrder ?? 0) - (right.treeOrder ?? 0) || left.title.localeCompare(right.title)
 }
 
 function getAncestorPageIds(pageId: string, pageById: Map<string, IndexedPage>) {

@@ -35,10 +35,10 @@ Status values: `Not started`, `In progress`, `Blocked`, `Partial`, `Done`.
 - Domain and demo data are done for the mock-backed product slice.
 - Reader UI and document detail are partial: the TUI renders the main reader, navigator, outline, related panel, scroll behavior, safe document-kind symbols, richer markdown/code/table styling, and orphaned local pages; it now reads pages from the local SQLite index. Browser-open hooks and broader polish remain.
 - Search, spaces, and link overlays are partial: active-space page search and space switcher read the local SQLite index; document find, all-space search UI, command palette, help, and link navigation overlays remain.
-- Local index and search are done for this slice: local SQLite schema, repository upserts, relationship queries, URL matching, and page search are implemented and tested.
+- Local index and search are done for this slice: local SQLite schema, repository upserts, Confluence tree ordering, relationship queries, URL matching, and page search are implemented and tested.
 - Confluence API mapping is done for the read-only slice: URL normalization, auth headers, mocked paginated fetches, recursive direct children, canonical document projection, storage HTML mapping including tables, sidecar preservation, and local model mapping are implemented and tested.
 - Explicit sync service is done for the first local-first slice: `sync` loads local auth, fetches configured spaces/pages/children, maps Confluence storage into local projections, writes spaces/pages/links/body artifacts into SQLite, reports partial failures, and does not prune local pages after incomplete scans.
-- CLI local DB integration is done for `doctor`, `search`, and scoped `sync` flags. These commands read local SQLite except for explicit `sync`.
+- CLI local DB integration is done for `doctor`, `search`, local body `repair`, and scoped `sync` flags. These commands read local SQLite except for explicit `sync`.
 - Sync observability is done for the first remote slice: Confluence requests time out by default, service-level progress events cover remote wait points, and CLI `sync` prints progress unless `--quiet` is set.
 - TUI date rendering is defensive: existing rows with missing or invalid timestamps display `unknown`, and future syncs use the sync timestamp when Confluence omits page dates.
 - Keymap and command registry are not started.
@@ -82,6 +82,9 @@ YYYY-MM-DD  ID  Result  Verification  Follow-up
 2026-07-21  tui-date-fix  Fixed TUI crash on pages with empty/invalid `updatedAt`; mapper now falls back to sync time for future undated Confluence pages.  bun run typecheck; bun test (51 pass, 0 fail).  Next: smoke test `bun run start` against synced data.
 2026-07-21  tui-reader-polish  Added safe-width navigator document symbols plus richer markdown, fenced code, and table styling for the reader.  bun run typecheck; bun test (51 pass, 0 fail).  Next: command/keymap registry, browser-open hook, or remaining overlays.
 2026-07-21  sync-tree-robustness  Sync now recursively discovers children, keeps failed body-fetch pages visible as placeholders, page-only failures no longer make the CLI exit nonzero, Confluence tables render as markdown tables, code highlighting initializes Tree-sitter, and orphaned local pages appear in the TUI tree.  bun run typecheck; bun test (54 pass, 0 fail).  Next: rerun `bun run start sync --space PTPCUOYKCI`, then reopen the TUI.
+2026-07-21  tree-order  Persisted Confluence tree order in SQLite and changed navigator sibling sorting to use synced tree order instead of alphabetical title order.  bun run typecheck; bun test (55 pass, 0 fail).  Next: rerun sync so existing rows get tree_order values.
+2026-07-21  multiline-code-paragraphs  Confluence paragraphs containing a single multiline `<code>` node now map to fenced code blocks, preserving Mermaid/ERD newlines instead of flattening them as inline code.  bun run typecheck; bun test (56 pass, 0 fail).  Next: rerun sync so stored body artifacts are regenerated.
+2026-07-21  body-repair  Added local `repair` command to rebuild stored body artifacts and page/search projections from existing `source_body`; parser now also merges Mermaid-style adjacent code-only paragraphs while keeping isolated inline-code paragraphs inline.  bun run typecheck; bun test (59 pass, 0 fail); bun run start repair (71 artifacts rebuilt); verified page 1962803383 has a Mermaid fence.  Next: reopen the TUI and inspect the repaired document rendering.
 ```
 
 ## Contract Changes
@@ -99,4 +102,6 @@ YYYY-MM-DD  ID  Contract changed  Impacted tasks
 2026-07-21  tui-local  Added `IndexRepository.listPagesInSpace` and `TuiDataSource`; default TUI now opens the local index instead of mock data.  Impacts TUI smoke testing and future command wiring.
 2026-07-21  tui-date-fix  `ConfluencePage` accepts `updatedAt`/`modifiedAt`, mapper accepts `syncedAt`, and TUI date display returns `unknown` for invalid timestamps.  Impacts sync mapping and TUI header rendering.
 2026-07-21  sync-tree-robustness  Added canonical `TableBlock`; sync page counts now include body-failure placeholders, CLI treats page-only failures as non-fatal, and TUI tree rows can represent detached local pages.  Impacts document projection, sync reports, CLI sync semantics, and TUI tree rendering.
+2026-07-21  tree-order  Migrated local index schema to v3 with `pages.tree_order`; `IndexedPage.treeOrder` is optional for fixtures but persisted for synced/repository pages.  Impacts repository ordering, sync mapping, and navigator sibling order.
+2026-07-21  body-repair  Added `mapConfluenceBody`, `IndexRepository.listPageBodies`, `IndexRepository.deleteLinksFromPage`, `repairBodyArtifacts`, and CLI `repair`.  Impacts local maintenance commands and any future body-artifact migration flow.
 ```

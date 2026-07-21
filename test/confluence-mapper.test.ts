@@ -132,6 +132,83 @@ describe("Confluence mapper", () => {
     expect(documentPlainText(mapped.document)).toContain("Status Ready")
   })
 
+  test("preserves multiline code paragraphs as fenced code blocks", () => {
+    const mapped = mapConfluencePage({
+      page: {
+        id: "226",
+        title: "Mermaid Page",
+        version: { number: 4, createdAt: "2026-07-21T09:00:00Z" },
+        body: {
+          storage: {
+            value: [
+              "<h3>Focused ERD</h3>",
+              "<p>This ERD focuses on scraping and pricing.</p>",
+              "<p><code>erDiagram\n  retailers {\n    uuid id PK\n    text name\n  }\n\n  retailers ||--o{ retailer_skus : has</code></p>",
+            ].join(""),
+          },
+        },
+      },
+      space,
+      baseUrl: "https://example.atlassian.net/wiki",
+    })
+
+    const codeBlock = mapped.document.blocks.find((block) => block.type === "code")
+
+    expect(codeBlock).toMatchObject({ type: "code", language: "mermaid" })
+    expect(codeBlock?.type === "code" ? codeBlock.text : "").toContain("retailers {\n    uuid id PK")
+    expect(mapped.renderedMarkdown).toContain("```mermaid\nerDiagram\n  retailers {")
+    expect(mapped.renderedMarkdown).not.toContain("`erDiagram retailers")
+  })
+
+  test("merges adjacent code-only paragraphs into a single fenced code block", () => {
+    const mapped = mapConfluencePage({
+      page: {
+        id: "227",
+        title: "Styled Mermaid Page",
+        version: { number: 5, createdAt: "2026-07-21T09:00:00Z" },
+        body: {
+          storage: {
+            value: [
+              "<p><code>erDiagram</code></p>",
+              "<p><code>retailers {</code></p>",
+              "<p><code>  uuid id PK</code></p>",
+              "<p><code>}</code></p>",
+            ].join(""),
+          },
+        },
+      },
+      space,
+      baseUrl: "https://example.atlassian.net/wiki",
+    })
+
+    const codeBlock = mapped.document.blocks[0]
+
+    expect(mapped.document.blocks).toHaveLength(1)
+    expect(codeBlock).toMatchObject({ type: "code", language: "mermaid" })
+    expect(codeBlock.type === "code" ? codeBlock.text : "").toBe("erDiagram\nretailers {\n  uuid id PK\n}")
+    expect(mapped.renderedMarkdown).toBe("```mermaid\nerDiagram\nretailers {\n  uuid id PK\n}\n```")
+  })
+
+  test("keeps isolated single-line code-only paragraphs inline", () => {
+    const mapped = mapConfluencePage({
+      page: {
+        id: "228",
+        title: "Inline Code Page",
+        version: { number: 1, createdAt: "2026-07-21T09:00:00Z" },
+        body: {
+          storage: {
+            value: "<p><code>release_id</code></p>",
+          },
+        },
+      },
+      space,
+      baseUrl: "https://example.atlassian.net/wiki",
+    })
+
+    expect(mapped.document.blocks[0]).toMatchObject({ type: "paragraph", inlines: [{ type: "code", text: "release_id" }] })
+    expect(mapped.renderedMarkdown).toBe("`release_id`")
+  })
+
   test("uses the sync timestamp when Confluence omits page timestamps", () => {
     const mapped = mapConfluencePage({
       page: {
@@ -181,6 +258,7 @@ describe("Confluence mapper", () => {
       updatedAt: "2026-07-20T13:00:00Z",
       contentMarkdown: "",
       snippet: "",
+      treeOrder: 0,
     })
   })
 })

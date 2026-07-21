@@ -19,6 +19,7 @@ export interface IndexedPage {
   updatedAt: string
   contentMarkdown: string
   snippet: string
+  treeOrder?: number
 }
 
 export type PageLinkKind = "internal" | "external"

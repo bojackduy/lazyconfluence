@@ -15,6 +15,7 @@ interface PageRow {
   updated_at: string
   content_markdown: string
   snippet: string
+  tree_order: number
 }
 
 interface LinkRow {
@@ -115,9 +116,9 @@ export class IndexRepository {
       const pageStatement = this.database.query(`
         INSERT INTO pages (
           page_id, space_key, title, url, url_key, parent_id, path_json, path_text,
-          owner, updated_at, content_markdown, snippet, indexed_at
+          owner, updated_at, content_markdown, snippet, tree_order, indexed_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(page_id) DO UPDATE SET
           space_key = excluded.space_key,
           title = excluded.title,
@@ -130,6 +131,7 @@ export class IndexRepository {
           updated_at = excluded.updated_at,
           content_markdown = excluded.content_markdown,
           snippet = excluded.snippet,
+          tree_order = excluded.tree_order,
           indexed_at = CURRENT_TIMESTAMP
       `)
       const deleteFtsStatement = this.database.query("DELETE FROM page_fts WHERE page_id = ?")
@@ -151,6 +153,7 @@ export class IndexRepository {
           page.updatedAt,
           page.contentMarkdown,
           page.snippet,
+          page.treeOrder ?? 0,
         )
         deleteFtsStatement.run(page.pageId)
         insertFtsStatement.run(page.title, pathText, page.snippet, page.contentMarkdown, page.pageId)
@@ -285,7 +288,7 @@ export class IndexRepository {
       SELECT *
       FROM pages
       WHERE space_key = ?
-      ORDER BY path_text COLLATE NOCASE, title COLLATE NOCASE
+      ORDER BY path_text COLLATE NOCASE, tree_order, title COLLATE NOCASE
     `).all(spaceKey) as PageRow[]
 
     return rows.map(pageFromRow)
@@ -307,12 +310,22 @@ export class IndexRepository {
     return row ? pageBodyFromRow(row) : null
   }
 
+  listPageBodies(): PageBodyArtifact[] {
+    const rows = this.database.query("SELECT * FROM page_bodies ORDER BY page_id COLLATE NOCASE").all() as PageBodyRow[]
+
+    return rows.map(pageBodyFromRow)
+  }
+
+  deleteLinksFromPage(pageId: string) {
+    this.database.query("DELETE FROM links WHERE from_page_id = ?").run(pageId)
+  }
+
   getChildren(parentPageId: string): IndexedPage[] {
     const rows = this.database.query(`
       SELECT *
       FROM pages
       WHERE parent_id = ?
-      ORDER BY path_text COLLATE NOCASE, title COLLATE NOCASE
+      ORDER BY tree_order, title COLLATE NOCASE
     `).all(parentPageId) as PageRow[]
 
     return rows.map(pageFromRow)
@@ -483,6 +496,7 @@ function pageFromRow(row: PageRow): IndexedPage {
     updatedAt: String(row.updated_at),
     contentMarkdown: String(row.content_markdown),
     snippet: String(row.snippet),
+    treeOrder: Number(row.tree_order ?? 0),
   }
 }
 

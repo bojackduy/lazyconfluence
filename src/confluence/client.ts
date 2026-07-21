@@ -33,6 +33,7 @@ export interface ConfluencePage {
   createdAt?: string
   updatedAt?: string
   modifiedAt?: string
+  position?: number
   body?: {
     storage?: {
       value?: string

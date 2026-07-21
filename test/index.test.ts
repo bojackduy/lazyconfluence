@@ -30,6 +30,7 @@ describe("local index repository", () => {
     await withSeededRepository((repository) => {
       expect(repository.getSpace("ENG")?.pageCount).toBe(3)
       expect(repository.getPage("architecture")?.title).toBe("Project Architecture")
+      expect(repository.listPagesInSpace("ENG").map((page) => page.pageId)).toEqual(["eng-home", "architecture", "release-checklist"])
       expect(repository.getChildren("eng-home").map((page) => page.pageId)).toEqual(["architecture", "release-checklist"])
 
       const outgoing = repository.getOutgoingLinks("eng-home")

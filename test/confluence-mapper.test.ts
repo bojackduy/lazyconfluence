@@ -104,6 +104,29 @@ describe("Confluence mapper", () => {
     expect(String(opaqueNode?.raw)).toContain("ac:name=\"toc\"")
   })
 
+  test("uses the sync timestamp when Confluence omits page timestamps", () => {
+    const mapped = mapConfluencePage({
+      page: {
+        id: "250",
+        title: "Undated Page",
+        body: { storage: { value: "<p>Undated content.</p>" } },
+      },
+      space,
+      baseUrl: "https://example.atlassian.net/wiki",
+      syncedAt: "2026-07-21T10:00:00Z",
+    })
+
+    const folder = mapConfluenceFolder({
+      page: { id: "251", title: "Undated Folder", type: "folder" },
+      space,
+      baseUrl: "https://example.atlassian.net/wiki",
+      syncedAt: "2026-07-21T10:00:00Z",
+    })
+
+    expect(mapped.indexedPage.updatedAt).toBe("2026-07-21T10:00:00Z")
+    expect(folder.updatedAt).toBe("2026-07-21T10:00:00Z")
+  })
+
   test("maps folders into tree-capable indexed projections", () => {
     const folder = mapConfluenceFolder({
       page: {

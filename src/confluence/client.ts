@@ -31,6 +31,8 @@ export interface ConfluencePage {
   ownerId?: string
   authorId?: string
   createdAt?: string
+  updatedAt?: string
+  modifiedAt?: string
   body?: {
     storage?: {
       value?: string

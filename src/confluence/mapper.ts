@@ -10,6 +10,7 @@ export interface ConfluencePageMappingInput {
   space: ConfluenceSpace
   baseUrl: string
   ancestors?: Array<{ id: string; title: string }>
+  syncedAt?: string
 }
 
 export interface MappedConfluencePage {
@@ -53,7 +54,7 @@ export function mapConfluencePage(input: ConfluencePageMappingInput): MappedConf
     parentId: input.page.parentId ?? null,
     path: [...(input.ancestors?.map((ancestor) => ancestor.title) ?? []), input.page.title],
     owner: input.page.ownerId || input.page.authorId || "",
-    updatedAt: input.page.version?.createdAt || input.page.createdAt || "",
+    updatedAt: pageUpdatedAt(input.page, input.syncedAt),
     contentMarkdown: renderedMarkdown,
     snippet: documentSnippet(document),
   }
@@ -85,10 +86,18 @@ export function mapConfluenceFolder(input: ConfluencePageMappingInput): IndexedP
     parentId: input.page.parentId ?? null,
     path: [...(input.ancestors?.map((ancestor) => ancestor.title) ?? []), input.page.title],
     owner: input.page.ownerId || input.page.authorId || "",
-    updatedAt: input.page.version?.createdAt || input.page.createdAt || "",
+    updatedAt: pageUpdatedAt(input.page, input.syncedAt),
     contentMarkdown: "",
     snippet: "",
   }
+}
+
+function pageUpdatedAt(page: ConfluencePage, fallback?: string) {
+  return firstValidDate([page.version?.createdAt, page.updatedAt, page.modifiedAt, page.createdAt, fallback]) ?? ""
+}
+
+function firstValidDate(values: Array<string | undefined>) {
+  return values.find((value) => typeof value === "string" && value.trim() && Number.isFinite(Date.parse(value)))
 }
 
 function readPageBody(page: ConfluencePage): { representation: SourceRepresentation; value: string } {

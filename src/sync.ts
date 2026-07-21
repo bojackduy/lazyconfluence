@@ -154,23 +154,17 @@ async function syncSpace(input: {
   const listedPages = await input.client.fetchPagesBySpace(input.space.id, { bodyFormat: "storage", limit: input.pageLimit })
   emitProgress(input.onProgress, { type: "fetched-space-pages", message: `Fetched ${listedPages.length} page${listedPages.length === 1 ? "" : "s"} for ${input.space.key}.`, spaceKey: input.space.key, spaceName: input.space.name, count: listedPages.length })
   const nodeById = new Map<string, ConfluencePage>()
+  const pageFailures: SyncFailure[] = []
 
   for (const page of listedPages) {
     if (page.id) nodeById.set(page.id, page)
   }
 
-  for (const page of listedPages) {
-    emitProgress(input.onProgress, { type: "fetching-page-children", message: `Fetching children for ${page.id}: ${page.title}.`, spaceKey: input.space.key, spaceName: input.space.name, pageId: page.id, title: page.title })
-    for (const child of await input.client.fetchDirectChildren(page.id)) {
-      if (!child.id || nodeById.has(child.id)) continue
-      nodeById.set(child.id, child.parentId ? child : { ...child, parentId: page.id })
-    }
-  }
+  await discoverPageChildren({ ...input, seedPages: listedPages, nodeById, pageFailures })
 
   const pages: IndexedPage[] = []
   const links: PageLink[] = []
   const bodyArtifacts: PageBodyArtifact[] = []
-  const pageFailures: SyncFailure[] = []
 
   for (const page of nodeById.values()) {
     const ancestors = ancestorsFor(page, nodeById)
@@ -202,8 +196,10 @@ async function syncSpace(input: {
       })
       emitProgress(input.onProgress, { type: "indexed-page", message: `Indexed page ${mapped.indexedPage.pageId}: ${mapped.indexedPage.title}.`, spaceKey: input.space.key, spaceName: input.space.name, pageId: mapped.indexedPage.pageId, title: mapped.indexedPage.title })
     } catch (error) {
-      pageFailures.push({ scope: "page", key: page.id || page.title, message: errorMessage(error) })
-      emitProgress(input.onProgress, { type: "failed-page", message: `Failed page ${page.id || page.title}: ${errorMessage(error)}`, spaceKey: input.space.key, spaceName: input.space.name, pageId: page.id, title: page.title })
+      const message = errorMessage(error)
+      pageFailures.push({ scope: "page", key: page.id || page.title, message })
+      pages.push(mapUnavailableConfluencePage({ page, space: input.space, baseUrl: input.baseUrl, ancestors, syncedAt: input.syncedAt }, message))
+      emitProgress(input.onProgress, { type: "failed-page", message: `Failed page ${page.id || page.title}: ${message}`, spaceKey: input.space.key, spaceName: input.space.name, pageId: page.id, title: page.title })
     }
   }
 
@@ -214,6 +210,82 @@ async function syncSpace(input: {
   input.repository.upsertLinks(links)
 
   return { pagesIndexed: pages.length, linksIndexed: links.length, bodyArtifactsPersisted: bodyArtifacts.length, failures: pageFailures }
+}
+
+async function discoverPageChildren(input: {
+  client: ConfluenceClient
+  space: ConfluenceSpace
+  spaceKey?: string
+  seedPages: ConfluencePage[]
+  nodeById: Map<string, ConfluencePage>
+  pageFailures: SyncFailure[]
+  onProgress?: (event: SyncProgressEvent) => void
+}) {
+  const queue = [...input.seedPages]
+  const visited = new Set<string>()
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const page = queue[index]
+    if (!page.id || visited.has(page.id)) continue
+
+    visited.add(page.id)
+    emitProgress(input.onProgress, { type: "fetching-page-children", message: `Fetching children for ${page.id}: ${page.title}.`, spaceKey: input.space.key, spaceName: input.space.name, pageId: page.id, title: page.title })
+
+    let children: ConfluencePage[]
+    try {
+      children = await input.client.fetchDirectChildren(page.id)
+    } catch (error) {
+      const message = errorMessage(error)
+      input.pageFailures.push({ scope: "page", key: page.id, message: `Could not fetch children: ${message}` })
+      emitProgress(input.onProgress, { type: "failed-page", message: `Failed children for ${page.id}: ${message}`, spaceKey: input.space.key, spaceName: input.space.name, pageId: page.id, title: page.title })
+      continue
+    }
+
+    for (const child of children) {
+      if (!child.id) continue
+
+      const childWithParent = child.parentId ? child : { ...child, parentId: page.id }
+      const existing = input.nodeById.get(child.id)
+
+      if (existing) {
+        input.nodeById.set(child.id, mergeConfluencePage(existing, childWithParent))
+        continue
+      }
+
+      input.nodeById.set(child.id, childWithParent)
+      queue.push(childWithParent)
+    }
+  }
+}
+
+function mergeConfluencePage(existing: ConfluencePage, incoming: ConfluencePage): ConfluencePage {
+  return {
+    ...incoming,
+    ...existing,
+    parentId: existing.parentId ?? incoming.parentId ?? null,
+    body: existing.body ?? incoming.body,
+    _links: existing._links ?? incoming._links,
+    version: existing.version ?? incoming.version,
+  }
+}
+
+function mapUnavailableConfluencePage(input: Parameters<typeof mapConfluenceFolder>[0], message: string): IndexedPage {
+  const page = mapConfluenceFolder(input)
+
+  return {
+    ...page,
+    contentMarkdown: [
+      `# ${page.title || page.pageId}`,
+      "",
+      "lazyconfluence found this page in Confluence, but could not fetch its body during the last sync.",
+      "",
+      `Page ID: ${page.pageId}`,
+      `Error: ${message}`,
+      "",
+      page.url ? `[Open in Confluence](${page.url})` : "",
+    ].filter(Boolean).join("\n"),
+    snippet: "Body unavailable from the last sync; page kept visible in the local tree.",
+  }
 }
 
 function ancestorsFor(page: ConfluencePage, nodeById: Map<string, ConfluencePage>) {

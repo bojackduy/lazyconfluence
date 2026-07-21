@@ -18,7 +18,7 @@ export interface ParsedConfluenceStorage {
 export function parseConfluenceStorage(input: ParseConfluenceStorageInput): ParsedConfluenceStorage {
   const blocks: DocumentBlock[] = []
   const nodes: Record<string, NodeMapping> = {}
-  const blockPattern = /<((?:h[1-6])|p|ul|ol|pre|blockquote|ac:structured-macro)\b([^>]*)>([\s\S]*?)<\/\1>|<(hr)\b[^>]*\/?>/gi
+  const blockPattern = /<((?:h[1-6])|p|ul|ol|pre|blockquote|table|ac:structured-macro)\b([^>]*)>([\s\S]*?)<\/\1>|<(hr)\b[^>]*\/?>/gi
   let lastIndex = 0
   let match: RegExpExecArray | null
 
@@ -74,6 +74,9 @@ function addMatchedBlock(input: ParseConfluenceStorageInput, blocks: DocumentBlo
     block = { type: "code", nodeId, source: { path: sourcePath, type: tag }, language: null, text: htmlToText(inner) }
   } else if (tag === "blockquote") {
     block = { type: "quote", nodeId, source: { path: sourcePath, type: tag }, inlines: parseInlineHtml(inner, input.baseUrl) }
+  } else if (tag === "table") {
+    const rows = parseTableRows(inner, input.baseUrl)
+    if (rows.length) block = { type: "table", nodeId, source: { path: sourcePath, type: tag }, rows }
   } else if (tag === "hr") {
     block = { type: "rule", nodeId, source: { path: sourcePath, type: tag } }
   } else if (tag === "ac:structured-macro") {
@@ -152,6 +155,27 @@ function parseListItems(value: string, baseUrl: string) {
   }
 
   return items
+}
+
+function parseTableRows(value: string, baseUrl: string) {
+  const rows: Array<{ cells: Array<{ header: boolean; inlines: InlineNode[] }> }> = []
+  const rowPattern = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi
+  let rowMatch: RegExpExecArray | null
+
+  while ((rowMatch = rowPattern.exec(value)) !== null) {
+    const cells: Array<{ header: boolean; inlines: InlineNode[] }> = []
+    const cellPattern = /<(th|td)\b[^>]*>([\s\S]*?)<\/\1>/gi
+    let cellMatch: RegExpExecArray | null
+
+    while ((cellMatch = cellPattern.exec(rowMatch[1])) !== null) {
+      const tag = cellMatch[1].toLowerCase()
+      cells.push({ header: tag === "th", inlines: parseInlineHtml(cellMatch[2], baseUrl) })
+    }
+
+    if (cells.length) rows.push({ cells })
+  }
+
+  return rows
 }
 
 function appendText(inlines: InlineNode[], text: string) {

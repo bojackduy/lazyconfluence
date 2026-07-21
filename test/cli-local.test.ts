@@ -94,6 +94,34 @@ describe("local CLI integration", () => {
       await setup.cleanup()
     }
   })
+
+  test("sync reports page body failures without failing the usable local index", async () => {
+    const setup = await createCliSetup()
+    const responses = {
+      "/wiki/api/v2/spaces?keys=ENG&limit=250": {
+        results: [{ id: "10", key: "ENG", name: "Engineering", homepageId: "100" }],
+      },
+      "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage": {
+        results: [confluencePagePayload("100", "Engineering Home", null, "<p>Home page.</p>"), confluencePageMetadata("bad", "Bad Page", null)],
+        _links: {},
+      },
+      "/wiki/api/v2/pages/100/direct-children?limit=250": { results: [], _links: {} },
+      "/wiki/api/v2/pages/bad/direct-children?limit=250": { results: [], _links: {} },
+      "/wiki/api/v2/pages/bad?body-format=storage": fetchResponse({ message: "boom" }, false, 500, "Server Error"),
+    }
+
+    try {
+      const output = await withMockFetch(jsonGlobalFetch(responses), () => captureCli(() => withProcessEnv(setup.env, () => runCli(["sync", "--space", "ENG"]))))
+
+      expect(output.exitCode).toBeUndefined()
+      expect(output.stdout).toContain("Failed page bad")
+      expect(output.stdout).toContain("Sync completed with failures.")
+      expect(output.stdout).toContain("Pages indexed: 2")
+      expect(output.stdout).toContain("page bad: Confluence returned HTTP 500")
+    } finally {
+      await setup.cleanup()
+    }
+  })
 })
 
 async function createCliSetup() {
@@ -181,6 +209,7 @@ function jsonGlobalFetch(responses: Record<string, unknown>) {
     const body = responses[`${parsed.pathname}${parsed.search}`]
 
     if (!body) return fetchResponse({ message: `missing fixture for ${parsed.pathname}${parsed.search}` }, false, 404, "Not Found") as Response
+    if (isResponseLike(body)) return body as Response
 
     return fetchResponse(body) as Response
   }) as typeof fetch
@@ -195,7 +224,18 @@ function fetchResponse(body: unknown, ok = true, status = 200, statusText = "OK"
   }
 }
 
+function isResponseLike(value: unknown): value is ReturnType<typeof fetchResponse> {
+  return typeof value === "object" && value !== null && "ok" in value && "json" in value
+}
+
 function confluencePagePayload(id: string, title: string, parentId: string | null, storageHtml: string) {
+  return {
+    ...confluencePageMetadata(id, title, parentId),
+    body: { storage: { value: storageHtml } },
+  }
+}
+
+function confluencePageMetadata(id: string, title: string, parentId: string | null) {
   return {
     id,
     title,
@@ -203,7 +243,6 @@ function confluencePagePayload(id: string, title: string, parentId: string | nul
     ownerId: "owner",
     version: { number: 1, createdAt: "2026-07-21T09:00:00Z" },
     _links: { webui: `/wiki/spaces/ENG/pages/${id}/${title.replace(/\s+/g, "+")}` },
-    body: { storage: { value: storageHtml } },
   }
 }
 

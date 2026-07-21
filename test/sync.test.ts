@@ -79,12 +79,18 @@ describe("sync service", () => {
             _links: {},
           },
           "/wiki/api/v2/pages/101/direct-children?limit=250": { results: [], _links: {} },
+          "/wiki/api/v2/pages/900/direct-children?limit=250": {
+            results: [pagePayload("901", "Nested Design", "900")],
+            _links: {},
+          },
+          "/wiki/api/v2/pages/901/direct-children?limit=250": { results: [], _links: {} },
           "/wiki/api/v2/pages/101?body-format=storage": pagePayload(
             "101",
             "Project Architecture",
             "100",
             '<p>Architecture links back to <a href="/wiki/spaces/ENG/pages/100/Engineering+Home">home</a> and <a href="https://developer.atlassian.com/cloud/confluence/rest/v2/">REST API</a>.</p><ac:structured-macro ac:name="toc"><ac:parameter ac:name="printable">true</ac:parameter></ac:structured-macro>',
           ),
+          "/wiki/api/v2/pages/901?body-format=storage": pagePayload("901", "Nested Design", "900", "<p>Nested child content.</p>"),
         }),
       })
 
@@ -92,25 +98,28 @@ describe("sync service", () => {
       expect(progress).toContain("fetching-space-pages:Fetching pages for ENG.")
       expect(progress).toContain("fetched-space-pages:Fetched 2 pages for ENG.")
       expect(progress).toContain("fetching-page-children:Fetching children for 100: Engineering Home.")
+      expect(progress).toContain("fetching-page-children:Fetching children for 900: Design Notes.")
       expect(progress).toContain("fetching-page-body:Fetching body for 101: Project Architecture.")
-      expect(progress).toContain("writing-space:Writing 3 pages, 2 links, and 2 body artifacts for ENG.")
+      expect(progress).toContain("fetching-page-body:Fetching body for 901: Nested Design.")
+      expect(progress).toContain("writing-space:Writing 4 pages, 2 links, and 3 body artifacts for ENG.")
       expect(progress.at(-1)).toBe("completed:Sync completed.")
       expect(report).toMatchObject({
         complete: true,
         spacesRequested: 1,
         spacesSynced: 1,
-        pagesIndexed: 3,
+        pagesIndexed: 4,
         linksIndexed: 2,
-        bodyArtifactsPersisted: 2,
+        bodyArtifactsPersisted: 3,
         failures: [],
       })
       expect(calls).toContain("https://example.atlassian.net/wiki/api/v2/pages/101?body-format=storage")
 
       const repository = openIndexRepository({ path: setup.dbPath })
       try {
-        expect(repository.getSpace("ENG")?.pageCount).toBe(3)
+        expect(repository.getSpace("ENG")?.pageCount).toBe(4)
         expect(repository.getPage("101")?.path).toEqual(["Engineering Home", "Project Architecture"])
         expect(repository.getChildren("100").map((page) => page.pageId).sort()).toEqual(["101", "900"])
+        expect(repository.getChildren("900").map((page) => page.pageId)).toEqual(["901"])
         expect(repository.getOutgoingLinks("101").map((link) => link.kind).sort()).toEqual(["external", "internal"])
         expect(repository.getIncomingLinks("100").map((link) => link.fromPageId)).toEqual(["101"])
         expect(repository.searchPagesInSpace("ENG", "architecture")[0]?.page.pageId).toBe("101")
@@ -206,7 +215,7 @@ describe("sync service", () => {
       })
 
       expect(report.complete).toBe(false)
-      expect(report.pagesIndexed).toBe(1)
+      expect(report.pagesIndexed).toBe(2)
       expect(report.bodyArtifactsPersisted).toBe(1)
       expect(report.failures).toEqual([{ scope: "page", key: "bad", message: expect.stringContaining("HTTP 500") }])
 
@@ -214,7 +223,8 @@ describe("sync service", () => {
       try {
         expect(checked.getPage("old-page")?.title).toBe("Old Local Page")
         expect(checked.getPage("fresh")?.title).toBe("Fresh Page")
-        expect(checked.getPage("bad")).toBeNull()
+        expect(checked.getPage("bad")?.contentMarkdown).toContain("could not fetch its body")
+        expect(checked.getPage("bad")?.snippet).toContain("kept visible")
       } finally {
         checked.close()
       }

@@ -18,7 +18,7 @@ export interface CanonicalDocument {
   blocks: DocumentBlock[]
 }
 
-export type DocumentBlock = HeadingBlock | ParagraphBlock | ListBlock | CodeBlock | QuoteBlock | RuleBlock | UnsupportedBlock
+export type DocumentBlock = HeadingBlock | ParagraphBlock | ListBlock | CodeBlock | QuoteBlock | TableBlock | RuleBlock | UnsupportedBlock
 
 export interface HeadingBlock extends BaseDocumentNode {
   type: "heading"
@@ -45,6 +45,20 @@ export interface CodeBlock extends BaseDocumentNode {
 
 export interface QuoteBlock extends BaseDocumentNode {
   type: "quote"
+  inlines: InlineNode[]
+}
+
+export interface TableBlock extends BaseDocumentNode {
+  type: "table"
+  rows: TableRow[]
+}
+
+export interface TableRow {
+  cells: TableCell[]
+}
+
+export interface TableCell {
+  header: boolean
   inlines: InlineNode[]
 }
 

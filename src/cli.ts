@@ -1,7 +1,8 @@
 import { createInterface } from "node:readline/promises"
 import { stdin as input, stdout as output } from "node:process"
 import { ATLASSIAN_API_TOKEN_URL, createLocalConfig, loadAtlassianAuth, parseSpaceKeys, saveLocalAuth } from "./config"
-import { formatSyncReport, syncConfluence, SyncServiceError } from "./sync"
+import { openIndexRepository } from "./index/repository"
+import { formatSyncReport, syncConfluence, SyncServiceError, type SyncProgressEvent } from "./sync"
 import { renderTui } from "./tui/app"
 
 export async function runCli(args: string[]) {
@@ -19,10 +20,10 @@ export async function runCli(args: string[]) {
       await printLocalConfigSummary()
       return
     case "sync":
-      await runSyncCommand()
+      await runSyncCommand(args.slice(1))
       return
     case "search":
-      console.log("search is deferred for the next UI loop.")
+      await runSearchCommand(args.slice(1))
       return
     default:
       console.error(`Unknown command: ${command}`)
@@ -31,14 +32,58 @@ export async function runCli(args: string[]) {
   }
 }
 
-async function runSyncCommand() {
+async function runSyncCommand(args: string[]) {
   try {
-    const report = await syncConfluence()
+    const options = parseSyncArgs(args)
+    const report = await syncConfluence({ spaceKeys: options.spaceKeys, onProgress: options.quiet ? undefined : printSyncProgress })
     console.log(formatSyncReport(report))
     if (!report.complete) process.exitCode = 1
   } catch (error) {
     console.error(error instanceof SyncServiceError ? error.message : error instanceof Error ? error.message : "Unknown sync error.")
     process.exitCode = 1
+  }
+}
+
+async function runSearchCommand(args: string[]) {
+  let options: ReturnType<typeof parseSearchArgs>
+
+  try {
+    options = parseSearchArgs(args)
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : "Invalid search options.")
+    process.exitCode = 1
+    return
+  }
+
+  const auth = await loadAtlassianAuth()
+
+  if (!options.all && !options.spaceKey && !auth) {
+    console.error("No lazyconfluence config found. Run `bun run start init`, or use `search --all <query>` to search the local database without config.")
+    process.exitCode = 1
+    return
+  }
+
+  const spaceKey = options.all ? null : options.spaceKey || auth?.config.atlassian.defaultSpaceKey || null
+  const repository = openIndexRepository()
+
+  try {
+    const results = spaceKey ? repository.searchPagesInSpace(spaceKey, options.query, options.limit) : repository.searchPagesAcrossSpaces(options.query, options.limit)
+
+    if (!results.length) {
+      console.log("No local results.")
+      return
+    }
+
+    console.log(`Local search results${spaceKey ? ` in ${spaceKey}` : " across all spaces"}:`)
+    for (const [index, result] of results.entries()) {
+      console.log(`${index + 1}. [${result.page.spaceKey}] ${result.page.title}`)
+      console.log(`   Path: ${result.page.path.join(" / ")}`)
+      console.log(`   Updated: ${result.page.updatedAt}`)
+      if (result.page.snippet) console.log(`   Snippet: ${result.page.snippet}`)
+      console.log(`   URL: ${result.page.url}`)
+    }
+  } finally {
+    repository.close()
   }
 }
 
@@ -73,7 +118,7 @@ async function runInit() {
     console.log(`Config: ${paths.configFile}`)
     console.log(`Credentials: ${paths.credentialFile}`)
     console.log(`Default space: ${config.atlassian.defaultSpaceKey}`)
-    console.log("Remote checks, sync, and cache setup are still deferred.")
+    console.log("Run `bun run start sync` to fetch configured spaces into the local index.")
   } finally {
     closeRl()
   }
@@ -81,19 +126,122 @@ async function runInit() {
 
 async function printLocalConfigSummary() {
   const auth = await loadAtlassianAuth()
+  const repository = openIndexRepository()
 
-  if (!auth) {
-    console.log("No lazyconfluence config found. Run `bun run start init` first.")
-    return
+  try {
+    const stats = repository.getStats()
+
+    if (!auth) {
+      console.log("No lazyconfluence config found. Run `bun run start init` first.")
+    } else {
+      console.log("lazyconfluence local config")
+      console.log(`Site URL: ${auth.config.atlassian.siteUrl}`)
+      console.log(`Email: ${auth.config.atlassian.email}`)
+      console.log(`Spaces: ${auth.config.atlassian.spaceKeys.join(", ")}`)
+      console.log(`Default space: ${auth.config.atlassian.defaultSpaceKey}`)
+      console.log(`API token: ${auth.apiToken ? "found" : "missing"}`)
+    }
+
+    console.log("lazyconfluence local database")
+    console.log(`Database: ${repository.path ?? "unknown"}`)
+    console.log(`Schema version: ${stats.schemaVersion}`)
+    console.log(`Spaces indexed: ${stats.spaceCount}`)
+    console.log(`Pages indexed: ${stats.pageCount}`)
+    console.log(`Links indexed: ${stats.linkCount}`)
+    console.log(`Body artifacts: ${stats.bodyArtifactCount}`)
+
+    if (auth) {
+      for (const spaceKey of auth.config.atlassian.spaceKeys) {
+        const space = repository.getSpace(spaceKey)
+        console.log(`Configured space ${spaceKey}: ${space ? `${space.pageCount} local pages` : "not synced"}`)
+      }
+    }
+
+    console.log("No remote doctor check was run.")
+  } finally {
+    repository.close()
+  }
+}
+
+function parseSyncArgs(args: string[]) {
+  let spaceKeys: string[] | undefined
+  let quiet = false
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]
+
+    if (arg === "--space") {
+      const value = args[index + 1]
+      if (!value) throw new Error("--space requires a space key.")
+      spaceKeys = [value]
+      index += 1
+      continue
+    }
+
+    if (arg === "--spaces") {
+      const value = args[index + 1]
+      if (!value) throw new Error("--spaces requires comma-separated space keys.")
+      spaceKeys = parseSpaceKeys(value)
+      index += 1
+      continue
+    }
+
+    if (arg === "--all-configured") continue
+
+    if (arg === "--quiet") {
+      quiet = true
+      continue
+    }
+
+    throw new Error(`Unknown sync option: ${arg}`)
   }
 
-  console.log("lazyconfluence local config")
-  console.log(`Site URL: ${auth.config.atlassian.siteUrl}`)
-  console.log(`Email: ${auth.config.atlassian.email}`)
-  console.log(`Spaces: ${auth.config.atlassian.spaceKeys.join(", ")}`)
-  console.log(`Default space: ${auth.config.atlassian.defaultSpaceKey}`)
-  console.log(`API token: ${auth.apiToken ? "found" : "missing"}`)
-  console.log("No remote doctor check is implemented yet.")
+  return { spaceKeys, quiet }
+}
+
+function printSyncProgress(event: SyncProgressEvent) {
+  console.log(event.message)
+}
+
+function parseSearchArgs(args: string[]) {
+  let all = false
+  let spaceKey: string | null = null
+  let limit = 20
+  const queryParts: string[] = []
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]
+
+    if (arg === "--all") {
+      all = true
+      continue
+    }
+
+    if (arg === "--space") {
+      const value = args[index + 1]
+      if (!value) throw new Error("--space requires a space key.")
+      spaceKey = value
+      index += 1
+      continue
+    }
+
+    if (arg === "--limit") {
+      const value = Number(args[index + 1])
+      if (!Number.isInteger(value) || value < 1) throw new Error("--limit requires a positive integer.")
+      limit = value
+      index += 1
+      continue
+    }
+
+    queryParts.push(arg)
+  }
+
+  return {
+    all,
+    spaceKey,
+    limit,
+    query: queryParts.join(" ").trim(),
+  }
 }
 
 async function askRequired(rl: ReturnType<typeof createInterface>, label: string, defaultValue?: string) {

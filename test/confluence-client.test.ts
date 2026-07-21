@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { buildConfluenceAuthHeaders, ConfluenceClient, confluenceApiUrl, normalizeConfluenceBaseUrl, type FetchLike } from "../src/confluence/client"
+import { buildConfluenceAuthHeaders, ConfluenceClient, ConfluenceClientError, confluenceApiUrl, normalizeConfluenceBaseUrl, type FetchLike } from "../src/confluence/client"
 
 describe("Confluence client", () => {
   test("normalizes Confluence URLs and builds auth headers", () => {
@@ -93,6 +93,34 @@ describe("Confluence client", () => {
       "https://example.atlassian.net/wiki/api/v2/pages/100?body-format=storage",
       "https://example.atlassian.net/wiki/api/v2/pages/100/direct-children?limit=250",
     ])
+  })
+
+  test("times out requests that do not finish", async () => {
+    const calls: string[] = []
+    const client = new ConfluenceClient({
+      siteUrl: "https://example.atlassian.net/wiki",
+      email: "reader@example.com",
+      apiToken: "token",
+      requestTimeoutMs: 1,
+      fetch: async (url, init) => {
+        calls.push(url)
+
+        return new Promise((_, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("Request aborted", "AbortError")), { once: true })
+        })
+      },
+    })
+
+    let error: unknown
+    try {
+      await client.resolveSpaces(["ENG"])
+    } catch (caught) {
+      error = caught
+    }
+
+    expect(error).toBeInstanceOf(ConfluenceClientError)
+    expect(error instanceof Error ? error.message : "").toContain("Confluence request timed out after 1ms")
+    expect(calls[0]).toBe("https://example.atlassian.net/wiki/api/v2/spaces?keys=ENG&limit=250")
   })
 })
 

@@ -56,11 +56,13 @@ describe("sync service", () => {
   test("syncs Confluence spaces, pages, children, and links into the local index", async () => {
     const setup = await createSyncTestSetup()
     const calls: string[] = []
+    const progress: string[] = []
 
     try {
       const report = await syncConfluence({
         env: setup.env,
         now: fixedClock(),
+        onProgress: (event) => progress.push(`${event.type}:${event.message}`),
         fetch: jsonFetch(calls, {
           "/wiki/api/v2/spaces?keys=ENG&limit=250": {
             results: [{ id: "10", key: "ENG", name: "Engineering", homepageId: "100" }],
@@ -86,6 +88,13 @@ describe("sync service", () => {
         }),
       })
 
+      expect(progress).toContain("resolving-spaces:Resolving spaces: ENG.")
+      expect(progress).toContain("fetching-space-pages:Fetching pages for ENG.")
+      expect(progress).toContain("fetched-space-pages:Fetched 2 pages for ENG.")
+      expect(progress).toContain("fetching-page-children:Fetching children for 100: Engineering Home.")
+      expect(progress).toContain("fetching-page-body:Fetching body for 101: Project Architecture.")
+      expect(progress).toContain("writing-space:Writing 3 pages, 2 links, and 2 body artifacts for ENG.")
+      expect(progress.at(-1)).toBe("completed:Sync completed.")
       expect(report).toMatchObject({
         complete: true,
         spacesRequested: 1,
@@ -111,6 +120,43 @@ describe("sync service", () => {
         expect(body?.sidecar.nodes["lc_101_0001"]?.roundTrip).toBe("native")
         expect(Object.values(body?.sidecar.nodes ?? {}).some((node) => node.roundTrip === "opaque")).toBe(true)
         expect(body?.renderedMarkdown).toContain("<!-- confluence-opaque")
+      } finally {
+        repository.close()
+      }
+    } finally {
+      await setup.cleanup()
+    }
+  })
+
+  test("can sync an explicit subset of configured spaces", async () => {
+    const setup = await createSyncTestSetup(["ENG", "OPS"])
+    const calls: string[] = []
+
+    try {
+      const report = await syncConfluence({
+        env: setup.env,
+        now: fixedClock(),
+        spaceKeys: ["OPS"],
+        fetch: jsonFetch(calls, {
+          "/wiki/api/v2/spaces?keys=OPS&limit=250": {
+            results: [{ id: "20", key: "OPS", name: "Operations", homepageId: "200" }],
+          },
+          "/wiki/api/v2/pages?space-id=20&limit=100&body-format=storage": {
+            results: [pagePayload("200", "Operations Home", null, "<p>Operations content.</p>")],
+            _links: {},
+          },
+          "/wiki/api/v2/pages/200/direct-children?limit=250": { results: [], _links: {} },
+        }),
+      })
+
+      expect(calls[0]).toBe("https://example.atlassian.net/wiki/api/v2/spaces?keys=OPS&limit=250")
+      expect(report.spacesRequested).toBe(1)
+      expect(report.spacesSynced).toBe(1)
+
+      const repository = openIndexRepository({ path: setup.dbPath })
+      try {
+        expect(repository.getSpace("ENG")).toBeNull()
+        expect(repository.getSpace("OPS")?.pageCount).toBe(1)
       } finally {
         repository.close()
       }
@@ -178,13 +224,13 @@ describe("sync service", () => {
   })
 })
 
-async function createSyncTestSetup() {
+async function createSyncTestSetup(spaceKeys = ["ENG"]) {
   const dir = await mkdtemp(join(tmpdir(), "lazyconfluence-sync-"))
   const configHome = join(dir, "config")
   const dbPath = join(dir, "index.sqlite3")
   const env = { LAZYCONFLUENCE_CONFIG_HOME: configHome, LAZYCONFLUENCE_DB_PATH: dbPath } as NodeJS.ProcessEnv
 
-  await saveLocalAuth(createLocalConfig({ siteUrl: "https://example.atlassian.net", email: "reader@example.com", spaceKeys: ["ENG"] }), "token", env)
+  await saveLocalAuth(createLocalConfig({ siteUrl: "https://example.atlassian.net", email: "reader@example.com", spaceKeys }), "token", env)
 
   return {
     configHome,

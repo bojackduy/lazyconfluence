@@ -3,9 +3,10 @@ export interface ConfluenceClientOptions {
   email: string
   apiToken: string
   fetch?: FetchLike
+  requestTimeoutMs?: number
 }
 
-export type FetchLike = (url: string, init?: { headers?: Record<string, string> }) => Promise<JsonResponseLike>
+export type FetchLike = (url: string, init?: { headers?: Record<string, string>; signal?: AbortSignal }) => Promise<JsonResponseLike>
 
 export interface JsonResponseLike {
   ok: boolean
@@ -57,11 +58,13 @@ export class ConfluenceClient {
   readonly baseUrl: string
   private readonly headers: Record<string, string>
   private readonly fetchJson: FetchLike
+  private readonly requestTimeoutMs: number
 
   constructor(options: ConfluenceClientOptions) {
     this.baseUrl = normalizeConfluenceBaseUrl(options.siteUrl)
     this.headers = buildConfluenceAuthHeaders(options.email, options.apiToken)
     this.fetchJson = options.fetch ?? fetch
+    this.requestTimeoutMs = options.requestTimeoutMs ?? 30_000
   }
 
   async resolveSpaces(spaceKeys: string[]) {
@@ -115,7 +118,20 @@ export class ConfluenceClient {
 
   private async requestJson(pathOrUrl: string, params: QueryParams = {}) {
     const url = confluenceApiUrl(this.baseUrl, pathOrUrl, params)
-    const response = await this.fetchJson(url, { headers: this.headers })
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs)
+
+    let response: JsonResponseLike
+    try {
+      response = await this.fetchJson(url, { headers: this.headers, signal: controller.signal })
+    } catch (error) {
+      if (controller.signal.aborted || isAbortError(error)) {
+        throw new ConfluenceClientError(`Confluence request timed out after ${this.requestTimeoutMs}ms for ${url}`)
+      }
+      throw error
+    } finally {
+      clearTimeout(timeout)
+    }
 
     if (!response.ok) throw new ConfluenceClientError(`Confluence returned HTTP ${response.status} ${response.statusText} for ${url}`)
 
@@ -214,6 +230,10 @@ function pageFromPayload(value: unknown): ConfluencePage {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? value as Record<string, unknown> : {}
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === "AbortError"
 }
 
 function dedupe(values: string[]) {

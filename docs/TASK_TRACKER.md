@@ -38,6 +38,8 @@ Status values: `Not started`, `In progress`, `Blocked`, `Partial`, `Done`.
 - Local index and search are done for this slice: local SQLite schema, repository upserts, relationship queries, URL matching, and page search are implemented and tested.
 - Confluence API mapping is done for the read-only slice: URL normalization, auth headers, mocked paginated fetches, direct children, canonical document projection, storage HTML mapping, sidecar preservation, and local model mapping are implemented and tested.
 - Explicit sync service is done for the first local-first slice: `sync` loads local auth, fetches configured spaces/pages/children, maps Confluence storage into local projections, writes spaces/pages/links/body artifacts into SQLite, reports partial failures, and does not prune local pages after incomplete scans.
+- CLI local DB integration is done for `doctor`, `search`, and scoped `sync` flags. These commands read local SQLite except for explicit `sync`.
+- Sync observability is done for the first remote slice: Confluence requests time out by default, service-level progress events cover remote wait points, and CLI `sync` prints progress unless `--quiet` is set.
 - Keymap and command registry are not started.
 - Quality and integration are not started.
 
@@ -73,6 +75,8 @@ YYYY-MM-DD  ID  Result  Verification  Follow-up
 2026-07-21  04  Read-only Confluence client, canonical document mapping, storage HTML projection, link extraction, and opaque macro sidecar preservation implemented.  bun run typecheck; bun test (38 pass, 0 fail).  Next: explicit sync service should connect mocked Confluence client/mapper to the local repository.
 2026-07-21  sync  Explicit sync service implemented and CLI `sync` now runs it.  bun run typecheck; bun test (42 pass, 0 fail).  Next: CLI `search`/doctor local DB integration or TUI repository adapter; keep TUI mock-backed until integration task.
 2026-07-21  body-artifacts  Local schema v2 and repository/sync persistence for canonical body artifacts implemented.  bun run typecheck; bun test (43 pass, 0 fail).  Next: CLI local DB search/doctor or TUI repository adapter.
+2026-07-21  cli-local  CLI `doctor` reports local DB health, CLI `search` queries SQLite, and `sync --space/--spaces` scopes explicit sync.  bun run typecheck; bun test (47 pass, 0 fail).  Next: TUI repository adapter or command/keymap registry.
+2026-07-21  sync-progress  Confluence request timeout, sync progress events, default CLI sync progress output, `sync --quiet`, and current init handoff message implemented.  bun run typecheck; bun test (49 pass, 0 fail).  Next: TUI repository adapter or command/keymap registry.
 ```
 
 ## Contract Changes
@@ -85,4 +89,6 @@ YYYY-MM-DD  ID  Contract changed  Impacted tasks
 2026-07-21  04  Added canonical document model, mapping sidecar, Confluence client API, and mapper output that derives IndexedPage/PageLink projections from Confluence storage.  Impacts sync, future editable Markdown, and TUI repository integration.
 2026-07-21  sync  Added syncConfluence service report contract and made CLI `sync` the explicit Confluence fetch/write path.  Impacts CLI integration, local-first smoke tests, and future TUI repository integration.
 2026-07-21  body-artifacts  Migrated local schema to v2 with page_bodies and added PageBodyArtifact repository contract storing raw source, canonical JSON, sidecar JSON, editable Markdown seed, and rendered Markdown.  Impacts future editable Markdown and Confluence write-back.
+2026-07-21  cli-local  Added repository stats contract for local health checks and CLI flags for local search/sync scoping.  Impacts help/command registry and future TUI command wiring.
+2026-07-21  sync-progress  Added `SyncProgressEvent`, `SyncConfluenceOptions.onProgress`, CLI `sync --quiet`, and optional `ConfluenceClientOptions.requestTimeoutMs`; `FetchLike` now accepts an AbortSignal.  Impacts future TUI sync status wiring and client tests.
 ```

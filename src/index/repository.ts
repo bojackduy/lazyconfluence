@@ -59,6 +59,14 @@ export interface PageBodyArtifact {
   updatedAt: string
 }
 
+export interface IndexRepositoryStats {
+  schemaVersion: number
+  spaceCount: number
+  pageCount: number
+  linkCount: number
+  bodyArtifactCount: number
+}
+
 export class IndexRepository {
   constructor(
     private readonly database: Database,
@@ -272,6 +280,16 @@ export class IndexRepository {
     return row ? pageFromRow(row) : null
   }
 
+  getStats(): IndexRepositoryStats {
+    return {
+      schemaVersion: this.readUserVersion(),
+      spaceCount: this.countRows("spaces"),
+      pageCount: this.countRows("pages"),
+      linkCount: this.countRows("links"),
+      bodyArtifactCount: this.countRows("page_bodies"),
+    }
+  }
+
   getPageBody(pageId: string): PageBodyArtifact | null {
     const row = this.database.query("SELECT * FROM page_bodies WHERE page_id = ?").get(pageId) as PageBodyRow | null
 
@@ -421,6 +439,18 @@ export class IndexRepository {
       this.database.run("ROLLBACK")
       throw error
     }
+  }
+
+  private readUserVersion() {
+    const row = this.database.query("PRAGMA user_version").get() as { user_version: number } | null
+
+    return Number(row?.user_version ?? 0)
+  }
+
+  private countRows(table: "spaces" | "pages" | "links" | "page_bodies") {
+    const row = this.database.query(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number } | null
+
+    return Number(row?.count ?? 0)
   }
 }
 

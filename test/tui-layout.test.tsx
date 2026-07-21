@@ -31,9 +31,12 @@ describe("main TUI layout", () => {
       expect(output).toContain("h/l fold")
       expect(output).toContain("s spaces")
       expect(output).toContain("d/u scroll doc")
-      expect(output).toContain("▾ Local Engineering Home")
+      expect(output).toContain("▾ ▣ Local Engineering Home")
+      expect(output).toContain("• Real Synced Architecture")
       expect(output).toContain("Real Synced Architecture")
       expect(output).toContain("Local synced content from SQLite")
+      expect(output).toContain("code: typescript")
+      expect(output).toContain("const answer = 42")
       expect(output).not.toContain("Start here for engineering norms")
     } finally {
       await setup.cleanup()
@@ -132,7 +135,7 @@ const home: IndexedPage = {
   path: ["Local Engineering Home"],
   owner: "Platform Team",
   updatedAt: "2026-07-21T09:00:00Z",
-  contentMarkdown: "# Local Engineering Home\n\nLocal synced content from SQLite.",
+  contentMarkdown: "# Local Engineering Home\n\nLocal synced content from SQLite with `inline metadata`.\n\n```ts\nconst answer = 42\n```\n\n| Area | Owner |\n| --- | --- |\n| Sync | Platform |",
   snippet: "Local synced content from SQLite.",
 }
 

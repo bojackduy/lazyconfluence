@@ -33,7 +33,7 @@ Status values: `Not started`, `In progress`, `Blocked`, `Partial`, `Done`.
 
 - Foundation shell is done: Bun, TypeScript, CLI entrypoint, TUI launch, `init`, and local `doctor` exist.
 - Domain and demo data are done for the mock-backed product slice.
-- Reader UI and document detail are partial: the TUI renders the main reader, navigator, outline, related panel, scroll behavior, and now reads pages from the local SQLite index; browser-open hooks and broader polish remain.
+- Reader UI and document detail are partial: the TUI renders the main reader, navigator, outline, related panel, scroll behavior, safe document-kind symbols, richer markdown/code/table styling, and now reads pages from the local SQLite index; browser-open hooks and broader polish remain.
 - Search, spaces, and link overlays are partial: active-space page search and space switcher read the local SQLite index; document find, all-space search UI, command palette, help, and link navigation overlays remain.
 - Local index and search are done for this slice: local SQLite schema, repository upserts, relationship queries, URL matching, and page search are implemented and tested.
 - Confluence API mapping is done for the read-only slice: URL normalization, auth headers, mocked paginated fetches, direct children, canonical document projection, storage HTML mapping, sidecar preservation, and local model mapping are implemented and tested.
@@ -80,6 +80,7 @@ YYYY-MM-DD  ID  Result  Verification  Follow-up
 2026-07-21  sync-progress  Confluence request timeout, sync progress events, default CLI sync progress output, `sync --quiet`, and current init handoff message implemented.  bun run typecheck; bun test (49 pass, 0 fail).  Next: TUI repository adapter or command/keymap registry.
 2026-07-21  tui-local  TUI default data path now reads spaces, page tree, selected document, links, and search from the local SQLite index with an empty-index smoke screen.  bun run typecheck; bun test (49 pass, 0 fail).  Next: command/keymap registry, browser-open hook, or remaining overlays.
 2026-07-21  tui-date-fix  Fixed TUI crash on pages with empty/invalid `updatedAt`; mapper now falls back to sync time for future undated Confluence pages.  bun run typecheck; bun test (51 pass, 0 fail).  Next: smoke test `bun run start` against synced data.
+2026-07-21  tui-reader-polish  Added safe-width navigator document symbols plus richer markdown, fenced code, and table styling for the reader.  bun run typecheck; bun test (51 pass, 0 fail).  Next: command/keymap registry, browser-open hook, or remaining overlays.
 ```
 
 ## Contract Changes

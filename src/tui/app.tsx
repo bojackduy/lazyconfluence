@@ -1,5 +1,14 @@
 import { render, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
-import type { ScrollBoxRenderable } from "@opentui/core"
+import {
+  BoxRenderable,
+  CodeRenderable,
+  TextAttributes,
+  TextRenderable,
+  infoStringToFiletype,
+  type MarkdownOptions,
+  type RenderContext,
+  type ScrollBoxRenderable,
+} from "@opentui/core"
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import type { IndexedPage, ReaderPage, SearchResult, SpaceSearchResult } from "../model"
 import { loadCredentialStatus, type CredentialStatus } from "../config"
@@ -372,15 +381,52 @@ function NavigatorRow(props: { row: TreeRow; selected: boolean }) {
   }
 
   const prefix = () => `${"  ".repeat(props.row.depth)}${indicator()} `
+  const documentKind = () => navigatorDocumentKind(props.row)
+  const symbol = () => navigatorDocumentKindSymbols[documentKind()]
+  const symbolColor = () => navigatorDocumentKindColors[documentKind()]
 
   return (
-    <box height={1} width="100%" backgroundColor={props.selected ? theme.accentSoft : undefined} paddingLeft={0} paddingRight={1}>
-      <text height={1} fg={props.selected ? theme.text : theme.muted}>{prefix()}{props.row.page.title}</text>
+    <box height={1} width="100%" backgroundColor={props.selected ? theme.accentSoft : undefined} paddingLeft={0} paddingRight={1} flexDirection="row">
+      <text height={1} width={props.row.depth * 2 + 2} fg={theme.subtle}>{prefix()}</text>
+      <text height={1} width={2} fg={props.selected ? theme.text : symbolColor()}>{symbol()}</text>
+      <text height={1} flexGrow={1} minWidth={0} fg={props.selected ? theme.text : theme.muted}>{props.row.page.title}</text>
     </box>
   )
 }
 
+type NavigatorDocumentKind = "folder" | "page" | "live" | "canvas" | "unknown"
+
+const navigatorDocumentKindSymbols: Record<NavigatorDocumentKind, string> = {
+  folder: "▣",
+  page: "•",
+  live: "✦",
+  canvas: "□",
+  unknown: "?",
+}
+
+const navigatorDocumentKindColors: Record<NavigatorDocumentKind, string> = {
+  folder: theme.accent,
+  page: theme.muted,
+  live: theme.good,
+  canvas: "#c4b5fd",
+  unknown: theme.danger,
+}
+
+function navigatorDocumentKind(row: TreeRow): NavigatorDocumentKind {
+  if (!row.page.title.trim()) return "unknown"
+  if (row.hasChildren) return "folder"
+
+  const searchText = `${row.page.title} ${row.page.url} ${row.page.snippet}`.toLowerCase()
+
+  if (searchText.includes("whiteboard") || searchText.includes("canvas")) return "canvas"
+  if (searchText.includes("live doc") || searchText.includes("live-doc") || searchText.includes("live_document")) return "live"
+  return "page"
+}
+
 function Reader(props: { page: ReaderPage; focused: boolean; narrow: boolean; setDocumentScrollbox: (scrollbox: ScrollBoxRenderable) => void }) {
+  const renderer = useRenderer()
+  const renderCodeBlock = createReadableCodeBlockRenderer(renderer)
+
   return (
     <box
       flexGrow={1}
@@ -404,8 +450,13 @@ function Reader(props: { page: ReaderPage; focused: boolean; narrow: boolean; se
             <markdown
               content={props.page.contentMarkdown}
               syntaxStyle={markdownStyle}
+              fg={theme.text}
+              bg={theme.panelAlt}
               width="100%"
-              tableOptions={{ style: "grid", widthMode: "full", wrapMode: "word", borderStyle: "rounded", borderColor: theme.border }}
+              conceal
+              concealCode={false}
+              renderNode={renderCodeBlock}
+              tableOptions={{ style: "grid", widthMode: "full", columnFitter: "balanced", wrapMode: "word", cellPaddingX: 1, borderStyle: "rounded", borderColor: theme.codeBorder, selectable: true }}
             />
           </scrollbox>
         </box>
@@ -413,6 +464,46 @@ function Reader(props: { page: ReaderPage; focused: boolean; narrow: boolean; se
       </box>
     </box>
   )
+}
+
+function createReadableCodeBlockRenderer(renderer: RenderContext): NonNullable<MarkdownOptions["renderNode"]> {
+  return (token, context) => {
+    if (token.type !== "code") return undefined
+
+    const language = readableCodeLanguage(token.lang)
+    const filetype = infoStringToFiletype(token.lang ?? "")
+    const card = new BoxRenderable(renderer, {
+      width: "100%",
+      border: true,
+      borderStyle: "rounded",
+      borderColor: theme.codeBorder,
+      backgroundColor: theme.codeBg,
+      paddingX: 1,
+      flexDirection: "column",
+      marginBottom: 1,
+    })
+
+    card.add(new TextRenderable(renderer, { height: 1, width: "100%", content: language, fg: theme.subtle, attributes: TextAttributes.DIM }))
+    card.add(new CodeRenderable(renderer, {
+      content: token.text || " ",
+      filetype,
+      syntaxStyle: context.syntaxStyle,
+      fg: theme.codeText,
+      bg: theme.codeBg,
+      conceal: context.concealCode,
+      drawUnstyledText: true,
+      treeSitterClient: context.treeSitterClient,
+      width: "100%",
+      wrapMode: "word",
+    }))
+
+    return card
+  }
+}
+
+function readableCodeLanguage(language: string | undefined) {
+  const normalized = infoStringToFiletype(language ?? "")
+  return normalized ? `code: ${normalized}` : "code"
 }
 
 function SideRail(props: { page: ReaderPage; narrow: boolean }) {

@@ -1,10 +1,26 @@
 {
-  "name": "lazyconfluence",
+  "name": "@bojackduy/lazyconfluence",
   "version": "0.1.0",
-  "private": true,
+  "description": "Terminal-first Confluence document browser.",
+  "private": false,
   "type": "module",
+  "license": "MIT",
+  "bin": {
+    "lazyconfluence": "./dist/main.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  },
   "scripts": {
     "start": "bun run src/main.tsx",
+    "build": "bun build src/main.tsx --target=bun --packages=external --outdir=dist",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "lint": "bun run typecheck"

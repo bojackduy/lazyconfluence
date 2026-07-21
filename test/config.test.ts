@@ -68,7 +68,7 @@ describe("local auth config", () => {
       const status = await loadCredentialStatus(env)
 
       expect(status.kind).toBe("missing-config")
-      expect(status.kind !== "ready" ? status.help.join("\n") : "").toContain("bun run start init")
+      expect(status.kind !== "ready" ? status.help.join("\n") : "").toContain("lazyconfluence init")
     } finally {
       await rm(configHome, { recursive: true, force: true })
     }

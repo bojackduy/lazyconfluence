@@ -1,9 +1,9 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
-import { App } from "../src/tui/app"
+import { App, ReviewDraftOverlay } from "../src/tui/app"
 import { createLocalConfig } from "../src/config"
 import type { CredentialStatus } from "../src/config"
 import { openIndexRepository } from "../src/index/repository"
@@ -37,6 +37,9 @@ describe("main TUI layout", () => {
       expect(output).toContain("▾ ▣ Local Engineering Home")
       expect(output).toContain("• Real Synced Architecture")
       expect(output).toContain("Real Synced Architecture")
+      expect(output).toContain("ID: local-home")
+      expect(output).toContain("Space: ENG")
+      expect(output).toContain("Parent: root")
       expect(output).toContain("Local synced content from SQLite")
       expect(output).toContain("code: typescript")
       expect(output).toContain("const answer = 42")
@@ -113,33 +116,17 @@ describe("main TUI layout", () => {
     }
   })
 
-  test("TUI edit source opens an external editor and surfaces local draft state", async () => {
+  test("TUI surfaces local draft state", async () => {
     const setup = await createTuiTestSetup({ bodyArtifacts: [homeBody] })
     const repository = openIndexRepository({ path: setup.dbPath })
-    let editorCalled = false
-    let beforeEditorCalled = false
-    let afterEditorCalled = false
-    const dataSource = createRepositoryTuiDataSource(repository, {
-      externalEditor: async (filePath) => {
-        editorCalled = true
-        await writeFile(filePath, "# Local Engineering Home\n\nEdited from TUI.\n", "utf8")
-      },
-    })
+    const dataSource = createRepositoryTuiDataSource(repository)
 
     try {
-      const result = await dataSource.editPageDraft("local-home", {
-        beforeEditor: () => { beforeEditorCalled = true },
-        afterEditor: () => { afterEditorCalled = true },
-      })
-
-      expect(result.status).toBe("saved")
-      expect(editorCalled).toBe(true)
-      expect(beforeEditorCalled).toBe(true)
-      expect(afterEditorCalled).toBe(true)
+      dataSource.savePageDraft("local-home", "# Local Engineering Home\n\nEdited from TUI.\n")
       expect(repository.getPageDraft("local-home")).toMatchObject({ status: "draft", draftMarkdown: "# Local Engineering Home\n\nEdited from TUI.\n" })
 
       const output = await withProcessEnv(setup.env, async () => {
-        const rendered = await testRender(() => <App credentialStatus={readyStatus} dataSource={dataSource} externalEditorHooks={{ beforeEditor: () => {}, afterEditor: () => {} }} />, { width: 120, height: 36 })
+        const rendered = await testRender(() => <App credentialStatus={readyStatus} dataSource={dataSource} />, { width: 120, height: 36 })
 
         try {
           await rendered.renderOnce()
@@ -154,6 +141,103 @@ describe("main TUI layout", () => {
     } finally {
       dataSource.close?.()
       await setup.cleanup()
+    }
+  })
+
+  test("TUI draft source saves, stages, diffs, unstages, and discards local drafts", async () => {
+    const setup = await createTuiTestSetup({ bodyArtifacts: [homeBody] })
+    const repository = openIndexRepository({ path: setup.dbPath })
+    const dataSource = createRepositoryTuiDataSource(repository)
+
+    try {
+      const markdown = "# Local Engineering Home\n\nEdited from in-app editor."
+
+      expect(dataSource.savePageDraft("local-home", markdown)).toMatchObject({ status: "saved", pageTitle: "Local Engineering Home" })
+      expect(repository.getPageDraft("local-home")).toMatchObject({ status: "draft", draftMarkdown: markdown })
+
+      expect(dataSource.stagePageDraft("local-home", markdown)).toBe("staged")
+      expect(repository.getPageDraft("local-home")?.status).toBe("staged")
+
+      const diff = dataSource.formatPageDraftDiff("local-home", markdown)
+      expect(diff).toContain("+++ draft")
+      expect(diff).toContain("+Edited from in-app editor.")
+
+      expect(dataSource.unstagePageDraft("local-home")).toBe("unstaged")
+      expect(repository.getPageDraft("local-home")?.status).toBe("draft")
+
+      expect(dataSource.discardPageDraft("local-home")).toBe("discarded")
+      expect(repository.getPageDraft("local-home")).toBeNull()
+
+      expect(dataSource.savePageDraft("local-home", homeBody.editableMarkdown)).toMatchObject({ status: "unchanged" })
+      expect(repository.getPageDraft("local-home")).toBeNull()
+    } finally {
+      dataSource.close?.()
+      await setup.cleanup()
+    }
+  })
+
+  test("reader previews saved draft content when a draft exists", async () => {
+    const setup = await createTuiTestSetup({ bodyArtifacts: [homeBody] })
+    const repository = openIndexRepository({ path: setup.dbPath })
+    const dataSource = createRepositoryTuiDataSource(repository)
+
+    try {
+      dataSource.savePageDraft("local-home", "# Local Engineering Home\n\nDraft preview from local editor.")
+
+      const output = await withProcessEnv(setup.env, async () => {
+        const rendered = await testRender(() => <App credentialStatus={readyStatus} dataSource={dataSource} />, { width: 120, height: 36 })
+
+        try {
+          await rendered.renderOnce()
+          return rendered.captureCharFrame()
+        } finally {
+          rendered.renderer.destroy()
+        }
+      })
+
+      expect(output).toContain("Draft preview from local editor.")
+      expect(output).not.toContain("Local synced content from SQLite")
+    } finally {
+      dataSource.close?.()
+      await setup.cleanup()
+    }
+  })
+
+  test("renders draft review controls and apply feedback", async () => {
+    const rendered = await testRender(() => (
+      <ReviewDraftOverlay
+        visible
+        pageTitle="Local Engineering Home"
+        pageId="local-home"
+        draftStatus="staged"
+        dirty={false}
+        message="Apply blocked: Cannot safely preserve opaque Confluence content."
+        applying={false}
+        diffMarkdown={["--- synced", "+++ draft", "@@", "-Old body", "+New body"].join("\n")}
+        width={80}
+        height={18}
+        onApply={() => {}}
+        onStage={() => {}}
+        onDiscard={() => {}}
+        onClose={() => {}}
+      />
+    ), { width: 90, height: 24 })
+
+    try {
+      await rendered.renderOnce()
+      const output = rendered.captureCharFrame()
+
+      expect(output).toContain("REVIEW DRAFT")
+      expect(output).toContain("ID: local-home")
+      expect(output).toContain("Draft: staged")
+      expect(output).toContain("Apply blocked: Cannot safely preserve opaque Confluence content.")
+      expect(output).toContain("+++ draft")
+      expect(output).toContain("Apply")
+      expect(output).toContain("Unstage")
+      expect(output).toContain("Discard")
+      expect(output).toContain("Close")
+    } finally {
+      rendered.renderer.destroy()
     }
   })
 })

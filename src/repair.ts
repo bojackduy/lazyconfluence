@@ -35,7 +35,7 @@ export async function repairBodyArtifacts(options: RepairBodyArtifactsOptions = 
   const startedAt = now().toISOString()
   const baseUrl = options.baseUrl ?? (await loadAtlassianAuth(env))?.config.atlassian.siteUrl
 
-  if (!baseUrl) throw new RepairServiceError("No lazyconfluence config found. Run `bun run start init` first.")
+  if (!baseUrl) throw new RepairServiceError("No lazyconfluence config found. Run `lazyconfluence init` first.")
 
   const repository = options.repository ?? openIndexRepository({ env })
   const shouldCloseRepository = !options.repository

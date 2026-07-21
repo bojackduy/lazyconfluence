@@ -4,6 +4,7 @@ import {
   CodeRenderable,
   TextAttributes,
   TextRenderable,
+  type TextareaRenderable,
   destroyTreeSitterClient,
   getTreeSitterClient,
   infoStringToFiletype,
@@ -16,7 +17,8 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount }
 import type { IndexedPage, ReaderPage, SearchResult, SpaceSearchResult } from "../model"
 import { loadCredentialStatus, type CredentialStatus } from "../config"
 import type { PageDraftStatus } from "../index/repository"
-import { createRepositoryTuiDataSource, emptyPageId, emptyReaderPage, emptySpaceSummary, type TuiDataSource } from "./data"
+import type { ApplyPageDraftResult } from "../apply"
+import { createRepositoryTuiDataSource, emptyPageId, emptyReaderPage, emptySpaceSummary, type SaveTuiPageDraftResult, type TuiDataSource } from "./data"
 import { markdownStyle, theme } from "./theme"
 
 type TreeRow = {
@@ -47,7 +49,7 @@ export async function renderTui() {
   })
 }
 
-export function App(props: { credentialStatus?: CredentialStatus; dataSource?: TuiDataSource; externalEditorHooks?: { beforeEditor?: () => void | Promise<void>; afterEditor?: () => void | Promise<void> } } = {}) {
+export function App(props: { credentialStatus?: CredentialStatus; dataSource?: TuiDataSource } = {}) {
   const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
   const dataSource = props.dataSource ?? createRepositoryTuiDataSource()
@@ -65,7 +67,17 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const [spaceSwitcherQuery, setSpaceSwitcherQuery] = createSignal("")
   const [spaceSwitcherSelectedIndex, setSpaceSwitcherSelectedIndex] = createSignal(0)
   const [draftRevision, setDraftRevision] = createSignal(0)
-  const [editing, setEditing] = createSignal(false)
+  const [editorOpen, setEditorOpen] = createSignal(false)
+  const [editorPageId, setEditorPageId] = createSignal<string | null>(null)
+  const [editorPageTitle, setEditorPageTitle] = createSignal("")
+  const [editorInitialMarkdown, setEditorInitialMarkdown] = createSignal("")
+  const [editorOriginalMarkdown, setEditorOriginalMarkdown] = createSignal("")
+  const [editorMarkdown, setEditorMarkdown] = createSignal("")
+  const [editorDiffOpen, setEditorDiffOpen] = createSignal(false)
+  const [editorDiffMarkdown, setEditorDiffMarkdown] = createSignal("")
+  const [editorApplying, setEditorApplying] = createSignal(false)
+  const [editorCloseArmed, setEditorCloseArmed] = createSignal(false)
+  const [editorDiscardArmed, setEditorDiscardArmed] = createSignal(false)
   const [editStatusMessage, setEditStatusMessage] = createSignal("")
   const [treeSitterClient, setTreeSitterClient] = createSignal<TreeSitterClient | undefined>()
   let documentScrollbox: ScrollBoxRenderable | undefined
@@ -77,11 +89,20 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const treeRows = createMemo(() => buildTreeRows(pages(), expandedPageIds()))
   const selectedIndex = createMemo(() => treeRows().findIndex((row) => row.page.pageId === selectedPageId()))
   const selectedRow = createMemo(() => treeRows().find((row) => row.page.pageId === selectedPageId()))
-  const readerPage = createMemo(() => dataSource.getReaderPage(selectedPageId()) ?? emptyReaderPage(space()))
+  const readerPage = createMemo(() => {
+    draftRevision()
+    return dataSource.getReaderPage(selectedPageId()) ?? emptyReaderPage(space())
+  })
   const draftStatus = createMemo(() => {
     draftRevision()
     return dataSource.getPageDraftStatus(selectedPageId())
   })
+  const editorDraftStatus = createMemo(() => {
+    draftRevision()
+    const pageId = editorPageId()
+    return pageId ? dataSource.getPageDraftStatus(pageId) : null
+  })
+  const editorDirty = createMemo(() => editorOpen() && editorMarkdown() !== editorOriginalMarkdown())
   const pageSearchResults = createMemo(() => dataSource.searchPagesInSpace(activeSpaceKey(), pageSearchQuery()))
   const spaceSwitcherResults = createMemo(() => dataSource.searchSpaces(spaceSwitcherQuery()))
   const isNarrow = createMemo(() => dimensions().width < 96)
@@ -213,8 +234,8 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     setFocusPane("document")
   }
 
-  const editSelectedPage = () => {
-    if (editing()) return
+  const openEditorForSelectedPage = () => {
+    if (editorOpen()) return
     const pageId = selectedPageId()
 
     if (pageId === emptyPageId) {
@@ -222,23 +243,156 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
       return
     }
 
-    setEditing(true)
-    setEditStatusMessage("Opening editor...")
+    try {
+      const input = dataSource.getEditableDraftInput(pageId)
+      const markdown = input.draft?.draftMarkdown ?? input.body.editableMarkdown
 
-    void dataSource.editPageDraft(pageId, {
-      beforeEditor: props.externalEditorHooks?.beforeEditor ?? (() => renderer.suspend()),
-      afterEditor: props.externalEditorHooks?.afterEditor ?? (() => {
-        renderer.resume()
-        renderer.requestLive()
-      }),
-    }).then((result) => {
+      setEditorPageId(pageId)
+      setEditorPageTitle(input.page.title)
+      setEditorInitialMarkdown(markdown)
+      setEditorOriginalMarkdown(markdown)
+      setEditorMarkdown(markdown)
+      setEditorDiffMarkdown("")
+      setEditorDiffOpen(false)
+      setEditorCloseArmed(false)
+      setEditorDiscardArmed(false)
+      setEditorOpen(true)
+      setFocusPane("document")
+      setEditStatusMessage(`Editing local draft for ${input.page.title}.`)
+    } catch (error) {
+      setEditStatusMessage(errorMessage(error))
+    }
+  }
+
+  const saveEditorDraft = () => {
+    const pageId = editorPageId()
+    if (!pageId) return
+
+    try {
+      const result = dataSource.savePageDraft(pageId, editorMarkdown())
+
       setDraftRevision((revision) => revision + 1)
-      setEditStatusMessage(result.status === "saved" ? `Draft saved for ${result.page.title}.` : `No draft changes for ${result.page.title}.`)
+      setEditorOriginalMarkdown(editorMarkdown())
+      setEditorCloseArmed(false)
+      setEditorDiscardArmed(false)
+      setEditStatusMessage(editorSaveMessage(result))
+    } catch (error) {
+      setEditStatusMessage(errorMessage(error))
+    }
+  }
+
+  const toggleEditorStage = () => {
+    const pageId = editorPageId()
+    if (!pageId) return
+
+    try {
+      if (editorDraftStatus() === "staged" && !editorDirty()) {
+        const result = dataSource.unstagePageDraft(pageId)
+        setDraftRevision((revision) => revision + 1)
+        setEditStatusMessage(result === "unstaged" ? `Draft unstaged for ${editorPageTitle()}.` : `No staged draft for ${editorPageTitle()}.`)
+        return
+      }
+
+      const result = dataSource.stagePageDraft(pageId, editorMarkdown())
+      setDraftRevision((revision) => revision + 1)
+      setEditorOriginalMarkdown(editorMarkdown())
+      setEditorCloseArmed(false)
+      setEditorDiscardArmed(false)
+      setEditStatusMessage(result === "staged" ? `Draft staged for ${editorPageTitle()}.` : `No draft changes to stage for ${editorPageTitle()}.`)
+    } catch (error) {
+      setEditStatusMessage(errorMessage(error))
+    }
+  }
+
+  const discardEditorDraft = () => {
+    const pageId = editorPageId()
+    if (!pageId) return
+
+    if (editorDirty() && !editorDiscardArmed()) {
+      setEditorDiscardArmed(true)
+      setEditStatusMessage("Unsaved editor changes. Press Ctrl+R again to discard the draft and close.")
+      return
+    }
+
+    try {
+      const result = dataSource.discardPageDraft(pageId)
+      setDraftRevision((revision) => revision + 1)
+      closeEditorImmediately(result === "discarded" ? `Draft discarded for ${editorPageTitle()}.` : `No saved draft for ${editorPageTitle()}.`)
+    } catch (error) {
+      setEditStatusMessage(errorMessage(error))
+    }
+  }
+
+  const closeEditor = () => {
+    if (editorDiffOpen()) {
+      setEditorDiffOpen(false)
+      return
+    }
+
+    if (editorDirty() && !editorCloseArmed()) {
+      setEditorCloseArmed(true)
+      setEditStatusMessage("Unsaved editor buffer. Press Esc again to close without saving, or Ctrl+S to save.")
+      return
+    }
+
+    closeEditorImmediately(`Closed editor for ${editorPageTitle()}.`)
+  }
+
+  const closeEditorImmediately = (message: string) => {
+    setEditorOpen(false)
+    setEditorPageId(null)
+    setEditorPageTitle("")
+    setEditorInitialMarkdown("")
+    setEditorOriginalMarkdown("")
+    setEditorMarkdown("")
+    setEditorDiffMarkdown("")
+    setEditorDiffOpen(false)
+    setEditorApplying(false)
+    setEditorCloseArmed(false)
+    setEditorDiscardArmed(false)
+    setEditStatusMessage(message)
+  }
+
+  const showEditorDiff = () => {
+    const pageId = editorPageId()
+    if (!pageId) return
+
+    try {
+      setEditorDiffMarkdown(dataSource.formatPageDraftDiff(pageId, editorMarkdown()))
+      setEditorDiffOpen(true)
+      setEditStatusMessage(`Showing local diff for ${editorPageTitle()}.`)
+    } catch (error) {
+      setEditStatusMessage(errorMessage(error))
+    }
+  }
+
+  const applyEditorDraft = () => {
+    const pageId = editorPageId()
+    if (!pageId || editorApplying()) return
+
+    setEditorDiffOpen(true)
+    setEditorApplying(true)
+    setEditStatusMessage(`Applying ${editorPageTitle()} to Confluence...`)
+
+    void dataSource.applyPageDraft(pageId, editorMarkdown()).then((result) => {
+      setDraftRevision((revision) => revision + 1)
+      if (result.status === "applied") {
+        closeEditorImmediately(result.message)
+        return
+      }
+
+      setEditStatusMessage(applyResultMessage(result))
     }).catch((error) => {
       setEditStatusMessage(errorMessage(error))
     }).finally(() => {
-      setEditing(false)
+      setEditorApplying(false)
     })
+  }
+
+  const setEditorMarkdownFromTextarea = (markdown: string) => {
+    setEditorMarkdown(markdown)
+    setEditorCloseArmed(false)
+    setEditorDiscardArmed(false)
   }
 
   const expandSelectedPage = () => {
@@ -270,6 +424,18 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   useKeyboard((key) => {
     if (key.ctrl && key.name === "c") {
       renderer.destroy()
+      return
+    }
+
+    if (editorOpen()) {
+      if (editorDiffOpen() && isPlainKey(key, "a")) applyEditorDraft()
+      else if (editorDiffOpen() && isPlainKey(key, "s")) toggleEditorStage()
+      else if (editorDiffOpen() && isPlainKey(key, "d")) discardEditorDraft()
+      else if (key.name === "escape") closeEditor()
+      else if (key.ctrl && key.name === "s") saveEditorDraft()
+      else if (key.ctrl && key.name === "t") toggleEditorStage()
+      else if (key.ctrl && key.name === "o") showEditorDiff()
+      else if (key.ctrl && key.name === "r") discardEditorDraft()
       return
     }
 
@@ -313,7 +479,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     }
 
     if (isPlainKey(key, "e")) {
-      editSelectedPage()
+      openEditorForSelectedPage()
       return
     }
 
@@ -359,7 +525,29 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
         <Navigator rows={treeRows()} selectedPageId={selectedPageId()} focused={focusPane() === "navigator"} />
         <Reader page={readerPage()} focused={focusPane() === "document"} narrow={isNarrow()} treeSitterClient={treeSitterClient()} setDocumentScrollbox={(scrollbox) => { documentScrollbox = scrollbox }} />
       </box>
-      <StatusBar focusPane={focusPane()} editing={editing()} editMessage={editStatusMessage()} />
+      <StatusBar focusPane={focusPane()} editorOpen={editorOpen()} editorDirty={editorDirty()} editMessage={editStatusMessage()} />
+      <Show when={editorOpen()} fallback={<box height={0} />}>
+        <EditorOverlay
+          pageTitle={editorPageTitle()}
+          pageId={editorPageId() ?? ""}
+          initialMarkdown={editorInitialMarkdown()}
+          dirty={editorDirty()}
+          draftStatus={editorDraftStatus()}
+          message={editStatusMessage()}
+          diffOpen={editorDiffOpen()}
+          diffMarkdown={editorDiffMarkdown()}
+          applying={editorApplying()}
+          left={dimensions().width < 72 ? 1 : 4}
+          top={2}
+          width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 2 : 8))}
+          height={Math.max(10, dimensions().height - 4)}
+          onMarkdownChange={setEditorMarkdownFromTextarea}
+          onApply={applyEditorDraft}
+          onStage={toggleEditorStage}
+          onDiscard={discardEditorDraft}
+          onCloseReview={() => setEditorDiffOpen(false)}
+        />
+      </Show>
       <PageSearchOverlay
         visible={pageSearchOpen()}
         query={pageSearchQuery()}
@@ -400,12 +588,13 @@ function Header(props: { page: ReaderPage; spaceName: string; syncState: string;
   const statusText = () => props.draftStatus ? `${props.draftStatus} · ${props.syncState}` : props.syncState
 
   return (
-    <box height={5} border borderStyle="single" borderColor={theme.border} paddingX={1} flexDirection="column">
+    <box height={6} border borderStyle="single" borderColor={theme.border} paddingX={1} flexDirection="column">
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
         <text height={1} fg={theme.text} attributes={1}>{props.page.title}</text>
         <text height={1} fg={statusColor()}>{statusText()}</text>
       </box>
       <text height={1} fg={theme.muted}>{props.spaceName} / {props.page.path.join(" / ")}</text>
+      <text height={1} fg={theme.subtle}>ID: {props.page.pageId}  Space: {props.page.spaceKey}  Parent: {props.page.parentId ?? "root"}</text>
       <text height={1} fg={theme.subtle}>Owner: {props.page.owner}  Updated: {formatDate(props.page.updatedAt)}</text>
     </box>
   )
@@ -592,17 +781,179 @@ function InfoPanel(props: { title: string; items: string[]; empty: string }) {
   )
 }
 
-function StatusBar(props: { focusPane: string; editing: boolean; editMessage: string }) {
+function StatusBar(props: { focusPane: string; editorOpen: boolean; editorDirty: boolean; editMessage: string }) {
   const hint = () => {
+    if (props.editorOpen) return "Ctrl+S save | Ctrl+T stage | Ctrl+O review | Ctrl+R discard | Esc close"
     if (props.focusPane === "document") return "/ page search | s spaces | e edit | j/k scroll line | d/u scroll doc | h navigator | q quit"
     return "/ page search | s spaces | e edit | j/k move | h/l fold tree | d/u scroll doc | q quit"
   }
-  const status = () => props.editing ? "editing: external editor" : props.editMessage ? props.editMessage : `focus: ${props.focusPane}`
+  const status = () => {
+    if (props.editorOpen) return props.editMessage || `editing local draft: ${props.editorDirty ? "dirty" : "saved"}`
+    return props.editMessage ? props.editMessage : `focus: ${props.focusPane}`
+  }
 
   return (
     <box height={1} backgroundColor={theme.accentSoft} paddingX={1} flexDirection="row" justifyContent="space-between">
       <text height={1} fg={theme.text}>{status()}</text>
       <text height={1} fg={theme.muted}>{hint()}</text>
+    </box>
+  )
+}
+
+function EditorOverlay(props: {
+  pageTitle: string
+  pageId: string
+  initialMarkdown: string
+  dirty: boolean
+  draftStatus: PageDraftStatus | null
+  message: string
+  diffOpen: boolean
+  diffMarkdown: string
+  applying: boolean
+  left: number
+  top: number
+  width: number
+  height: number
+  onMarkdownChange: (markdown: string) => void
+  onApply: () => void
+  onStage: () => void
+  onDiscard: () => void
+  onCloseReview: () => void
+}) {
+  let textarea: TextareaRenderable | undefined
+
+  const statusText = () => {
+    const persisted = props.draftStatus ?? "synced"
+    return `${props.dirty ? "unsaved" : "clean"} · ${persisted}`
+  }
+
+  const updateMarkdown = (value?: unknown) => {
+    props.onMarkdownChange(typeof value === "string" ? value : textarea?.plainText ?? "")
+  }
+
+  return (
+    <box
+      position="absolute"
+      left={props.left}
+      top={props.top}
+      width={props.width}
+      height={props.height}
+      border
+      borderStyle="rounded"
+      borderColor={theme.borderActive}
+      backgroundColor={theme.bg}
+      paddingX={2}
+      paddingY={1}
+      flexDirection="column"
+      zIndex={40}
+    >
+      <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
+        <text height={1} fg={theme.accent} attributes={1}>LOCAL DRAFT EDITOR</text>
+        <text height={1} fg={props.dirty ? theme.warn : theme.good}>{statusText()}</text>
+      </box>
+      <text height={1} fg={theme.text}>{props.pageTitle}</text>
+      <text height={1} fg={theme.subtle}>ID: {props.pageId}  {props.message || "Edit Markdown locally. Nothing is sent to Confluence until Apply is approved."}</text>
+      <box height={1} />
+      <textarea
+        ref={(node) => { textarea = node }}
+        initialValue={props.initialMarkdown}
+        focused={!props.diffOpen}
+        flexGrow={1}
+        minHeight={0}
+        width="100%"
+        wrapMode="word"
+        backgroundColor={theme.codeBg}
+        focusedBackgroundColor={theme.codeBg}
+        textColor={theme.text}
+        focusedTextColor={theme.text}
+        cursorColor={theme.accent}
+        selectionBg={theme.accentSoft}
+        placeholder="No editable Markdown for this page."
+        onContentChange={updateMarkdown}
+      />
+      <box height={1} />
+      <text height={1} fg={theme.muted}>Ctrl+S save  Ctrl+T stage/unstage  Ctrl+O review/apply  Ctrl+R discard  Esc close</text>
+      <ReviewDraftOverlay
+        visible={props.diffOpen}
+        pageTitle={props.pageTitle}
+        pageId={props.pageId}
+        draftStatus={props.draftStatus}
+        dirty={props.dirty}
+        message={props.message}
+        applying={props.applying}
+        diffMarkdown={props.diffMarkdown}
+        width={Math.max(24, props.width - 6)}
+        height={Math.max(8, props.height - 7)}
+        onApply={props.onApply}
+        onStage={props.onStage}
+        onDiscard={props.onDiscard}
+        onClose={props.onCloseReview}
+      />
+    </box>
+  )
+}
+
+export function ReviewDraftOverlay(props: {
+  visible: boolean
+  pageTitle: string
+  pageId: string
+  draftStatus: PageDraftStatus | null
+  dirty: boolean
+  message: string
+  applying: boolean
+  diffMarkdown: string
+  width: number
+  height: number
+  onApply: () => void
+  onStage: () => void
+  onDiscard: () => void
+  onClose: () => void
+}) {
+  const lines = createMemo(() => props.diffMarkdown.split("\n"))
+
+  return (
+    <box
+      visible={props.visible}
+      position="absolute"
+      left={2}
+      top={3}
+      width={props.width}
+      height={props.height}
+      border
+      borderStyle="rounded"
+      borderColor={theme.warn}
+      backgroundColor="#07111f"
+      paddingX={1}
+      paddingY={1}
+      flexDirection="column"
+      zIndex={45}
+    >
+      <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
+        <text height={1} fg={theme.warn} attributes={1}>REVIEW DRAFT</text>
+        <text height={1} fg={theme.muted}>{props.applying ? "Applying..." : "a apply  s stage  d discard  esc close"}</text>
+      </box>
+      <text height={1} fg={theme.text}>{props.pageTitle}</text>
+      <text height={1} fg={theme.subtle}>ID: {props.pageId}  Draft: {props.draftStatus ?? "unsaved"}  Buffer: {props.dirty ? "dirty" : "clean"}</text>
+      <text height={1} fg={reviewMessageColor(props.message)}>{props.message || "Approve applies this draft to remote Confluence after conflict checks."}</text>
+      <scrollbox flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
+        <box flexDirection="column" width="100%">
+          <For each={lines()}>{(line) => <text height={1} width="100%" content={line || " "} fg={diffLineColor(line)} />}</For>
+        </box>
+      </scrollbox>
+      <box height={3} flexDirection="row" gap={1} paddingTop={1}>
+        <ReviewButton label={props.applying ? "Applying" : "Apply"} color={theme.good} disabled={props.applying} onPress={props.onApply} />
+        <ReviewButton label={props.draftStatus === "staged" && !props.dirty ? "Unstage" : "Stage"} color={theme.accent} disabled={props.applying} onPress={props.onStage} />
+        <ReviewButton label="Discard" color={theme.danger} disabled={props.applying} onPress={props.onDiscard} />
+        <ReviewButton label="Close" color={theme.muted} disabled={props.applying} onPress={props.onClose} />
+      </box>
+    </box>
+  )
+}
+
+function ReviewButton(props: { label: string; color: string; disabled?: boolean; onPress: () => void }) {
+  return (
+    <box height={3} width={14} border borderStyle="rounded" borderColor={props.disabled ? theme.border : props.color} alignItems="center" justifyContent="center" onMouseDown={() => { if (!props.disabled) props.onPress() }}>
+      <text height={1} fg={props.disabled ? theme.subtle : props.color}>{props.label}</text>
     </box>
   )
 }
@@ -817,6 +1168,30 @@ function isSearchCharacter(key: SearchKeyLike) {
 
 function isPlainKey(key: SearchKeyLike, value: string) {
   return !key.ctrl && !key.meta && (key.name === value || key.sequence === value)
+}
+
+function editorSaveMessage(result: SaveTuiPageDraftResult) {
+  if (result.status === "saved") return `Draft saved for ${result.pageTitle}.`
+  if (result.status === "cleared") return `Draft cleared for ${result.pageTitle}; content matches synced page.`
+  return `No draft changes for ${result.pageTitle}.`
+}
+
+function applyResultMessage(result: Exclude<ApplyPageDraftResult, { status: "applied" }>) {
+  if (result.status === "conflict") return `Conflict: ${result.details.join(" ")}`
+  return `Apply blocked: ${result.details.join(" ")}`
+}
+
+function reviewMessageColor(message: string) {
+  if (/\b(conflict|blocked|failed|missing|cannot)\b/i.test(message)) return theme.danger
+  if (/\b(appl|stage|save|review)\b/i.test(message)) return theme.good
+  return theme.subtle
+}
+
+function diffLineColor(line: string) {
+  if (line.startsWith("+++") || line.startsWith("---")) return theme.accent
+  if (line.startsWith("+")) return theme.good
+  if (line.startsWith("-")) return theme.danger
+  return theme.text
 }
 
 function relatedItems(page: ReaderPage) {

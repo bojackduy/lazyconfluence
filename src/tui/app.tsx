@@ -15,6 +15,7 @@ import {
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import type { IndexedPage, ReaderPage, SearchResult, SpaceSearchResult } from "../model"
 import { loadCredentialStatus, type CredentialStatus } from "../config"
+import type { PageDraftStatus } from "../index/repository"
 import { createRepositoryTuiDataSource, emptyPageId, emptyReaderPage, emptySpaceSummary, type TuiDataSource } from "./data"
 import { markdownStyle, theme } from "./theme"
 
@@ -46,7 +47,7 @@ export async function renderTui() {
   })
 }
 
-export function App(props: { credentialStatus?: CredentialStatus; dataSource?: TuiDataSource } = {}) {
+export function App(props: { credentialStatus?: CredentialStatus; dataSource?: TuiDataSource; externalEditorHooks?: { beforeEditor?: () => void | Promise<void>; afterEditor?: () => void | Promise<void> } } = {}) {
   const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
   const dataSource = props.dataSource ?? createRepositoryTuiDataSource()
@@ -63,6 +64,9 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const [spaceSwitcherOpen, setSpaceSwitcherOpen] = createSignal(false)
   const [spaceSwitcherQuery, setSpaceSwitcherQuery] = createSignal("")
   const [spaceSwitcherSelectedIndex, setSpaceSwitcherSelectedIndex] = createSignal(0)
+  const [draftRevision, setDraftRevision] = createSignal(0)
+  const [editing, setEditing] = createSignal(false)
+  const [editStatusMessage, setEditStatusMessage] = createSignal("")
   const [treeSitterClient, setTreeSitterClient] = createSignal<TreeSitterClient | undefined>()
   let documentScrollbox: ScrollBoxRenderable | undefined
 
@@ -74,6 +78,10 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const selectedIndex = createMemo(() => treeRows().findIndex((row) => row.page.pageId === selectedPageId()))
   const selectedRow = createMemo(() => treeRows().find((row) => row.page.pageId === selectedPageId()))
   const readerPage = createMemo(() => dataSource.getReaderPage(selectedPageId()) ?? emptyReaderPage(space()))
+  const draftStatus = createMemo(() => {
+    draftRevision()
+    return dataSource.getPageDraftStatus(selectedPageId())
+  })
   const pageSearchResults = createMemo(() => dataSource.searchPagesInSpace(activeSpaceKey(), pageSearchQuery()))
   const spaceSwitcherResults = createMemo(() => dataSource.searchSpaces(spaceSwitcherQuery()))
   const isNarrow = createMemo(() => dimensions().width < 96)
@@ -205,6 +213,34 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     setFocusPane("document")
   }
 
+  const editSelectedPage = () => {
+    if (editing()) return
+    const pageId = selectedPageId()
+
+    if (pageId === emptyPageId) {
+      setEditStatusMessage("No page selected to edit.")
+      return
+    }
+
+    setEditing(true)
+    setEditStatusMessage("Opening editor...")
+
+    void dataSource.editPageDraft(pageId, {
+      beforeEditor: props.externalEditorHooks?.beforeEditor ?? (() => renderer.suspend()),
+      afterEditor: props.externalEditorHooks?.afterEditor ?? (() => {
+        renderer.resume()
+        renderer.requestLive()
+      }),
+    }).then((result) => {
+      setDraftRevision((revision) => revision + 1)
+      setEditStatusMessage(result.status === "saved" ? `Draft saved for ${result.page.title}.` : `No draft changes for ${result.page.title}.`)
+    }).catch((error) => {
+      setEditStatusMessage(errorMessage(error))
+    }).finally(() => {
+      setEditing(false)
+    })
+  }
+
   const expandSelectedPage = () => {
     const row = selectedRow()
 
@@ -276,6 +312,11 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
       return
     }
 
+    if (isPlainKey(key, "e")) {
+      editSelectedPage()
+      return
+    }
+
     if (key.name === "tab") {
       setFocusPane((pane) => (pane === "navigator" ? "document" : "navigator"))
       return
@@ -312,13 +353,13 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
 
   return (
     <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.bg}>
-      <Header page={readerPage()} spaceName={space().name} syncState={space().syncState} />
+      <Header page={readerPage()} spaceName={space().name} syncState={space().syncState} draftStatus={draftStatus()} />
       <Show when={credentialWarning()} fallback={<box height={0} />}>{(status) => <CredentialNotice status={status()} />}</Show>
       <box flexGrow={1} minHeight={0} flexDirection={isNarrow() ? "column" : "row"} paddingX={1}>
         <Navigator rows={treeRows()} selectedPageId={selectedPageId()} focused={focusPane() === "navigator"} />
         <Reader page={readerPage()} focused={focusPane() === "document"} narrow={isNarrow()} treeSitterClient={treeSitterClient()} setDocumentScrollbox={(scrollbox) => { documentScrollbox = scrollbox }} />
       </box>
-      <StatusBar focusPane={focusPane()} />
+      <StatusBar focusPane={focusPane()} editing={editing()} editMessage={editStatusMessage()} />
       <PageSearchOverlay
         visible={pageSearchOpen()}
         query={pageSearchQuery()}
@@ -353,14 +394,16 @@ function CredentialNotice(props: { status: CredentialWarning }) {
   )
 }
 
-function Header(props: { page: ReaderPage; spaceName: string; syncState: string }) {
+function Header(props: { page: ReaderPage; spaceName: string; syncState: string; draftStatus: PageDraftStatus | null }) {
   const syncColor = () => (props.syncState === "fresh" ? theme.good : props.syncState === "stale" ? theme.warn : theme.danger)
+  const statusColor = () => (props.draftStatus === "staged" ? theme.good : props.draftStatus === "draft" ? theme.warn : syncColor())
+  const statusText = () => props.draftStatus ? `${props.draftStatus} · ${props.syncState}` : props.syncState
 
   return (
     <box height={5} border borderStyle="single" borderColor={theme.border} paddingX={1} flexDirection="column">
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
         <text height={1} fg={theme.text} attributes={1}>{props.page.title}</text>
-        <text height={1} fg={syncColor()}>{props.syncState}</text>
+        <text height={1} fg={statusColor()}>{statusText()}</text>
       </box>
       <text height={1} fg={theme.muted}>{props.spaceName} / {props.page.path.join(" / ")}</text>
       <text height={1} fg={theme.subtle}>Owner: {props.page.owner}  Updated: {formatDate(props.page.updatedAt)}</text>
@@ -549,15 +592,16 @@ function InfoPanel(props: { title: string; items: string[]; empty: string }) {
   )
 }
 
-function StatusBar(props: { focusPane: string }) {
+function StatusBar(props: { focusPane: string; editing: boolean; editMessage: string }) {
   const hint = () => {
-    if (props.focusPane === "document") return "/ page search | s spaces | j/k scroll line | d/u scroll doc | h navigator | q quit"
-    return "/ page search | s spaces | j/k move | h/l fold tree | d/u scroll doc | q quit"
+    if (props.focusPane === "document") return "/ page search | s spaces | e edit | j/k scroll line | d/u scroll doc | h navigator | q quit"
+    return "/ page search | s spaces | e edit | j/k move | h/l fold tree | d/u scroll doc | q quit"
   }
+  const status = () => props.editing ? "editing: external editor" : props.editMessage ? props.editMessage : `focus: ${props.focusPane}`
 
   return (
     <box height={1} backgroundColor={theme.accentSoft} paddingX={1} flexDirection="row" justifyContent="space-between">
-      <text height={1} fg={theme.text}>focus: {props.focusPane}</text>
+      <text height={1} fg={theme.text}>{status()}</text>
       <text height={1} fg={theme.muted}>{hint()}</text>
     </box>
   )
@@ -771,6 +815,10 @@ function isSearchCharacter(key: SearchKeyLike) {
   return key.sequence.length === 1 && key.sequence >= " "
 }
 
+function isPlainKey(key: SearchKeyLike, value: string) {
+  return !key.ctrl && !key.meta && (key.name === value || key.sequence === value)
+}
+
 function relatedItems(page: ReaderPage) {
   return [
     ...page.children.map((child) => `child: ${child.title}`),
@@ -791,4 +839,8 @@ function formatDate(value: string) {
 
 function formatOptionalDate(value: string | null) {
   return value ? formatDate(value) : "never"
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown TUI edit error."
 }

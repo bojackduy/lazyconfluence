@@ -1,12 +1,15 @@
-import { openIndexRepository, type IndexRepository } from "../index/repository"
+import { editPageDraftInExternalEditor, type EditPageDraftOptions, type EditPageDraftResult, type ExternalEditor } from "../editing"
+import { openIndexRepository, type IndexRepository, type PageDraftStatus } from "../index/repository"
 import type { IndexedPage, ReaderPage, SearchResult, SpaceSearchResult, SpaceSummary } from "../model"
 
 export const emptyPageId = "__lazyconfluence_empty__"
 
 export interface TuiDataSource {
   close?: () => void
+  editPageDraft: (pageId: string, options?: Pick<EditPageDraftOptions, "beforeEditor" | "afterEditor">) => Promise<EditPageDraftResult>
   getDefaultSpaceKey: () => string | null
   getDefaultPageId: (spaceKey?: string) => string | null
+  getPageDraftStatus: (pageId: string) => PageDraftStatus | null
   getPagesForSpace: (spaceKey: string) => IndexedPage[]
   getReaderPage: (pageId: string) => ReaderPage | null
   listSpaces: () => SpaceSummary[]
@@ -14,9 +17,10 @@ export interface TuiDataSource {
   searchSpaces: (query: string) => SpaceSearchResult[]
 }
 
-export function createRepositoryTuiDataSource(repository: IndexRepository = openIndexRepository()): TuiDataSource {
+export function createRepositoryTuiDataSource(repository: IndexRepository = openIndexRepository(), options: { externalEditor?: ExternalEditor } = {}): TuiDataSource {
   return {
     close: () => repository.close(),
+    editPageDraft: (pageId, hooks) => editPageDraftInExternalEditor(repository, pageId, { ...hooks, editor: options.externalEditor }),
     getDefaultSpaceKey: () => repository.listSpaces()[0]?.key ?? null,
     getDefaultPageId: (spaceKey) => {
       const key = spaceKey ?? repository.listSpaces()[0]?.key
@@ -25,6 +29,7 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
       const pages = repository.listPagesInSpace(key)
       return pages.find((page) => page.parentId === null)?.pageId ?? pages[0]?.pageId ?? null
     },
+    getPageDraftStatus: (pageId) => repository.getPageDraft(pageId)?.status ?? null,
     getPagesForSpace: (spaceKey) => repository.listPagesInSpace(spaceKey),
     getReaderPage: (pageId) => {
       const page = repository.getPage(pageId)

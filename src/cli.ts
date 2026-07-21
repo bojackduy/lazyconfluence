@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline/promises"
 import { stdin as input, stdout as output } from "node:process"
 import { ATLASSIAN_API_TOKEN_URL, createLocalConfig, loadAtlassianAuth, parseSpaceKeys, saveLocalAuth } from "./config"
+import { formatSyncReport, syncConfluence, SyncServiceError } from "./sync"
 import { renderTui } from "./tui/app"
 
 export async function runCli(args: string[]) {
@@ -18,7 +19,7 @@ export async function runCli(args: string[]) {
       await printLocalConfigSummary()
       return
     case "sync":
-      console.log("sync is deferred until the reader and navigator UI are approved.")
+      await runSyncCommand()
       return
     case "search":
       console.log("search is deferred for the next UI loop.")
@@ -27,6 +28,17 @@ export async function runCli(args: string[]) {
       console.error(`Unknown command: ${command}`)
       console.error("Usage: lazyconfluence [tui|init|doctor|sync|search]")
       process.exitCode = 1
+  }
+}
+
+async function runSyncCommand() {
+  try {
+    const report = await syncConfluence()
+    console.log(formatSyncReport(report))
+    if (!report.complete) process.exitCode = 1
+  } catch (error) {
+    console.error(error instanceof SyncServiceError ? error.message : error instanceof Error ? error.message : "Unknown sync error.")
+    process.exitCode = 1
   }
 }
 

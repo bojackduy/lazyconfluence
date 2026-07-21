@@ -6,7 +6,14 @@ export interface ConfluenceClientOptions {
   requestTimeoutMs?: number
 }
 
-export type FetchLike = (url: string, init?: { headers?: Record<string, string>; signal?: AbortSignal }) => Promise<JsonResponseLike>
+export type FetchLike = (url: string, init?: FetchInitLike) => Promise<JsonResponseLike>
+
+export interface FetchInitLike {
+  method?: string
+  headers?: Record<string, string>
+  body?: string
+  signal?: AbortSignal
+}
 
 export interface JsonResponseLike {
   ok: boolean
@@ -53,6 +60,14 @@ export interface ConfluencePage {
     base?: string
     next?: string
   }
+}
+
+export interface UpdateConfluencePageInput {
+  id: string
+  title: string
+  storageValue: string
+  versionNumber: number
+  message?: string
 }
 
 export class ConfluenceClientError extends Error {}
@@ -104,6 +119,29 @@ export class ConfluenceClient {
     return this.paginatedResults<ConfluencePage>(`/api/v2/pages/${encodeURIComponent(pageId)}/direct-children`, { limit })
   }
 
+  async updatePage(input: UpdateConfluencePageInput) {
+    const payload = {
+      id: input.id,
+      status: "current",
+      title: input.title,
+      body: {
+        representation: "storage",
+        value: input.storageValue,
+      },
+      version: {
+        number: input.versionNumber,
+        message: input.message ?? "Updated from lazyconfluence",
+      },
+    }
+    const response = await this.requestJson(`/api/v2/pages/${encodeURIComponent(input.id)}`, {}, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+
+    return pageFromPayload(response)
+  }
+
   private async paginatedResults<T>(path: string, params: QueryParams): Promise<T[]> {
     const results: T[] = []
     let nextPath: string | null = path
@@ -119,14 +157,14 @@ export class ConfluenceClient {
     return results
   }
 
-  private async requestJson(pathOrUrl: string, params: QueryParams = {}) {
+  private async requestJson(pathOrUrl: string, params: QueryParams = {}, init: Omit<FetchInitLike, "signal"> = {}) {
     const url = confluenceApiUrl(this.baseUrl, pathOrUrl, params)
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs)
 
     let response: JsonResponseLike
     try {
-      response = await this.fetchJson(url, { headers: this.headers, signal: controller.signal })
+      response = await this.fetchJson(url, { ...init, headers: { ...this.headers, ...init.headers }, signal: controller.signal })
     } catch (error) {
       if (controller.signal.aborted || isAbortError(error)) {
         throw new ConfluenceClientError(`Confluence request timed out after ${this.requestTimeoutMs}ms for ${url}`)

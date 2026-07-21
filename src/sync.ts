@@ -70,8 +70,8 @@ export async function syncConfluence(options: SyncConfluenceOptions = {}): Promi
   emitProgress(options.onProgress, { type: "loading-config", message: "Loading local config." })
   const auth = await loadAtlassianAuth(env)
 
-  if (!auth) throw new SyncServiceError("No lazyconfluence config found. Run `bun run start init` first.")
-  if (!auth.apiToken) throw new SyncServiceError(`Atlassian API token missing. Set ${auth.config.atlassian.apiTokenEnv} or run \`bun run start init\`.`)
+  if (!auth) throw new SyncServiceError("No lazyconfluence config found. Run `lazyconfluence init` first.")
+  if (!auth.apiToken) throw new SyncServiceError(`Atlassian API token missing. Set ${auth.config.atlassian.apiTokenEnv} or run \`lazyconfluence init\`.`)
 
   const repository = options.repository ?? openIndexRepository({ env })
   const shouldCloseRepository = !options.repository

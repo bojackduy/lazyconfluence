@@ -30,7 +30,7 @@ export function readEditableDraftInput(repository: IndexRepository, pageId: stri
   if (!page) throw new Error(`Page not found in local index: ${pageId}`)
 
   const body = repository.getPageBody(pageId)
-  if (!body) throw new Error(`No editable body artifact found for ${page.title} (${page.pageId}). Run \`bun run start sync\` first.`)
+  if (!body) throw new Error(`No editable body artifact found for ${page.title} (${page.pageId}). Run \`lazyconfluence sync\` first.`)
 
   return {
     page,

@@ -95,6 +95,36 @@ describe("Confluence client", () => {
     ])
   })
 
+  test("updates a page with Confluence storage", async () => {
+    const calls: Array<{ url: string; method?: string; body?: string; contentType?: string }> = []
+    const client = new ConfluenceClient({
+      siteUrl: "https://example.atlassian.net/wiki",
+      email: "reader@example.com",
+      apiToken: "token",
+      fetch: async (url, init) => {
+        calls.push({ url, method: init?.method, body: init?.body, contentType: init?.headers?.["Content-Type"] })
+        return response({ id: "100", title: "Home", version: { number: 8 } })
+      },
+    })
+
+    const updated = await client.updatePage({ id: "100", title: "Home", storageValue: "<p>Updated</p>", versionNumber: 8, message: "test apply" })
+
+    expect(updated.version?.number).toBe(8)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({
+      url: "https://example.atlassian.net/wiki/api/v2/pages/100",
+      method: "PUT",
+      contentType: "application/json",
+    })
+    expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({
+      id: "100",
+      status: "current",
+      title: "Home",
+      body: { representation: "storage", value: "<p>Updated</p>" },
+      version: { number: 8, message: "test apply" },
+    })
+  })
+
   test("times out requests that do not finish", async () => {
     const calls: string[] = []
     const client = new ConfluenceClient({

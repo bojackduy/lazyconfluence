@@ -100,7 +100,7 @@ async function runSearchCommand(args: string[]) {
   const auth = await loadAtlassianAuth()
 
   if (!options.all && !options.spaceKey && !auth) {
-    console.error("No lazyconfluence config found. Run `bun run start init`, or use `search --all <query>` to search the local database without config.")
+    console.error("No lazyconfluence config found. Run `lazyconfluence init`, or use `search --all <query>` to search the local database without config.")
     process.exitCode = 1
     return
   }
@@ -143,7 +143,7 @@ async function runEditCommand(args: string[]) {
     }
 
     console.log(`Saved local draft for ${result.page.title} (${result.page.pageId}).`)
-    console.log(`Review with: bun run start diff ${result.page.pageId}`)
+    console.log(`Review with: lazyconfluence diff ${result.page.pageId}`)
   } catch (error) {
     console.error(error instanceof Error ? error.message : "Unknown edit error.")
     process.exitCode = 1
@@ -163,7 +163,7 @@ async function runDraftCommand(args: string[]) {
     const saved = savePageDraft(repository, input.page, input.body, input.draft, draftMarkdown)
 
     console.log(`Saved local draft for ${saved.page.title} (${saved.page.pageId}).`)
-    console.log(`Review with: bun run start diff ${saved.page.pageId}`)
+    console.log(`Review with: lazyconfluence diff ${saved.page.pageId}`)
   } catch (error) {
     console.error(error instanceof Error ? error.message : "Unknown draft error.")
     process.exitCode = 1
@@ -223,7 +223,7 @@ async function runStageCommand(args: string[]) {
 
     repository.stagePageDraft(pageId, new Date().toISOString())
     console.log(`Staged draft for ${input.page.title} (${input.page.pageId}).`)
-    console.log(`Review with: bun run start diff ${input.page.pageId}`)
+    console.log(`Review with: lazyconfluence diff ${input.page.pageId}`)
   } catch (error) {
     console.error(error instanceof Error ? error.message : "Unknown stage error.")
     process.exitCode = 1
@@ -339,7 +339,7 @@ async function runInit() {
     console.log(`Config: ${paths.configFile}`)
     console.log(`Credentials: ${paths.credentialFile}`)
     console.log(`Default space: ${config.atlassian.defaultSpaceKey}`)
-    console.log("Run `bun run start sync` to fetch configured spaces into the local index.")
+    console.log("Run `lazyconfluence sync` to fetch configured spaces into the local index.")
   } finally {
     closeRl()
   }
@@ -353,7 +353,7 @@ async function printLocalConfigSummary() {
     const stats = repository.getStats()
 
     if (!auth) {
-      console.log("No lazyconfluence config found. Run `bun run start init` first.")
+      console.log("No lazyconfluence config found. Run `lazyconfluence init` first.")
     } else {
       console.log("lazyconfluence local config")
       console.log(`Site URL: ${auth.config.atlassian.siteUrl}`)

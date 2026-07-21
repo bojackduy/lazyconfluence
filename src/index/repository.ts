@@ -47,6 +47,19 @@ interface PageBodyRow {
   updated_at: string
 }
 
+interface PageDraftRow {
+  page_id: string
+  base_remote_version: number
+  base_source_hash: string
+  draft_markdown: string
+  status: PageDraftStatus
+  created_at: string
+  updated_at: string
+  staged_at: string | null
+}
+
+export type PageDraftStatus = "draft" | "staged"
+
 export interface PageBodyArtifact {
   pageId: string
   remoteVersion: number
@@ -60,12 +73,25 @@ export interface PageBodyArtifact {
   updatedAt: string
 }
 
+export interface PageDraft {
+  pageId: string
+  baseRemoteVersion: number
+  baseSourceHash: string
+  draftMarkdown: string
+  status: PageDraftStatus
+  createdAt: string
+  updatedAt: string
+  stagedAt: string | null
+}
+
 export interface IndexRepositoryStats {
   schemaVersion: number
   spaceCount: number
   pageCount: number
   linkCount: number
   bodyArtifactCount: number
+  draftCount: number
+  stagedDraftCount: number
 }
 
 export class IndexRepository {
@@ -301,6 +327,8 @@ export class IndexRepository {
       pageCount: this.countRows("pages"),
       linkCount: this.countRows("links"),
       bodyArtifactCount: this.countRows("page_bodies"),
+      draftCount: this.countRows("page_drafts"),
+      stagedDraftCount: this.countRows("page_drafts", "status = 'staged'"),
     }
   }
 
@@ -318,6 +346,58 @@ export class IndexRepository {
 
   deleteLinksFromPage(pageId: string) {
     this.database.query("DELETE FROM links WHERE from_page_id = ?").run(pageId)
+  }
+
+  upsertPageDraft(draft: PageDraft) {
+    this.database.query(`
+      INSERT INTO page_drafts (
+        page_id, base_remote_version, base_source_hash, draft_markdown,
+        status, created_at, updated_at, staged_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(page_id) DO UPDATE SET
+        base_remote_version = excluded.base_remote_version,
+        base_source_hash = excluded.base_source_hash,
+        draft_markdown = excluded.draft_markdown,
+        status = excluded.status,
+        updated_at = excluded.updated_at,
+        staged_at = excluded.staged_at
+    `).run(
+      draft.pageId,
+      draft.baseRemoteVersion,
+      draft.baseSourceHash,
+      draft.draftMarkdown,
+      draft.status,
+      draft.createdAt,
+      draft.updatedAt,
+      draft.stagedAt,
+    )
+  }
+
+  getPageDraft(pageId: string): PageDraft | null {
+    const row = this.database.query("SELECT * FROM page_drafts WHERE page_id = ?").get(pageId) as PageDraftRow | null
+
+    return row ? pageDraftFromRow(row) : null
+  }
+
+  listPageDrafts(status?: PageDraftStatus): PageDraft[] {
+    const rows = status
+      ? this.database.query("SELECT * FROM page_drafts WHERE status = ? ORDER BY updated_at DESC, page_id COLLATE NOCASE").all(status) as PageDraftRow[]
+      : this.database.query("SELECT * FROM page_drafts ORDER BY updated_at DESC, page_id COLLATE NOCASE").all() as PageDraftRow[]
+
+    return rows.map(pageDraftFromRow)
+  }
+
+  stagePageDraft(pageId: string, stagedAt: string) {
+    return this.database.query("UPDATE page_drafts SET status = 'staged', updated_at = ?, staged_at = ? WHERE page_id = ?").run(stagedAt, stagedAt, pageId).changes
+  }
+
+  unstagePageDraft(pageId: string, updatedAt: string) {
+    return this.database.query("UPDATE page_drafts SET status = 'draft', updated_at = ?, staged_at = NULL WHERE page_id = ?").run(updatedAt, pageId).changes
+  }
+
+  deletePageDraft(pageId: string) {
+    return this.database.query("DELETE FROM page_drafts WHERE page_id = ?").run(pageId).changes
   }
 
   getChildren(parentPageId: string): IndexedPage[] {
@@ -471,8 +551,8 @@ export class IndexRepository {
     return Number(row?.user_version ?? 0)
   }
 
-  private countRows(table: "spaces" | "pages" | "links" | "page_bodies") {
-    const row = this.database.query(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number } | null
+  private countRows(table: "spaces" | "pages" | "links" | "page_bodies" | "page_drafts", where?: string) {
+    const row = this.database.query(`SELECT COUNT(*) AS count FROM ${table}${where ? ` WHERE ${where}` : ""}`).get() as { count: number } | null
 
     return Number(row?.count ?? 0)
   }
@@ -544,5 +624,18 @@ function pageBodyFromRow(row: PageBodyRow): PageBodyArtifact {
     editableMarkdown: String(row.editable_markdown),
     renderedMarkdown: String(row.rendered_markdown),
     updatedAt: String(row.updated_at),
+  }
+}
+
+function pageDraftFromRow(row: PageDraftRow): PageDraft {
+  return {
+    pageId: String(row.page_id),
+    baseRemoteVersion: Number(row.base_remote_version),
+    baseSourceHash: String(row.base_source_hash),
+    draftMarkdown: String(row.draft_markdown),
+    status: row.status === "staged" ? "staged" : "draft",
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+    stagedAt: row.staged_at === null ? null : String(row.staged_at),
   }
 }

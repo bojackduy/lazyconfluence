@@ -38,7 +38,8 @@ Status values: `Not started`, `In progress`, `Blocked`, `Partial`, `Done`.
 - Local index and search are done for this slice: local SQLite schema, repository upserts, Confluence tree ordering, relationship queries, URL matching, and page search are implemented and tested.
 - Confluence API mapping is done for the read-only slice: URL normalization, auth headers, mocked paginated fetches, recursive direct children, canonical document projection, storage HTML mapping including tables, sidecar preservation, and local model mapping are implemented and tested.
 - Explicit sync service is done for the first local-first slice: `sync` loads local auth, fetches configured spaces/pages/children, maps Confluence storage into local projections, writes spaces/pages/links/body artifacts into SQLite, reports partial failures, and does not prune local pages after incomplete scans.
-- CLI local DB integration is done for `doctor`, `search`, local body `repair`, and scoped `sync` flags. These commands read local SQLite except for explicit `sync`.
+- CLI local DB integration is done for `doctor`, `search`, local body `repair`, local draft/stage/discard/diff/preview commands, and scoped `sync` flags. These commands read local SQLite except for explicit `sync`.
+- Local editing is started: CLI drafts can be created from a markdown file or `$EDITOR`, staged, unstaged, discarded, previewed, and diffed against the synced body artifact. Remote apply/write-back is not implemented yet.
 - Sync observability is done for the first remote slice: Confluence requests time out by default, service-level progress events cover remote wait points, and CLI `sync` prints progress unless `--quiet` is set.
 - TUI date rendering is defensive: existing rows with missing or invalid timestamps display `unknown`, and future syncs use the sync timestamp when Confluence omits page dates.
 - Keymap and command registry are not started.
@@ -85,6 +86,7 @@ YYYY-MM-DD  ID  Result  Verification  Follow-up
 2026-07-21  tree-order  Persisted Confluence tree order in SQLite and changed navigator sibling sorting to use synced tree order instead of alphabetical title order.  bun run typecheck; bun test (55 pass, 0 fail).  Next: rerun sync so existing rows get tree_order values.
 2026-07-21  multiline-code-paragraphs  Confluence paragraphs containing a single multiline `<code>` node now map to fenced code blocks, preserving Mermaid/ERD newlines instead of flattening them as inline code.  bun run typecheck; bun test (56 pass, 0 fail).  Next: rerun sync so stored body artifacts are regenerated.
 2026-07-21  body-repair  Added local `repair` command to rebuild stored body artifacts and page/search projections from existing `source_body`; parser now also merges Mermaid-style adjacent code-only paragraphs while keeping isolated inline-code paragraphs inline.  bun run typecheck; bun test (59 pass, 0 fail); bun run start repair (71 artifacts rebuilt); verified page 1962803383 has a Mermaid fence.  Next: reopen the TUI and inspect the repaired document rendering.
+2026-07-21  local-editing  Added schema v4 local page drafts plus CLI draft/edit/stage/unstage/discard/diff/preview commands.  bun run typecheck; bun test (61 pass, 0 fail).  Next: implement remote apply with version/hash conflict checks and Confluence write-back.
 ```
 
 ## Contract Changes
@@ -104,4 +106,5 @@ YYYY-MM-DD  ID  Contract changed  Impacted tasks
 2026-07-21  sync-tree-robustness  Added canonical `TableBlock`; sync page counts now include body-failure placeholders, CLI treats page-only failures as non-fatal, and TUI tree rows can represent detached local pages.  Impacts document projection, sync reports, CLI sync semantics, and TUI tree rendering.
 2026-07-21  tree-order  Migrated local index schema to v3 with `pages.tree_order`; `IndexedPage.treeOrder` is optional for fixtures but persisted for synced/repository pages.  Impacts repository ordering, sync mapping, and navigator sibling order.
 2026-07-21  body-repair  Added `mapConfluenceBody`, `IndexRepository.listPageBodies`, `IndexRepository.deleteLinksFromPage`, `repairBodyArtifacts`, and CLI `repair`.  Impacts local maintenance commands and any future body-artifact migration flow.
+2026-07-21  local-editing  Migrated local index schema to v4 with `page_drafts`; added `PageDraft`, draft stats, and CLI commands `edit`, `draft`, `drafts`, `stage`, `unstage`, `discard`, `diff`, and `preview`.  Impacts local maintenance commands, future TUI edit actions, and remote apply/write-back.
 ```

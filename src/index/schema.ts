@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite"
 
-export const INDEX_SCHEMA_VERSION = 3
+export const INDEX_SCHEMA_VERSION = 4
 
 export function applyIndexSchema(database: Database) {
   database.run("PRAGMA foreign_keys = ON")
@@ -76,6 +76,19 @@ CREATE TABLE IF NOT EXISTS page_bodies (
 );
 
 CREATE INDEX IF NOT EXISTS page_bodies_updated_at_idx ON page_bodies(updated_at);
+
+CREATE TABLE IF NOT EXISTS page_drafts (
+  page_id TEXT PRIMARY KEY REFERENCES pages(page_id) ON DELETE CASCADE,
+  base_remote_version INTEGER NOT NULL,
+  base_source_hash TEXT NOT NULL,
+  draft_markdown TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('draft', 'staged')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  staged_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS page_drafts_status_idx ON page_drafts(status, updated_at);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS page_fts USING fts5(
   title,

@@ -89,6 +89,42 @@ describe("local index repository", () => {
       expect(repository.getPage("architecture")?.contentMarkdown).toBe(architecture.contentMarkdown)
     })
   })
+
+  test("persists local page drafts and staged lifecycle", async () => {
+    await withSeededRepository((repository) => {
+      repository.upsertPageBody(architectureBody)
+      repository.upsertPageDraft({
+        pageId: "architecture",
+        baseRemoteVersion: 7,
+        baseSourceHash: "source-hash",
+        draftMarkdown: "# Project Architecture\n\nEdited locally.",
+        status: "draft",
+        createdAt: "2026-07-21T11:00:00Z",
+        updatedAt: "2026-07-21T11:00:00Z",
+        stagedAt: null,
+      })
+
+      expect(repository.getStats()).toMatchObject({ draftCount: 1, stagedDraftCount: 0 })
+      expect(repository.getPageDraft("architecture")?.status).toBe("draft")
+      expect(repository.listPageDrafts().map((draft) => draft.pageId)).toEqual(["architecture"])
+      expect(repository.listPageDrafts("draft")).toHaveLength(1)
+
+      repository.stagePageDraft("architecture", "2026-07-21T11:05:00Z")
+
+      expect(repository.getPageDraft("architecture")).toMatchObject({ status: "staged", stagedAt: "2026-07-21T11:05:00Z" })
+      expect(repository.getStats()).toMatchObject({ draftCount: 1, stagedDraftCount: 1 })
+      expect(repository.listPageDrafts("staged")).toHaveLength(1)
+
+      repository.unstagePageDraft("architecture", "2026-07-21T11:10:00Z")
+
+      expect(repository.getPageDraft("architecture")).toMatchObject({ status: "draft", stagedAt: null })
+
+      repository.deletePageDraft("architecture")
+
+      expect(repository.getPageDraft("architecture")).toBeNull()
+      expect(repository.getStats()).toMatchObject({ draftCount: 0, stagedDraftCount: 0 })
+    })
+  })
 })
 
 async function withSeededRepository(callback: (repository: Repository) => void | Promise<void>) {

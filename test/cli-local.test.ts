@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
@@ -19,9 +19,11 @@ describe("local CLI integration", () => {
       expect(output.stdout).toContain("lazyconfluence local config")
       expect(output.stdout).toContain("Default space: ENG")
       expect(output.stdout).toContain(`Database: ${setup.dbPath}`)
-      expect(output.stdout).toContain("Schema version: 3")
+      expect(output.stdout).toContain("Schema version: 4")
       expect(output.stdout).toContain("Spaces indexed: 2")
       expect(output.stdout).toContain("Pages indexed: 3")
+      expect(output.stdout).toContain("Local drafts: 0")
+      expect(output.stdout).toContain("Staged drafts: 0")
       expect(output.stdout).toContain("Configured space ENG: 2 local pages")
       expect(output.stdout).toContain("Configured space OPS: 1 local pages")
       expect(output.stdout).toContain("No remote doctor check was run.")
@@ -154,6 +156,44 @@ describe("local CLI integration", () => {
       await setup.cleanup()
     }
   })
+
+  test("draft commands manage local staged edits without network", async () => {
+    const setup = await createCliSetup()
+
+    try {
+      seedCliRepository(setup.dbPath)
+      seedEditableBody(setup.dbPath)
+      const draftPath = join(setup.dir, "architecture-draft.md")
+      await writeFile(draftPath, "# Project Architecture\n\nLocal-first architecture notes.\n\nEdited locally.\n", "utf8")
+
+      const saved = await captureCli(() => withProcessEnv(setup.env, () => runCli(["draft", "architecture", "--file", draftPath])))
+      const listed = await captureCli(() => withProcessEnv(setup.env, () => runCli(["drafts"])))
+      const diff = await captureCli(() => withProcessEnv(setup.env, () => runCli(["diff", "architecture"])))
+      const preview = await captureCli(() => withProcessEnv(setup.env, () => runCli(["preview", "architecture"])))
+      const staged = await captureCli(() => withProcessEnv(setup.env, () => runCli(["stage", "architecture"])))
+      const listedStaged = await captureCli(() => withProcessEnv(setup.env, () => runCli(["drafts", "--staged"])))
+      const unstaged = await captureCli(() => withProcessEnv(setup.env, () => runCli(["unstage", "architecture"])))
+      const discarded = await captureCli(() => withProcessEnv(setup.env, () => runCli(["discard", "architecture"])))
+      const empty = await captureCli(() => withProcessEnv(setup.env, () => runCli(["drafts"])))
+
+      expect(saved.exitCode).toBeUndefined()
+      expect(saved.stdout).toContain("Saved local draft for Project Architecture (architecture).")
+      expect(listed.stdout).toContain("Local drafts:")
+      expect(listed.stdout).toContain("[draft] [ENG] Project Architecture (architecture)")
+      expect(diff.stdout).toContain("Diff for Project Architecture (architecture):")
+      expect(diff.stdout).toContain("--- synced")
+      expect(diff.stdout).toContain("+++ draft")
+      expect(diff.stdout).toContain("+Edited locally.")
+      expect(preview.stdout).toContain("Edited locally.")
+      expect(staged.stdout).toContain("Staged draft for Project Architecture (architecture).")
+      expect(listedStaged.stdout).toContain("[staged] [ENG] Project Architecture (architecture)")
+      expect(unstaged.stdout).toContain("Unstaged draft for Project Architecture (architecture).")
+      expect(discarded.stdout).toContain("Discarded local draft for Project Architecture (architecture).")
+      expect(empty.stdout).toContain("No local drafts.")
+    } finally {
+      await setup.cleanup()
+    }
+  })
 })
 
 async function createCliSetup() {
@@ -191,6 +231,16 @@ function seedStaleMermaidBody(dbPath: string) {
   try {
     repository.upsertPage({ ...pages[0], contentMarkdown: "`erDiagram retailers { uuid id PK }`", snippet: "erDiagram retailers" })
     repository.upsertPageBody(staleMermaidBody)
+  } finally {
+    repository.close()
+  }
+}
+
+function seedEditableBody(dbPath: string) {
+  const repository = openIndexRepository({ path: dbPath })
+
+  try {
+    repository.upsertPageBody(editableArchitectureBody)
   } finally {
     repository.close()
   }
@@ -374,5 +424,41 @@ const staleMermaidBody: PageBodyArtifact = {
   },
   editableMarkdown: "`erDiagram retailers { uuid id PK }`",
   renderedMarkdown: "`erDiagram retailers { uuid id PK }`",
+  updatedAt: "2026-07-21T09:00:00Z",
+}
+
+const editableArchitectureBody: PageBodyArtifact = {
+  pageId: "architecture",
+  remoteVersion: 3,
+  sourceRepresentation: "storage",
+  sourceBody: "<h1>Project Architecture</h1><p>Local-first architecture notes.</p>",
+  sourceHash: "base-hash",
+  canonicalDocument: {
+    schemaVersion: 1,
+    pageId: "architecture",
+    title: "Project Architecture",
+    blocks: [
+      {
+        type: "heading",
+        nodeId: "heading",
+        level: 1,
+        inlines: [{ type: "text", text: "Project Architecture" }],
+      },
+      {
+        type: "paragraph",
+        nodeId: "paragraph",
+        inlines: [{ type: "text", text: "Local-first architecture notes." }],
+      },
+    ],
+  },
+  sidecar: {
+    schemaVersion: 1,
+    remoteVersion: 3,
+    sourceRepresentation: "storage",
+    sourceHash: "base-hash",
+    nodes: {},
+  },
+  editableMarkdown: "# Project Architecture\n\nLocal-first architecture notes.",
+  renderedMarkdown: "# Project Architecture\n\nLocal-first architecture notes.",
   updatedAt: "2026-07-21T09:00:00Z",
 }

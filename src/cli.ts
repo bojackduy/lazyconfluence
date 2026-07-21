@@ -1,10 +1,15 @@
+import { spawn } from "node:child_process"
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { createInterface } from "node:readline/promises"
 import { stdin as input, stdout as output } from "node:process"
 import { ATLASSIAN_API_TOKEN_URL, createLocalConfig, loadAtlassianAuth, parseSpaceKeys, saveLocalAuth } from "./config"
-import { openIndexRepository } from "./index/repository"
+import { openIndexRepository, type IndexRepository, type PageBodyArtifact, type PageDraft, type PageDraftStatus } from "./index/repository"
 import { formatRepairReport, repairBodyArtifacts, RepairServiceError } from "./repair"
 import { formatSyncReport, syncConfluence, SyncServiceError, type SyncProgressEvent, type SyncReport } from "./sync"
 import { renderTui } from "./tui/app"
+import type { IndexedPage } from "./model"
 
 export async function runCli(args: string[]) {
   const command = args[0]
@@ -26,12 +31,36 @@ export async function runCli(args: string[]) {
     case "repair":
       await runRepairCommand(args.slice(1))
       return
+    case "edit":
+      await runEditCommand(args.slice(1))
+      return
+    case "draft":
+      await runDraftCommand(args.slice(1))
+      return
+    case "drafts":
+      await runDraftsCommand(args.slice(1))
+      return
+    case "stage":
+      await runStageCommand(args.slice(1))
+      return
+    case "unstage":
+      await runUnstageCommand(args.slice(1))
+      return
+    case "discard":
+      await runDiscardCommand(args.slice(1))
+      return
+    case "diff":
+      await runDiffCommand(args.slice(1))
+      return
+    case "preview":
+      await runPreviewCommand(args.slice(1))
+      return
     case "search":
       await runSearchCommand(args.slice(1))
       return
     default:
       console.error(`Unknown command: ${command}`)
-      console.error("Usage: lazyconfluence [tui|init|doctor|sync|repair|search]")
+      console.error("Usage: lazyconfluence [tui|init|doctor|sync|repair|search|edit|draft|drafts|stage|unstage|discard|diff|preview]")
       process.exitCode = 1
   }
 }
@@ -103,6 +132,195 @@ async function runSearchCommand(args: string[]) {
   }
 }
 
+async function runEditCommand(args: string[]) {
+  let repository: IndexRepository | null = null
+  let tempDir: string | null = null
+
+  try {
+    const pageId = requiredPageId(args, "edit")
+    repository = openIndexRepository()
+    tempDir = await mkdtemp(join(tmpdir(), "lazyconfluence-edit-"))
+    const input = readEditableDraftInput(repository, pageId)
+    const originalMarkdown = input.draft?.draftMarkdown ?? input.body.editableMarkdown
+    const draftPath = join(tempDir, `${safeFileName(input.page.title || pageId)}.md`)
+
+    await writeFile(draftPath, originalMarkdown, "utf8")
+    await runEditor(draftPath)
+    const draftMarkdown = await readFile(draftPath, "utf8")
+
+    if (draftMarkdown === originalMarkdown) {
+      console.log(`No draft changes for ${input.page.title} (${input.page.pageId}).`)
+      return
+    }
+
+    const saved = savePageDraft(repository, input.page, input.body, input.draft, draftMarkdown)
+    console.log(`Saved local draft for ${saved.page.title} (${saved.page.pageId}).`)
+    console.log(`Review with: bun run start diff ${saved.page.pageId}`)
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : "Unknown edit error.")
+    process.exitCode = 1
+  } finally {
+    repository?.close()
+    if (tempDir) await rm(tempDir, { recursive: true, force: true })
+  }
+}
+
+async function runDraftCommand(args: string[]) {
+  let repository: IndexRepository | null = null
+
+  try {
+    const options = parseDraftArgs(args)
+    repository = openIndexRepository()
+    const input = readEditableDraftInput(repository, options.pageId)
+    const draftMarkdown = await readFile(options.filePath, "utf8")
+    const saved = savePageDraft(repository, input.page, input.body, input.draft, draftMarkdown)
+
+    console.log(`Saved local draft for ${saved.page.title} (${saved.page.pageId}).`)
+    console.log(`Review with: bun run start diff ${saved.page.pageId}`)
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : "Unknown draft error.")
+    process.exitCode = 1
+  } finally {
+    repository?.close()
+  }
+}
+
+async function runDraftsCommand(args: string[]) {
+  let status: PageDraftStatus | undefined
+
+  for (const arg of args) {
+    if (arg === "--staged") {
+      status = "staged"
+      continue
+    }
+    if (arg === "--draft") {
+      status = "draft"
+      continue
+    }
+    console.error(`Unknown drafts option: ${arg}`)
+    process.exitCode = 1
+    return
+  }
+
+  const repository = openIndexRepository()
+
+  try {
+    const drafts = repository.listPageDrafts(status)
+    if (!drafts.length) {
+      console.log(status === "staged" ? "No staged drafts." : status === "draft" ? "No unstaged drafts." : "No local drafts.")
+      return
+    }
+
+    console.log(status === "staged" ? "Staged drafts:" : status === "draft" ? "Unstaged drafts:" : "Local drafts:")
+    for (const [index, draft] of drafts.entries()) {
+      const page = repository.getPage(draft.pageId)
+      const label = page ? `[${page.spaceKey}] ${page.title}` : draft.pageId
+      console.log(`${index + 1}. [${draft.status}] ${label} (${draft.pageId})`)
+      console.log(`   Updated: ${draft.updatedAt}`)
+      if (draft.stagedAt) console.log(`   Staged: ${draft.stagedAt}`)
+    }
+  } finally {
+    repository.close()
+  }
+}
+
+async function runStageCommand(args: string[]) {
+  let repository: IndexRepository | null = null
+
+  try {
+    const pageId = requiredPageId(args, "stage")
+    repository = openIndexRepository()
+    const input = readEditableDraftInput(repository, pageId)
+    if (!input.draft) throw new Error(`No local draft found for page ${pageId}.`)
+    if (input.draft.draftMarkdown === input.body.editableMarkdown) throw new Error(`Draft for ${input.page.title} (${input.page.pageId}) has no changes to stage.`)
+
+    repository.stagePageDraft(pageId, new Date().toISOString())
+    console.log(`Staged draft for ${input.page.title} (${input.page.pageId}).`)
+    console.log(`Review with: bun run start diff ${input.page.pageId}`)
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : "Unknown stage error.")
+    process.exitCode = 1
+  } finally {
+    repository?.close()
+  }
+}
+
+async function runUnstageCommand(args: string[]) {
+  let repository: IndexRepository | null = null
+
+  try {
+    const pageId = requiredPageId(args, "unstage")
+    repository = openIndexRepository()
+    const page = repository.getPage(pageId)
+    if (!page) throw new Error(`Page not found in local index: ${pageId}`)
+    if (!repository.getPageDraft(pageId)) throw new Error(`No local draft found for page ${pageId}.`)
+
+    repository.unstagePageDraft(pageId, new Date().toISOString())
+    console.log(`Unstaged draft for ${page.title} (${page.pageId}).`)
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : "Unknown unstage error.")
+    process.exitCode = 1
+  } finally {
+    repository?.close()
+  }
+}
+
+async function runDiscardCommand(args: string[]) {
+  let repository: IndexRepository | null = null
+
+  try {
+    const pageId = requiredPageId(args, "discard")
+    repository = openIndexRepository()
+    const page = repository.getPage(pageId)
+    if (!page) throw new Error(`Page not found in local index: ${pageId}`)
+    const changes = repository.deletePageDraft(pageId)
+    if (!changes) throw new Error(`No local draft found for page ${pageId}.`)
+
+    console.log(`Discarded local draft for ${page.title} (${page.pageId}).`)
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : "Unknown discard error.")
+    process.exitCode = 1
+  } finally {
+    repository?.close()
+  }
+}
+
+async function runDiffCommand(args: string[]) {
+  let repository: IndexRepository | null = null
+
+  try {
+    const pageId = requiredPageId(args, "diff")
+    repository = openIndexRepository()
+    const input = readEditableDraftInput(repository, pageId)
+    if (!input.draft) throw new Error(`No local draft found for page ${pageId}.`)
+
+    console.log(`Diff for ${input.page.title} (${input.page.pageId}):`)
+    console.log(formatMarkdownDiff(input.body.editableMarkdown, input.draft.draftMarkdown))
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : "Unknown diff error.")
+    process.exitCode = 1
+  } finally {
+    repository?.close()
+  }
+}
+
+async function runPreviewCommand(args: string[]) {
+  let repository: IndexRepository | null = null
+
+  try {
+    const pageId = requiredPageId(args, "preview")
+    repository = openIndexRepository()
+    const draft = repository.getPageDraft(pageId)
+    if (!draft) throw new Error(`No local draft found for page ${pageId}.`)
+    console.log(draft.draftMarkdown)
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : "Unknown preview error.")
+    process.exitCode = 1
+  } finally {
+    repository?.close()
+  }
+}
+
 async function runInit() {
   console.log("lazyconfluence auth setup")
   console.log(`Generate an Atlassian API token at: ${ATLASSIAN_API_TOKEN_URL}`)
@@ -165,6 +383,8 @@ async function printLocalConfigSummary() {
     console.log(`Pages indexed: ${stats.pageCount}`)
     console.log(`Links indexed: ${stats.linkCount}`)
     console.log(`Body artifacts: ${stats.bodyArtifactCount}`)
+    console.log(`Local drafts: ${stats.draftCount}`)
+    console.log(`Staged drafts: ${stats.stagedDraftCount}`)
 
     if (auth) {
       for (const spaceKey of auth.config.atlassian.spaceKeys) {
@@ -219,6 +439,38 @@ function parseRepairArgs(args: string[]) {
   for (const arg of args) {
     throw new Error(`Unknown repair option: ${arg}`)
   }
+}
+
+function parseDraftArgs(args: string[]) {
+  const pageId = args[0]
+  let filePath: string | null = null
+
+  if (!pageId) throw new Error("draft requires a page ID.")
+
+  for (let index = 1; index < args.length; index += 1) {
+    const arg = args[index]
+    if (arg === "--file") {
+      const value = args[index + 1]
+      if (!value) throw new Error("--file requires a markdown file path.")
+      filePath = value
+      index += 1
+      continue
+    }
+
+    throw new Error(`Unknown draft option: ${arg}`)
+  }
+
+  if (!filePath) throw new Error("draft requires --file <markdown-file>.")
+
+  return { pageId, filePath }
+}
+
+function requiredPageId(args: string[], command: string) {
+  const pageId = args[0]
+  if (!pageId) throw new Error(`${command} requires a page ID.`)
+  if (args.length > 1) throw new Error(`Unknown ${command} option: ${args[1]}`)
+
+  return pageId
 }
 
 function printSyncProgress(event: SyncProgressEvent) {
@@ -334,4 +586,105 @@ async function askHiddenFallback(label: string) {
   } finally {
     rl.close()
   }
+}
+
+function readEditableDraftInput(repository: IndexRepository, pageId: string) {
+  const page = repository.getPage(pageId)
+  if (!page) throw new Error(`Page not found in local index: ${pageId}`)
+
+  const body = repository.getPageBody(pageId)
+  if (!body) throw new Error(`No editable body artifact found for ${page.title} (${page.pageId}). Run \`bun run start sync\` first.`)
+
+  return {
+    page,
+    body,
+    draft: repository.getPageDraft(pageId),
+  }
+}
+
+function savePageDraft(repository: IndexRepository, page: IndexedPage, body: PageBodyArtifact, existing: PageDraft | null, draftMarkdown: string) {
+  const now = new Date().toISOString()
+  const draft: PageDraft = {
+    pageId: page.pageId,
+    baseRemoteVersion: existing?.baseRemoteVersion ?? body.remoteVersion,
+    baseSourceHash: existing?.baseSourceHash ?? body.sourceHash,
+    draftMarkdown,
+    status: "draft",
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+    stagedAt: null,
+  }
+
+  repository.upsertPageDraft(draft)
+
+  return { page, draft }
+}
+
+async function runEditor(filePath: string) {
+  const editor = process.env.VISUAL || process.env.EDITOR
+  if (!editor) throw new Error("No editor configured. Set VISUAL or EDITOR, or use `draft <page-id> --file <markdown-file>`.")
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(editor, [filePath], { shell: true, stdio: "inherit" })
+
+    child.on("error", reject)
+    child.on("exit", (code) => {
+      if (code === 0) {
+        resolve()
+        return
+      }
+
+      reject(new Error(`Editor exited with code ${code ?? "unknown"}.`))
+    })
+  })
+}
+
+function formatMarkdownDiff(baseMarkdown: string, draftMarkdown: string) {
+  if (baseMarkdown === draftMarkdown) return "No draft changes."
+
+  return ["--- synced", "+++ draft", ...lineDiff(normalizeNewlines(baseMarkdown).split("\n"), normalizeNewlines(draftMarkdown).split("\n"))].join("\n")
+}
+
+function lineDiff(baseLines: string[], draftLines: string[]) {
+  const table = Array.from({ length: baseLines.length + 1 }, () => new Uint32Array(draftLines.length + 1))
+
+  for (let baseIndex = baseLines.length - 1; baseIndex >= 0; baseIndex -= 1) {
+    for (let draftIndex = draftLines.length - 1; draftIndex >= 0; draftIndex -= 1) {
+      table[baseIndex][draftIndex] = baseLines[baseIndex] === draftLines[draftIndex]
+        ? table[baseIndex + 1][draftIndex + 1] + 1
+        : Math.max(table[baseIndex + 1][draftIndex], table[baseIndex][draftIndex + 1])
+    }
+  }
+
+  const lines: string[] = []
+  let baseIndex = 0
+  let draftIndex = 0
+
+  while (baseIndex < baseLines.length || draftIndex < draftLines.length) {
+    if (baseLines[baseIndex] === draftLines[draftIndex]) {
+      lines.push(` ${baseLines[baseIndex] ?? ""}`)
+      baseIndex += 1
+      draftIndex += 1
+      continue
+    }
+
+    if (draftIndex < draftLines.length && (baseIndex >= baseLines.length || table[baseIndex][draftIndex + 1] >= table[baseIndex + 1][draftIndex])) {
+      lines.push(`+${draftLines[draftIndex]}`)
+      draftIndex += 1
+      continue
+    }
+
+    lines.push(`-${baseLines[baseIndex]}`)
+    baseIndex += 1
+  }
+
+  return lines
+}
+
+function normalizeNewlines(value: string) {
+  return value.replace(/\r\n?/g, "\n")
+}
+
+function safeFileName(value: string) {
+  return value.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "page"
 }

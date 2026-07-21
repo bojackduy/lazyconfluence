@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite"
 
-export const INDEX_SCHEMA_VERSION = 1
+export const INDEX_SCHEMA_VERSION = 2
 
 export function applyIndexSchema(database: Database) {
   database.run("PRAGMA foreign_keys = ON")
@@ -50,6 +50,21 @@ CREATE TABLE IF NOT EXISTS pages (
 CREATE UNIQUE INDEX IF NOT EXISTS pages_url_key_idx ON pages(url_key);
 CREATE INDEX IF NOT EXISTS pages_space_parent_idx ON pages(space_key, parent_id, title COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS pages_space_path_idx ON pages(space_key, path_text COLLATE NOCASE);
+
+CREATE TABLE IF NOT EXISTS page_bodies (
+  page_id TEXT PRIMARY KEY REFERENCES pages(page_id) ON DELETE CASCADE,
+  remote_version INTEGER NOT NULL,
+  source_representation TEXT NOT NULL CHECK(source_representation IN ('storage', 'atlas_doc_format')),
+  source_body TEXT NOT NULL,
+  source_hash TEXT NOT NULL,
+  canonical_json TEXT NOT NULL,
+  sidecar_json TEXT NOT NULL,
+  editable_markdown TEXT NOT NULL,
+  rendered_markdown TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS page_bodies_updated_at_idx ON page_bodies(updated_at);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS page_fts USING fts5(
   title,

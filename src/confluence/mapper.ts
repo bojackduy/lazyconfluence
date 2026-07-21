@@ -17,6 +17,10 @@ export interface MappedConfluencePage {
   sidecar: MappingSidecar
   indexedPage: IndexedPage
   links: PageLink[]
+  remoteVersion: number
+  sourceRepresentation: SourceRepresentation
+  sourceBody: string
+  renderedMarkdown: string
 }
 
 export function mapConfluenceSpace(space: ConfluenceSpace, options: { lastSyncedAt?: string | null; pageCount?: number } = {}): SpaceSummary {
@@ -40,6 +44,7 @@ export function mapConfluencePage(input: ConfluencePageMappingInput): MappedConf
     remoteVersion,
     sourceRepresentation: body.representation,
   })
+  const renderedMarkdown = renderDocumentMarkdown(document)
   const indexedPage: IndexedPage = {
     pageId: input.page.id,
     spaceKey: input.space.key,
@@ -49,7 +54,7 @@ export function mapConfluencePage(input: ConfluencePageMappingInput): MappedConf
     path: [...(input.ancestors?.map((ancestor) => ancestor.title) ?? []), input.page.title],
     owner: input.page.ownerId || input.page.authorId || "",
     updatedAt: input.page.version?.createdAt || input.page.createdAt || "",
-    contentMarkdown: renderDocumentMarkdown(document),
+    contentMarkdown: renderedMarkdown,
     snippet: documentSnippet(document),
   }
 
@@ -64,6 +69,10 @@ export function mapConfluencePage(input: ConfluencePageMappingInput): MappedConf
       title: link.text || link.href,
       kind: isConfluencePageUrl(link.href) ? "internal" : "external",
     })),
+    remoteVersion,
+    sourceRepresentation: body.representation,
+    sourceBody: body.value,
+    renderedMarkdown,
   }
 }
 

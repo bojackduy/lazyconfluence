@@ -2,6 +2,7 @@ import { mkdtemp, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
+import type { PageBodyArtifact } from "../src/index/repository"
 import type { IndexedPage, PageLink, SpaceSummary } from "../src/model"
 import { resolveIndexDatabasePath } from "../src/index/db"
 import { openIndexRepository } from "../src/index/repository"
@@ -70,6 +71,21 @@ describe("local index repository", () => {
 
       expect(matched?.pageId).toBe("architecture")
       expect(repository.matchPageUrl("https://example.atlassian.net/wiki/spaces/ENG/pages/999/Missing")).toBeNull()
+    })
+  })
+
+  test("persists canonical body artifacts separately from search projection", async () => {
+    await withSeededRepository((repository) => {
+      repository.upsertPageBody(architectureBody)
+
+      const body = repository.getPageBody("architecture")
+
+      expect(body?.sourceRepresentation).toBe("storage")
+      expect(body?.sourceBody).toContain("ac:structured-macro")
+      expect(body?.canonicalDocument.blocks[0]?.type).toBe("heading")
+      expect(body?.sidecar.nodes.opaque.roundTrip).toBe("opaque")
+      expect(body?.editableMarkdown).toContain("<!-- confluence-opaque")
+      expect(repository.getPage("architecture")?.contentMarkdown).toBe(architecture.contentMarkdown)
     })
   })
 })
@@ -198,4 +214,49 @@ const opsToArchitecture: PageLink = {
   targetPageId: null,
   title: "Project Architecture",
   kind: "internal",
+}
+
+const architectureBody: PageBodyArtifact = {
+  pageId: "architecture",
+  remoteVersion: 7,
+  sourceRepresentation: "storage",
+  sourceBody: '<h1>Project Architecture</h1><ac:structured-macro ac:name="toc" />',
+  sourceHash: "source-hash",
+  canonicalDocument: {
+    schemaVersion: 1,
+    pageId: "architecture",
+    title: "Project Architecture",
+    blocks: [
+      {
+        type: "heading",
+        nodeId: "heading",
+        level: 1,
+        inlines: [{ type: "text", text: "Project Architecture" }],
+      },
+      {
+        type: "unsupported",
+        nodeId: "opaque",
+        sourceType: "ac:structured-macro:toc",
+        fallbackText: "",
+      },
+    ],
+  },
+  sidecar: {
+    schemaVersion: 1,
+    remoteVersion: 7,
+    sourceRepresentation: "storage",
+    sourceHash: "source-hash",
+    nodes: {
+      opaque: {
+        sourcePath: "storage.blocks[1]",
+        sourceHash: "macro-hash",
+        sourceType: "ac:structured-macro:toc",
+        raw: '<ac:structured-macro ac:name="toc" />',
+        roundTrip: "opaque",
+      },
+    },
+  },
+  editableMarkdown: '# Project Architecture\n\n<!-- confluence-opaque node="opaque" type="ac:structured-macro:toc" -->',
+  renderedMarkdown: '# Project Architecture\n\n<!-- confluence-opaque node="opaque" type="ac:structured-macro:toc" -->',
+  updatedAt: "2026-07-21T10:00:00Z",
 }

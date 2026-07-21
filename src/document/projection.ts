@@ -27,6 +27,11 @@ export function documentLinks(document: CanonicalDocument) {
     if (block.type === "list") {
       for (const item of block.items) collectInlineLinks(item, links)
     }
+    if (block.type === "table") {
+      for (const row of block.rows) {
+        for (const cell of row.cells) collectInlineLinks(cell.inlines, links)
+      }
+    }
   }
 
   return links
@@ -61,6 +66,8 @@ function renderBlockMarkdown(block: DocumentBlock) {
       return [`\`\`\`${block.language || ""}`, block.text, "```"].join("\n")
     case "quote":
       return renderInlineMarkdown(block.inlines).split("\n").map((line) => `> ${line}`.trimEnd()).join("\n")
+    case "table":
+      return renderTableMarkdown(block)
     case "rule":
       return "---"
     case "unsupported":
@@ -89,6 +96,39 @@ function renderInlineMarkdown(inlines: InlineNode[]) {
   }).join("")
 }
 
+function renderTableMarkdown(block: Extract<DocumentBlock, { type: "table" }>) {
+  const rows = block.rows.filter((row) => row.cells.length > 0)
+  const columnCount = Math.max(0, ...rows.map((row) => row.cells.length))
+
+  if (!rows.length || !columnCount) return ""
+
+  const headerIndex = rows.findIndex((row) => row.cells.some((cell) => cell.header))
+  const effectiveHeaderIndex = headerIndex === -1 ? 0 : headerIndex
+  const header = rows[effectiveHeaderIndex]
+  const bodyRows = rows.filter((_row, index) => index !== effectiveHeaderIndex)
+  const separator = Array.from({ length: columnCount }, () => "---")
+
+  return [
+    renderTableRow(header, columnCount),
+    renderMarkdownTableCells(separator),
+    ...bodyRows.map((row) => renderTableRow(row, columnCount)),
+  ].join("\n")
+}
+
+function renderTableRow(row: Extract<DocumentBlock, { type: "table" }>["rows"][number], columnCount: number) {
+  return renderMarkdownTableCells(Array.from({ length: columnCount }, (_value, index) => renderTableCell(row.cells[index])))
+}
+
+function renderMarkdownTableCells(cells: string[]) {
+  return `| ${cells.join(" | ")} |`
+}
+
+function renderTableCell(cell: Extract<DocumentBlock, { type: "table" }>["rows"][number]["cells"][number] | undefined) {
+  const value = cell ? renderInlineMarkdown(cell.inlines).replace(/\s*\n\s*/g, "<br>").replace(/\|/g, "\\|").trim() : ""
+
+  return value || " "
+}
+
 function blockText(block: DocumentBlock) {
   switch (block.type) {
     case "heading":
@@ -97,6 +137,8 @@ function blockText(block: DocumentBlock) {
       return inlineText(block.inlines)
     case "list":
       return block.items.map(inlineText).join("\n")
+    case "table":
+      return block.rows.map((row) => row.cells.map((cell) => inlineText(cell.inlines)).join("\t")).join("\n")
     case "code":
       return block.text
     case "rule":

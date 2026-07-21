@@ -4,10 +4,13 @@ import {
   CodeRenderable,
   TextAttributes,
   TextRenderable,
+  destroyTreeSitterClient,
+  getTreeSitterClient,
   infoStringToFiletype,
   type MarkdownOptions,
   type RenderContext,
   type ScrollBoxRenderable,
+  type TreeSitterClient,
 } from "@opentui/core"
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import type { IndexedPage, ReaderPage, SearchResult, SpaceSearchResult } from "../model"
@@ -20,6 +23,7 @@ type TreeRow = {
   depth: number
   hasChildren: boolean
   expanded: boolean
+  detached: boolean
 }
 
 type SearchKeyLike = {
@@ -59,6 +63,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const [spaceSwitcherOpen, setSpaceSwitcherOpen] = createSignal(false)
   const [spaceSwitcherQuery, setSpaceSwitcherQuery] = createSignal("")
   const [spaceSwitcherSelectedIndex, setSpaceSwitcherSelectedIndex] = createSignal(0)
+  const [treeSitterClient, setTreeSitterClient] = createSignal<TreeSitterClient | undefined>()
   let documentScrollbox: ScrollBoxRenderable | undefined
 
   const spaces = createMemo(() => dataSource.listSpaces())
@@ -89,6 +94,22 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
 
     onCleanup(() => {
       cancelled = true
+    })
+  })
+
+  onMount(() => {
+    const client = getTreeSitterClient()
+    let cancelled = false
+
+    void client.initialize().then(() => {
+      if (!cancelled) setTreeSitterClient(client)
+    }).catch(() => {
+      if (!cancelled) setTreeSitterClient(undefined)
+    })
+
+    onCleanup(() => {
+      cancelled = true
+      void destroyTreeSitterClient()
     })
   })
 
@@ -295,7 +316,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
       <Show when={credentialWarning()} fallback={<box height={0} />}>{(status) => <CredentialNotice status={status()} />}</Show>
       <box flexGrow={1} minHeight={0} flexDirection={isNarrow() ? "column" : "row"} paddingX={1}>
         <Navigator rows={treeRows()} selectedPageId={selectedPageId()} focused={focusPane() === "navigator"} />
-        <Reader page={readerPage()} focused={focusPane() === "document"} narrow={isNarrow()} setDocumentScrollbox={(scrollbox) => { documentScrollbox = scrollbox }} />
+        <Reader page={readerPage()} focused={focusPane() === "document"} narrow={isNarrow()} treeSitterClient={treeSitterClient()} setDocumentScrollbox={(scrollbox) => { documentScrollbox = scrollbox }} />
       </box>
       <StatusBar focusPane={focusPane()} />
       <PageSearchOverlay
@@ -383,13 +404,14 @@ function NavigatorRow(props: { row: TreeRow; selected: boolean }) {
   const prefix = () => `${"  ".repeat(props.row.depth)}${indicator()} `
   const documentKind = () => navigatorDocumentKind(props.row)
   const symbol = () => navigatorDocumentKindSymbols[documentKind()]
-  const symbolColor = () => navigatorDocumentKindColors[documentKind()]
+  const symbolColor = () => props.row.detached ? theme.warn : navigatorDocumentKindColors[documentKind()]
+  const titleColor = () => props.selected ? theme.text : props.row.detached ? theme.warn : theme.muted
 
   return (
     <box height={1} width="100%" backgroundColor={props.selected ? theme.accentSoft : undefined} paddingLeft={0} paddingRight={1} flexDirection="row">
       <text height={1} width={props.row.depth * 2 + 2} fg={theme.subtle}>{prefix()}</text>
       <text height={1} width={2} fg={props.selected ? theme.text : symbolColor()}>{symbol()}</text>
-      <text height={1} flexGrow={1} minWidth={0} fg={props.selected ? theme.text : theme.muted}>{props.row.page.title}</text>
+      <text height={1} flexGrow={1} minWidth={0} fg={titleColor()}>{props.row.page.title}</text>
     </box>
   )
 }
@@ -423,7 +445,7 @@ function navigatorDocumentKind(row: TreeRow): NavigatorDocumentKind {
   return "page"
 }
 
-function Reader(props: { page: ReaderPage; focused: boolean; narrow: boolean; setDocumentScrollbox: (scrollbox: ScrollBoxRenderable) => void }) {
+function Reader(props: { page: ReaderPage; focused: boolean; narrow: boolean; treeSitterClient?: TreeSitterClient; setDocumentScrollbox: (scrollbox: ScrollBoxRenderable) => void }) {
   const renderer = useRenderer()
   const renderCodeBlock = createReadableCodeBlockRenderer(renderer)
 
@@ -455,6 +477,7 @@ function Reader(props: { page: ReaderPage; focused: boolean; narrow: boolean; se
               width="100%"
               conceal
               concealCode={false}
+              treeSitterClient={props.treeSitterClient}
               renderNode={renderCodeBlock}
               tableOptions={{ style: "grid", widthMode: "full", columnFitter: "balanced", wrapMode: "word", cellPaddingX: 1, borderStyle: "rounded", borderColor: theme.codeBorder, selectable: true }}
             />
@@ -659,6 +682,7 @@ function EmptySpaceState(props: { query: string }) {
 
 function buildTreeRows(pages: IndexedPage[], expandedPageIds: Set<string>) {
   const byParent = new Map<string | null, IndexedPage[]>()
+  const pageIds = new Set(pages.map((page) => page.pageId))
 
   for (const page of pages) {
     const siblings = byParent.get(page.parentId) ?? []
@@ -671,17 +695,38 @@ function buildTreeRows(pages: IndexedPage[], expandedPageIds: Set<string>) {
   }
 
   const rows: TreeRow[] = []
-  const visit = (parentId: string | null, depth: number) => {
-    for (const page of byParent.get(parentId) ?? []) {
-      const hasChildren = (byParent.get(page.pageId)?.length ?? 0) > 0
-      const expanded = hasChildren && expandedPageIds.has(page.pageId)
+  const visited = new Set<string>()
+  const rootPages = pages
+    .filter((page) => page.parentId === null || !pageIds.has(page.parentId))
+    .sort((a, b) => a.title.localeCompare(b.title))
+  const reachablePageIds = new Set<string>()
 
-      rows.push({ page, depth, hasChildren, expanded })
-      if (expanded) visit(page.pageId, depth + 1)
+  const markReachable = (page: IndexedPage) => {
+    if (reachablePageIds.has(page.pageId)) return
+
+    reachablePageIds.add(page.pageId)
+    for (const child of byParent.get(page.pageId) ?? []) markReachable(child)
+  }
+
+  const visit = (page: IndexedPage, depth: number, detached: boolean) => {
+    if (visited.has(page.pageId)) return
+
+    visited.add(page.pageId)
+    const hasChildren = (byParent.get(page.pageId)?.length ?? 0) > 0
+    const expanded = hasChildren && expandedPageIds.has(page.pageId)
+
+    rows.push({ page, depth, hasChildren, expanded, detached })
+    if (expanded) {
+      for (const child of byParent.get(page.pageId) ?? []) visit(child, depth + 1, false)
     }
   }
 
-  visit(null, 0)
+  for (const page of rootPages) markReachable(page)
+  for (const page of rootPages) visit(page, 0, page.parentId !== null && !pageIds.has(page.parentId))
+  for (const page of pages) {
+    if (!reachablePageIds.has(page.pageId)) visit(page, 0, true)
+  }
+
   return rows
 }
 

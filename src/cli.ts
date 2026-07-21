@@ -2,7 +2,7 @@ import { createInterface } from "node:readline/promises"
 import { stdin as input, stdout as output } from "node:process"
 import { ATLASSIAN_API_TOKEN_URL, createLocalConfig, loadAtlassianAuth, parseSpaceKeys, saveLocalAuth } from "./config"
 import { openIndexRepository } from "./index/repository"
-import { formatSyncReport, syncConfluence, SyncServiceError, type SyncProgressEvent } from "./sync"
+import { formatSyncReport, syncConfluence, SyncServiceError, type SyncProgressEvent, type SyncReport } from "./sync"
 import { renderTui } from "./tui/app"
 
 export async function runCli(args: string[]) {
@@ -37,7 +37,7 @@ async function runSyncCommand(args: string[]) {
     const options = parseSyncArgs(args)
     const report = await syncConfluence({ spaceKeys: options.spaceKeys, onProgress: options.quiet ? undefined : printSyncProgress })
     console.log(formatSyncReport(report))
-    if (!report.complete) process.exitCode = 1
+    if (hasFatalSyncFailure(report)) process.exitCode = 1
   } catch (error) {
     console.error(error instanceof SyncServiceError ? error.message : error instanceof Error ? error.message : "Unknown sync error.")
     process.exitCode = 1
@@ -200,7 +200,12 @@ function parseSyncArgs(args: string[]) {
 }
 
 function printSyncProgress(event: SyncProgressEvent) {
+  if (event.type === "completed") return
   console.log(event.message)
+}
+
+function hasFatalSyncFailure(report: SyncReport) {
+  return report.spacesSynced === 0 || report.failures.some((failure) => failure.scope !== "page")
 }
 
 function parseSearchArgs(args: string[]) {

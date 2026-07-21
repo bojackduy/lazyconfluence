@@ -64,16 +64,38 @@ describe("main TUI layout", () => {
       await setup.cleanup()
     }
   })
+
+  test("renders locally orphaned pages instead of hiding them", async () => {
+    const setup = await createTuiTestSetup({ extraPages: [orphanedRunbook] })
+
+    try {
+      const output = await withProcessEnv(setup.env, async () => {
+        const rendered = await testRender(() => <App credentialStatus={readyStatus} />, { width: 120, height: 36 })
+
+        await rendered.renderOnce()
+
+        const frame = rendered.captureCharFrame()
+        rendered.renderer.destroy()
+
+        return frame
+      })
+
+      expect(output).toContain("Orphaned Runbook")
+      expect(output).toContain("• Orphaned Runbook")
+    } finally {
+      await setup.cleanup()
+    }
+  })
 })
 
-async function createTuiTestSetup(overrides: { home?: IndexedPage; architecture?: IndexedPage } = {}) {
+async function createTuiTestSetup(overrides: { home?: IndexedPage; architecture?: IndexedPage; extraPages?: IndexedPage[] } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "lazyconfluence-tui-"))
   const dbPath = join(dir, "index.sqlite3")
   const repository = openIndexRepository({ path: dbPath })
 
   try {
     repository.upsertSpace(space)
-    repository.upsertPages([overrides.home ?? home, overrides.architecture ?? architecture])
+    repository.upsertPages([overrides.home ?? home, overrides.architecture ?? architecture, ...(overrides.extraPages ?? [])])
   } finally {
     repository.close()
   }
@@ -150,4 +172,17 @@ const architecture: IndexedPage = {
   updatedAt: "2026-07-21T09:30:00Z",
   contentMarkdown: "# Real Synced Architecture\n\nRepository-backed page.",
   snippet: "Repository-backed page.",
+}
+
+const orphanedRunbook: IndexedPage = {
+  pageId: "orphaned-runbook",
+  spaceKey: "ENG",
+  title: "Orphaned Runbook",
+  url: "https://example.atlassian.net/wiki/spaces/ENG/pages/102/Orphaned+Runbook",
+  parentId: "missing-parent",
+  path: ["Missing Parent", "Orphaned Runbook"],
+  owner: "Operations Guild",
+  updatedAt: "2026-07-21T09:45:00Z",
+  contentMarkdown: "# Orphaned Runbook\n\nThis page should still be reachable.",
+  snippet: "This page should still be reachable.",
 }

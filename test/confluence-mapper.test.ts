@@ -104,6 +104,34 @@ describe("Confluence mapper", () => {
     expect(String(opaqueNode?.raw)).toContain("ac:name=\"toc\"")
   })
 
+  test("maps storage tables into markdown tables", () => {
+    const mapped = mapConfluencePage({
+      page: {
+        id: "225",
+        title: "Table Page",
+        version: { number: 3, createdAt: "2026-07-21T09:00:00Z" },
+        body: {
+          storage: {
+            value: [
+              '<table data-layout="default"><tbody>',
+              "<tr><th><p>Field</p></th><th><p>Value</p></th></tr>",
+              "<tr><td><p>Status</p></td><td><p><strong>Ready</strong></p></td></tr>",
+              "</tbody></table>",
+            ].join(""),
+          },
+        },
+      },
+      space,
+      baseUrl: "https://example.atlassian.net/wiki",
+    })
+
+    expect(mapped.document.blocks.map((block) => block.type)).toEqual(["table"])
+    expect(mapped.renderedMarkdown).toContain("| Field | Value |")
+    expect(mapped.renderedMarkdown).toContain("| --- | --- |")
+    expect(mapped.renderedMarkdown).toContain("| Status | **Ready** |")
+    expect(documentPlainText(mapped.document)).toContain("Status Ready")
+  })
+
   test("uses the sync timestamp when Confluence omits page timestamps", () => {
     const mapped = mapConfluencePage({
       page: {

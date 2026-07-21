@@ -33,13 +33,14 @@ Status values: `Not started`, `In progress`, `Blocked`, `Partial`, `Done`.
 
 - Foundation shell is done: Bun, TypeScript, CLI entrypoint, TUI launch, `init`, and local `doctor` exist.
 - Domain and demo data are done for the mock-backed product slice.
-- Reader UI and document detail are partial: the mock-backed TUI renders the main reader, navigator, outline, related panel, and scroll behavior, but repository-backed reads are not wired.
-- Search, spaces, and link overlays are partial: active-space page search and space switcher exist against mock data; document find, all-space search UI, command palette, help, and link navigation overlays remain.
+- Reader UI and document detail are partial: the TUI renders the main reader, navigator, outline, related panel, scroll behavior, and now reads pages from the local SQLite index; browser-open hooks and broader polish remain.
+- Search, spaces, and link overlays are partial: active-space page search and space switcher read the local SQLite index; document find, all-space search UI, command palette, help, and link navigation overlays remain.
 - Local index and search are done for this slice: local SQLite schema, repository upserts, relationship queries, URL matching, and page search are implemented and tested.
 - Confluence API mapping is done for the read-only slice: URL normalization, auth headers, mocked paginated fetches, direct children, canonical document projection, storage HTML mapping, sidecar preservation, and local model mapping are implemented and tested.
 - Explicit sync service is done for the first local-first slice: `sync` loads local auth, fetches configured spaces/pages/children, maps Confluence storage into local projections, writes spaces/pages/links/body artifacts into SQLite, reports partial failures, and does not prune local pages after incomplete scans.
 - CLI local DB integration is done for `doctor`, `search`, and scoped `sync` flags. These commands read local SQLite except for explicit `sync`.
 - Sync observability is done for the first remote slice: Confluence requests time out by default, service-level progress events cover remote wait points, and CLI `sync` prints progress unless `--quiet` is set.
+- TUI date rendering is defensive: existing rows with missing or invalid timestamps display `unknown`, and future syncs use the sync timestamp when Confluence omits page dates.
 - Keymap and command registry are not started.
 - Quality and integration are not started.
 
@@ -77,6 +78,8 @@ YYYY-MM-DD  ID  Result  Verification  Follow-up
 2026-07-21  body-artifacts  Local schema v2 and repository/sync persistence for canonical body artifacts implemented.  bun run typecheck; bun test (43 pass, 0 fail).  Next: CLI local DB search/doctor or TUI repository adapter.
 2026-07-21  cli-local  CLI `doctor` reports local DB health, CLI `search` queries SQLite, and `sync --space/--spaces` scopes explicit sync.  bun run typecheck; bun test (47 pass, 0 fail).  Next: TUI repository adapter or command/keymap registry.
 2026-07-21  sync-progress  Confluence request timeout, sync progress events, default CLI sync progress output, `sync --quiet`, and current init handoff message implemented.  bun run typecheck; bun test (49 pass, 0 fail).  Next: TUI repository adapter or command/keymap registry.
+2026-07-21  tui-local  TUI default data path now reads spaces, page tree, selected document, links, and search from the local SQLite index with an empty-index smoke screen.  bun run typecheck; bun test (49 pass, 0 fail).  Next: command/keymap registry, browser-open hook, or remaining overlays.
+2026-07-21  tui-date-fix  Fixed TUI crash on pages with empty/invalid `updatedAt`; mapper now falls back to sync time for future undated Confluence pages.  bun run typecheck; bun test (51 pass, 0 fail).  Next: smoke test `bun run start` against synced data.
 ```
 
 ## Contract Changes
@@ -91,4 +94,6 @@ YYYY-MM-DD  ID  Contract changed  Impacted tasks
 2026-07-21  body-artifacts  Migrated local schema to v2 with page_bodies and added PageBodyArtifact repository contract storing raw source, canonical JSON, sidecar JSON, editable Markdown seed, and rendered Markdown.  Impacts future editable Markdown and Confluence write-back.
 2026-07-21  cli-local  Added repository stats contract for local health checks and CLI flags for local search/sync scoping.  Impacts help/command registry and future TUI command wiring.
 2026-07-21  sync-progress  Added `SyncProgressEvent`, `SyncConfluenceOptions.onProgress`, CLI `sync --quiet`, and optional `ConfluenceClientOptions.requestTimeoutMs`; `FetchLike` now accepts an AbortSignal.  Impacts future TUI sync status wiring and client tests.
+2026-07-21  tui-local  Added `IndexRepository.listPagesInSpace` and `TuiDataSource`; default TUI now opens the local index instead of mock data.  Impacts TUI smoke testing and future command wiring.
+2026-07-21  tui-date-fix  `ConfluencePage` accepts `updatedAt`/`modifiedAt`, mapper accepts `syncedAt`, and TUI date display returns `unknown` for invalid timestamps.  Impacts sync mapping and TUI header rendering.
 ```

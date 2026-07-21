@@ -176,7 +176,7 @@ async function syncSpace(input: {
     const ancestors = ancestorsFor(page, nodeById)
 
     if (page.type === "folder") {
-      pages.push(mapConfluenceFolder({ page, space: input.space, baseUrl: input.baseUrl, ancestors }))
+      pages.push(mapConfluenceFolder({ page, space: input.space, baseUrl: input.baseUrl, ancestors, syncedAt: input.syncedAt }))
       emitProgress(input.onProgress, { type: "indexed-page", message: `Indexed folder ${page.id}: ${page.title}.`, spaceKey: input.space.key, spaceName: input.space.name, pageId: page.id, title: page.title })
       continue
     }
@@ -184,7 +184,7 @@ async function syncSpace(input: {
     try {
       if (!hasStorageBody(page)) emitProgress(input.onProgress, { type: "fetching-page-body", message: `Fetching body for ${page.id}: ${page.title}.`, spaceKey: input.space.key, spaceName: input.space.name, pageId: page.id, title: page.title })
       const pageWithBody = hasStorageBody(page) ? page : await input.client.fetchPageBody(page.id)
-      const mapped = mapConfluencePage({ page: pageWithBody, space: input.space, baseUrl: input.baseUrl, ancestors })
+      const mapped = mapConfluencePage({ page: pageWithBody, space: input.space, baseUrl: input.baseUrl, ancestors, syncedAt: input.syncedAt })
 
       pages.push(mapped.indexedPage)
       links.push(...mapped.links)

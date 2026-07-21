@@ -3,7 +3,7 @@ import type { ScrollBoxRenderable } from "@opentui/core"
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import type { IndexedPage, ReaderPage, SearchResult, SpaceSearchResult } from "../model"
 import { loadCredentialStatus, type CredentialStatus } from "../config"
-import { getDefaultPageId, getPagesForSpace, getReaderPage, mockSpaces, searchPagesInSpace, searchSpaces } from "../mock-data"
+import { createRepositoryTuiDataSource, emptyPageId, emptyReaderPage, emptySpaceSummary, type TuiDataSource } from "./data"
 import { markdownStyle, theme } from "./theme"
 
 type TreeRow = {
@@ -33,13 +33,16 @@ export async function renderTui() {
   })
 }
 
-export function App(props: { credentialStatus?: CredentialStatus } = {}) {
+export function App(props: { credentialStatus?: CredentialStatus; dataSource?: TuiDataSource } = {}) {
   const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
+  const dataSource = props.dataSource ?? createRepositoryTuiDataSource()
+  const initialSpaceKey = dataSource.getDefaultSpaceKey() ?? "LOCAL"
+  const initialPageId = dataSource.getDefaultPageId(initialSpaceKey) ?? emptyPageId
   const [credentialStatus, setCredentialStatus] = createSignal<CredentialStatus | null>(props.credentialStatus ?? null)
-  const [activeSpaceKey, setActiveSpaceKey] = createSignal("ENG")
-  const [selectedPageId, setSelectedPageId] = createSignal(getDefaultPageId())
-  const [expandedPageIds, setExpandedPageIds] = createSignal(new Set([getDefaultPageId()]))
+  const [activeSpaceKey, setActiveSpaceKey] = createSignal(initialSpaceKey)
+  const [selectedPageId, setSelectedPageId] = createSignal(initialPageId)
+  const [expandedPageIds, setExpandedPageIds] = createSignal(new Set(initialPageId === emptyPageId ? [] : [initialPageId]))
   const [focusPane, setFocusPane] = createSignal<"navigator" | "document">("navigator")
   const [pageSearchOpen, setPageSearchOpen] = createSignal(false)
   const [pageSearchQuery, setPageSearchQuery] = createSignal("")
@@ -49,15 +52,16 @@ export function App(props: { credentialStatus?: CredentialStatus } = {}) {
   const [spaceSwitcherSelectedIndex, setSpaceSwitcherSelectedIndex] = createSignal(0)
   let documentScrollbox: ScrollBoxRenderable | undefined
 
-  const space = createMemo(() => mockSpaces.find((candidate) => candidate.key === activeSpaceKey()) ?? mockSpaces[0])
-  const pages = createMemo(() => getPagesForSpace(activeSpaceKey()))
+  const spaces = createMemo(() => dataSource.listSpaces())
+  const space = createMemo(() => spaces().find((candidate) => candidate.key === activeSpaceKey()) ?? emptySpaceSummary(activeSpaceKey()))
+  const pages = createMemo(() => dataSource.getPagesForSpace(activeSpaceKey()))
   const pageById = createMemo(() => new Map(pages().map((page) => [page.pageId, page])))
   const treeRows = createMemo(() => buildTreeRows(pages(), expandedPageIds()))
   const selectedIndex = createMemo(() => treeRows().findIndex((row) => row.page.pageId === selectedPageId()))
   const selectedRow = createMemo(() => treeRows().find((row) => row.page.pageId === selectedPageId()))
-  const readerPage = createMemo(() => getReaderPage(selectedPageId()))
-  const pageSearchResults = createMemo(() => searchPagesInSpace(activeSpaceKey(), pageSearchQuery()))
-  const spaceSwitcherResults = createMemo(() => searchSpaces(spaceSwitcherQuery()))
+  const readerPage = createMemo(() => dataSource.getReaderPage(selectedPageId()) ?? emptyReaderPage(space()))
+  const pageSearchResults = createMemo(() => dataSource.searchPagesInSpace(activeSpaceKey(), pageSearchQuery()))
+  const spaceSwitcherResults = createMemo(() => dataSource.searchSpaces(spaceSwitcherQuery()))
   const isNarrow = createMemo(() => dimensions().width < 96)
   const halfPageScrollAmount = createMemo(() => Math.max(6, Math.floor((dimensions().height - 9) / 2)))
   const credentialWarning = createMemo<CredentialWarning | null>(() => {
@@ -77,6 +81,10 @@ export function App(props: { credentialStatus?: CredentialStatus } = {}) {
     onCleanup(() => {
       cancelled = true
     })
+  })
+
+  onCleanup(() => {
+    if (!props.dataSource) dataSource.close?.()
   })
 
   createEffect(() => {
@@ -121,7 +129,7 @@ export function App(props: { credentialStatus?: CredentialStatus } = {}) {
     setPageSearchOpen(false)
     setSpaceSwitcherOpen(true)
     setSpaceSwitcherQuery("")
-    setSpaceSwitcherSelectedIndex(Math.max(0, searchSpaces("").findIndex((result) => result.space.key === activeSpaceKey())))
+    setSpaceSwitcherSelectedIndex(Math.max(0, dataSource.searchSpaces("").findIndex((result) => result.space.key === activeSpaceKey())))
   }
 
   const closeSpaceSwitcher = () => {
@@ -149,10 +157,10 @@ export function App(props: { credentialStatus?: CredentialStatus } = {}) {
 
     if (!result) return
 
-    const defaultPageId = getDefaultPageId(result.space.key)
+    const defaultPageId = dataSource.getDefaultPageId(result.space.key) ?? emptyPageId
     setActiveSpaceKey(result.space.key)
     setSelectedPageId(defaultPageId)
-    setExpandedPageIds(new Set([defaultPageId]))
+    setExpandedPageIds(new Set(defaultPageId === emptyPageId ? [] : [defaultPageId]))
     documentScrollbox?.scrollTo(0)
     setFocusPane("navigator")
     closeSpaceSwitcher()
@@ -275,7 +283,7 @@ export function App(props: { credentialStatus?: CredentialStatus } = {}) {
   return (
     <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.bg}>
       <Header page={readerPage()} spaceName={space().name} syncState={space().syncState} />
-      <Show when={credentialWarning()}>{(status) => <CredentialNotice status={status()} />}</Show>
+      <Show when={credentialWarning()} fallback={<box height={0} />}>{(status) => <CredentialNotice status={status()} />}</Show>
       <box flexGrow={1} minHeight={0} flexDirection={isNarrow() ? "column" : "row"} paddingX={1}>
         <Navigator rows={treeRows()} selectedPageId={selectedPageId()} focused={focusPane() === "navigator"} />
         <Reader page={readerPage()} focused={focusPane() === "document"} narrow={isNarrow()} setDocumentScrollbox={(scrollbox) => { documentScrollbox = scrollbox }} />
@@ -631,8 +639,14 @@ function relatedItems(page: ReaderPage) {
   ]
 }
 
+const dateFormatter = new Intl.DateTimeFormat("en", { month: "short", day: "2-digit", year: "numeric" })
+
 function formatDate(value: string) {
-  return new Intl.DateTimeFormat("en", { month: "short", day: "2-digit", year: "numeric" }).format(new Date(value))
+  const timestamp = Date.parse(value)
+
+  if (!Number.isFinite(timestamp)) return "unknown"
+
+  return dateFormatter.format(new Date(timestamp))
 }
 
 function formatOptionalDate(value: string | null) {

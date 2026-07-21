@@ -280,6 +280,17 @@ export class IndexRepository {
     return row ? pageFromRow(row) : null
   }
 
+  listPagesInSpace(spaceKey: string): IndexedPage[] {
+    const rows = this.database.query(`
+      SELECT *
+      FROM pages
+      WHERE space_key = ?
+      ORDER BY path_text COLLATE NOCASE, title COLLATE NOCASE
+    `).all(spaceKey) as PageRow[]
+
+    return rows.map(pageFromRow)
+  }
+
   getStats(): IndexRepositoryStats {
     return {
       schemaVersion: this.readUserVersion(),

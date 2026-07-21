@@ -33,13 +33,13 @@ Status values: `Not started`, `In progress`, `Blocked`, `Partial`, `Done`.
 
 - Foundation shell is done: Bun, TypeScript, CLI entrypoint, TUI launch, `init`, and local `doctor` exist.
 - Domain and demo data are done for the mock-backed product slice.
-- Reader UI and document detail are partial: the TUI renders the main reader, navigator, outline, related panel, scroll behavior, safe document-kind symbols, richer markdown/code/table styling, and orphaned local pages; it now reads pages from the local SQLite index. Browser-open hooks and broader polish remain.
+- Reader UI and document detail are partial: the TUI renders the main reader, navigator, outline, related panel, scroll behavior, safe document-kind symbols, richer markdown/code/table styling, and orphaned local pages; it now reads pages from the local SQLite index and can launch `$EDITOR` for the selected page to save a local draft. Browser-open hooks and broader polish remain.
 - Search, spaces, and link overlays are partial: active-space page search and space switcher read the local SQLite index; document find, all-space search UI, command palette, help, and link navigation overlays remain.
 - Local index and search are done for this slice: local SQLite schema, repository upserts, Confluence tree ordering, relationship queries, URL matching, and page search are implemented and tested.
 - Confluence API mapping is done for the read-only slice: URL normalization, auth headers, mocked paginated fetches, recursive direct children, canonical document projection, storage HTML mapping including tables, sidecar preservation, and local model mapping are implemented and tested.
 - Explicit sync service is done for the first local-first slice: `sync` loads local auth, fetches configured spaces/pages/children, maps Confluence storage into local projections, writes spaces/pages/links/body artifacts into SQLite, reports partial failures, and does not prune local pages after incomplete scans.
 - CLI local DB integration is done for `doctor`, `search`, local body `repair`, local draft/stage/discard/diff/preview commands, and scoped `sync` flags. These commands read local SQLite except for explicit `sync`.
-- Local editing is started: CLI drafts can be created from a markdown file or `$EDITOR`, staged, unstaged, discarded, previewed, and diffed against the synced body artifact. Remote apply/write-back is not implemented yet.
+- Local editing is started: CLI drafts can be created from a markdown file or `$EDITOR`, staged, unstaged, discarded, previewed, and diffed against the synced body artifact. The TUI can launch `$EDITOR` with `e` for the selected page and shows draft/staged state in the header. Remote apply/write-back is not implemented yet.
 - Sync observability is done for the first remote slice: Confluence requests time out by default, service-level progress events cover remote wait points, and CLI `sync` prints progress unless `--quiet` is set.
 - TUI date rendering is defensive: existing rows with missing or invalid timestamps display `unknown`, and future syncs use the sync timestamp when Confluence omits page dates.
 - Keymap and command registry are not started.
@@ -87,6 +87,7 @@ YYYY-MM-DD  ID  Result  Verification  Follow-up
 2026-07-21  multiline-code-paragraphs  Confluence paragraphs containing a single multiline `<code>` node now map to fenced code blocks, preserving Mermaid/ERD newlines instead of flattening them as inline code.  bun run typecheck; bun test (56 pass, 0 fail).  Next: rerun sync so stored body artifacts are regenerated.
 2026-07-21  body-repair  Added local `repair` command to rebuild stored body artifacts and page/search projections from existing `source_body`; parser now also merges Mermaid-style adjacent code-only paragraphs while keeping isolated inline-code paragraphs inline.  bun run typecheck; bun test (59 pass, 0 fail); bun run start repair (71 artifacts rebuilt); verified page 1962803383 has a Mermaid fence.  Next: reopen the TUI and inspect the repaired document rendering.
 2026-07-21  local-editing  Added schema v4 local page drafts plus CLI draft/edit/stage/unstage/discard/diff/preview commands.  bun run typecheck; bun test (61 pass, 0 fail).  Next: implement remote apply with version/hash conflict checks and Confluence write-back.
+2026-07-21  tui-external-editor  TUI `e` action now suspends OpenTUI, opens `$EDITOR` for the selected page, resumes after editor exit, saves changed markdown as a local draft, and shows draft/staged state in the header/status bar.  bun run typecheck; bun test (62 pass, 0 fail).  Next: add TUI stage/discard/diff actions or remote apply with conflict checks.
 ```
 
 ## Contract Changes
@@ -107,4 +108,5 @@ YYYY-MM-DD  ID  Contract changed  Impacted tasks
 2026-07-21  tree-order  Migrated local index schema to v3 with `pages.tree_order`; `IndexedPage.treeOrder` is optional for fixtures but persisted for synced/repository pages.  Impacts repository ordering, sync mapping, and navigator sibling order.
 2026-07-21  body-repair  Added `mapConfluenceBody`, `IndexRepository.listPageBodies`, `IndexRepository.deleteLinksFromPage`, `repairBodyArtifacts`, and CLI `repair`.  Impacts local maintenance commands and any future body-artifact migration flow.
 2026-07-21  local-editing  Migrated local index schema to v4 with `page_drafts`; added `PageDraft`, draft stats, and CLI commands `edit`, `draft`, `drafts`, `stage`, `unstage`, `discard`, `diff`, and `preview`.  Impacts local maintenance commands, future TUI edit actions, and remote apply/write-back.
+2026-07-21  tui-external-editor  Added shared `editing` module, `TuiDataSource.editPageDraft`, `TuiDataSource.getPageDraftStatus`, and optional test hooks for external editor suspend/resume.  Impacts TUI actions and future staged/apply UI.
 ```

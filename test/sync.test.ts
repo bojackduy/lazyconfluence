@@ -81,7 +81,7 @@ describe("sync service", () => {
             "101",
             "Project Architecture",
             "100",
-            '<p>Architecture links back to <a href="/wiki/spaces/ENG/pages/100/Engineering+Home">home</a> and <a href="https://developer.atlassian.com/cloud/confluence/rest/v2/">REST API</a>.</p>',
+            '<p>Architecture links back to <a href="/wiki/spaces/ENG/pages/100/Engineering+Home">home</a> and <a href="https://developer.atlassian.com/cloud/confluence/rest/v2/">REST API</a>.</p><ac:structured-macro ac:name="toc"><ac:parameter ac:name="printable">true</ac:parameter></ac:structured-macro>',
           ),
         }),
       })
@@ -92,6 +92,7 @@ describe("sync service", () => {
         spacesSynced: 1,
         pagesIndexed: 3,
         linksIndexed: 2,
+        bodyArtifactsPersisted: 2,
         failures: [],
       })
       expect(calls).toContain("https://example.atlassian.net/wiki/api/v2/pages/101?body-format=storage")
@@ -104,6 +105,12 @@ describe("sync service", () => {
         expect(repository.getOutgoingLinks("101").map((link) => link.kind).sort()).toEqual(["external", "internal"])
         expect(repository.getIncomingLinks("100").map((link) => link.fromPageId)).toEqual(["101"])
         expect(repository.searchPagesInSpace("ENG", "architecture")[0]?.page.pageId).toBe("101")
+        const body = repository.getPageBody("101")
+
+        expect(body?.sourceBody).toContain("ac:structured-macro")
+        expect(body?.sidecar.nodes["lc_101_0001"]?.roundTrip).toBe("native")
+        expect(Object.values(body?.sidecar.nodes ?? {}).some((node) => node.roundTrip === "opaque")).toBe(true)
+        expect(body?.renderedMarkdown).toContain("<!-- confluence-opaque")
       } finally {
         repository.close()
       }
@@ -154,6 +161,7 @@ describe("sync service", () => {
 
       expect(report.complete).toBe(false)
       expect(report.pagesIndexed).toBe(1)
+      expect(report.bodyArtifactsPersisted).toBe(1)
       expect(report.failures).toEqual([{ scope: "page", key: "bad", message: expect.stringContaining("HTTP 500") }])
 
       const checked = openIndexRepository({ path: setup.dbPath })

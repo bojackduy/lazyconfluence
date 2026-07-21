@@ -37,7 +37,7 @@ Status values: `Not started`, `In progress`, `Blocked`, `Partial`, `Done`.
 - Search, spaces, and link overlays are partial: active-space page search and space switcher exist against mock data; document find, all-space search UI, command palette, help, and link navigation overlays remain.
 - Local index and search are done for this slice: local SQLite schema, repository upserts, relationship queries, URL matching, and page search are implemented and tested.
 - Confluence API mapping is done for the read-only slice: URL normalization, auth headers, mocked paginated fetches, direct children, canonical document projection, storage HTML mapping, sidecar preservation, and local model mapping are implemented and tested.
-- Explicit sync service is done for the first local-first slice: `sync` loads local auth, fetches configured spaces/pages/children, maps Confluence storage into local projections, writes spaces/pages/links into SQLite, reports partial failures, and does not prune local pages after incomplete scans.
+- Explicit sync service is done for the first local-first slice: `sync` loads local auth, fetches configured spaces/pages/children, maps Confluence storage into local projections, writes spaces/pages/links/body artifacts into SQLite, reports partial failures, and does not prune local pages after incomplete scans.
 - Keymap and command registry are not started.
 - Quality and integration are not started.
 
@@ -72,6 +72,7 @@ YYYY-MM-DD  ID  Result  Verification  Follow-up
 2026-07-21  05  Local SQLite index, repository, relationship queries, URL matching, and search implemented.  bun run typecheck; bun test (30 pass, 0 fail).  Next: build Confluence API mapping or explicit sync service; do not wire TUI yet.
 2026-07-21  04  Read-only Confluence client, canonical document mapping, storage HTML projection, link extraction, and opaque macro sidecar preservation implemented.  bun run typecheck; bun test (38 pass, 0 fail).  Next: explicit sync service should connect mocked Confluence client/mapper to the local repository.
 2026-07-21  sync  Explicit sync service implemented and CLI `sync` now runs it.  bun run typecheck; bun test (42 pass, 0 fail).  Next: CLI `search`/doctor local DB integration or TUI repository adapter; keep TUI mock-backed until integration task.
+2026-07-21  body-artifacts  Local schema v2 and repository/sync persistence for canonical body artifacts implemented.  bun run typecheck; bun test (43 pass, 0 fail).  Next: CLI local DB search/doctor or TUI repository adapter.
 ```
 
 ## Contract Changes
@@ -83,4 +84,5 @@ YYYY-MM-DD  ID  Contract changed  Impacted tasks
 2026-07-21  05  Added local SQLite schema v1 for spaces, pages, links, and page_fts plus repository search/query API.  Impacts future sync, CLI search, and TUI repository integration.
 2026-07-21  04  Added canonical document model, mapping sidecar, Confluence client API, and mapper output that derives IndexedPage/PageLink projections from Confluence storage.  Impacts sync, future editable Markdown, and TUI repository integration.
 2026-07-21  sync  Added syncConfluence service report contract and made CLI `sync` the explicit Confluence fetch/write path.  Impacts CLI integration, local-first smoke tests, and future TUI repository integration.
+2026-07-21  body-artifacts  Migrated local schema to v2 with page_bodies and added PageBodyArtifact repository contract storing raw source, canonical JSON, sidecar JSON, editable Markdown seed, and rendered Markdown.  Impacts future editable Markdown and Confluence write-back.
 ```

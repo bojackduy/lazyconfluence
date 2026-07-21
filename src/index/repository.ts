@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite"
+import type { CanonicalDocument, MappingSidecar, SourceRepresentation } from "../document/model"
 import type { IndexedPage, PageLink, PageLinkKind, SearchResult, SpaceSummary, SyncState } from "../model"
 import { openIndexDatabase, type IndexDatabase, type OpenIndexDatabaseOptions } from "./db"
 import { compareSearchResults, ftsPrefixQuery, normalizeSearchText, pageUrlKey, scorePageSearchResult } from "./search"
@@ -30,6 +31,32 @@ interface SpaceRow {
   last_synced_at: string | null
   sync_state: SyncState
   page_count: number
+}
+
+interface PageBodyRow {
+  page_id: string
+  remote_version: number
+  source_representation: SourceRepresentation
+  source_body: string
+  source_hash: string
+  canonical_json: string
+  sidecar_json: string
+  editable_markdown: string
+  rendered_markdown: string
+  updated_at: string
+}
+
+export interface PageBodyArtifact {
+  pageId: string
+  remoteVersion: number
+  sourceRepresentation: SourceRepresentation
+  sourceBody: string
+  sourceHash: string
+  canonicalDocument: CanonicalDocument
+  sidecar: MappingSidecar
+  editableMarkdown: string
+  renderedMarkdown: string
+  updatedAt: string
 }
 
 export class IndexRepository {
@@ -164,6 +191,49 @@ export class IndexRepository {
     })
   }
 
+  upsertPageBody(body: PageBodyArtifact) {
+    return this.upsertPageBodies([body])
+  }
+
+  upsertPageBodies(bodies: PageBodyArtifact[]) {
+    if (!bodies.length) return 0
+
+    const statement = this.database.query(`
+      INSERT INTO page_bodies (
+        page_id, remote_version, source_representation, source_body, source_hash,
+        canonical_json, sidecar_json, editable_markdown, rendered_markdown, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(page_id) DO UPDATE SET
+        remote_version = excluded.remote_version,
+        source_representation = excluded.source_representation,
+        source_body = excluded.source_body,
+        source_hash = excluded.source_hash,
+        canonical_json = excluded.canonical_json,
+        sidecar_json = excluded.sidecar_json,
+        editable_markdown = excluded.editable_markdown,
+        rendered_markdown = excluded.rendered_markdown,
+        updated_at = excluded.updated_at
+    `)
+
+    for (const body of bodies) {
+      statement.run(
+        body.pageId,
+        body.remoteVersion,
+        body.sourceRepresentation,
+        body.sourceBody,
+        body.sourceHash,
+        JSON.stringify(body.canonicalDocument),
+        JSON.stringify(body.sidecar),
+        body.editableMarkdown,
+        body.renderedMarkdown,
+        body.updatedAt,
+      )
+    }
+
+    return bodies.length
+  }
+
   getSpace(key: string): SpaceSummary | null {
     const row = this.database.query(`
       SELECT spaces.key,
@@ -200,6 +270,12 @@ export class IndexRepository {
     const row = this.database.query("SELECT * FROM pages WHERE page_id = ?").get(pageId) as PageRow | null
 
     return row ? pageFromRow(row) : null
+  }
+
+  getPageBody(pageId: string): PageBodyArtifact | null {
+    const row = this.database.query("SELECT * FROM page_bodies WHERE page_id = ?").get(pageId) as PageBodyRow | null
+
+    return row ? pageBodyFromRow(row) : null
   }
 
   getChildren(parentPageId: string): IndexedPage[] {
@@ -399,4 +475,19 @@ function parsePath(value: string, fallbackTitle: string) {
   }
 
   return [fallbackTitle]
+}
+
+function pageBodyFromRow(row: PageBodyRow): PageBodyArtifact {
+  return {
+    pageId: String(row.page_id),
+    remoteVersion: Number(row.remote_version),
+    sourceRepresentation: row.source_representation,
+    sourceBody: String(row.source_body),
+    sourceHash: String(row.source_hash),
+    canonicalDocument: JSON.parse(row.canonical_json) as CanonicalDocument,
+    sidecar: JSON.parse(row.sidecar_json) as MappingSidecar,
+    editableMarkdown: String(row.editable_markdown),
+    renderedMarkdown: String(row.rendered_markdown),
+    updatedAt: String(row.updated_at),
+  }
 }

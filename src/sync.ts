@@ -2,7 +2,7 @@ import type { FetchLike, ConfluencePage, ConfluenceSpace } from "./confluence/cl
 import { ConfluenceClient } from "./confluence/client"
 import { mapConfluenceFolder, mapConfluencePage, mapConfluenceSpace } from "./confluence/mapper"
 import { loadAtlassianAuth } from "./config"
-import { openIndexRepository, type IndexRepository } from "./index/repository"
+import { openIndexRepository, type IndexRepository, type PageBodyArtifact } from "./index/repository"
 import type { IndexedPage, PageLink } from "./model"
 
 export interface SyncConfluenceOptions {
@@ -27,6 +27,7 @@ export interface SyncReport {
   spacesSynced: number
   pagesIndexed: number
   linksIndexed: number
+  bodyArtifactsPersisted: number
   failures: SyncFailure[]
   complete: boolean
 }
@@ -61,6 +62,7 @@ export async function syncConfluence(options: SyncConfluenceOptions = {}): Promi
       spacesSynced: 0,
       pagesIndexed: 0,
       linksIndexed: 0,
+      bodyArtifactsPersisted: 0,
       failures: [],
       complete: true,
     }
@@ -71,6 +73,7 @@ export async function syncConfluence(options: SyncConfluenceOptions = {}): Promi
         report.spacesSynced += 1
         report.pagesIndexed += result.pagesIndexed
         report.linksIndexed += result.linksIndexed
+        report.bodyArtifactsPersisted += result.bodyArtifactsPersisted
         report.failures.push(...result.failures)
       } catch (error) {
         report.failures.push({ scope: "space", key: space.key, message: errorMessage(error) })
@@ -92,6 +95,7 @@ export function formatSyncReport(report: SyncReport) {
     `Spaces: ${report.spacesSynced}/${report.spacesRequested}`,
     `Pages indexed: ${report.pagesIndexed}`,
     `Links indexed: ${report.linksIndexed}`,
+    `Body artifacts: ${report.bodyArtifactsPersisted}`,
   ]
 
   if (report.databasePath) lines.push(`Database: ${report.databasePath}`)
@@ -124,6 +128,7 @@ async function syncSpace(input: {
 
   const pages: IndexedPage[] = []
   const links: PageLink[] = []
+  const bodyArtifacts: PageBodyArtifact[] = []
   const pageFailures: SyncFailure[] = []
 
   for (const page of nodeById.values()) {
@@ -140,6 +145,18 @@ async function syncSpace(input: {
 
       pages.push(mapped.indexedPage)
       links.push(...mapped.links)
+      bodyArtifacts.push({
+        pageId: mapped.indexedPage.pageId,
+        remoteVersion: mapped.remoteVersion,
+        sourceRepresentation: mapped.sourceRepresentation,
+        sourceBody: mapped.sourceBody,
+        sourceHash: mapped.sidecar.sourceHash,
+        canonicalDocument: mapped.document,
+        sidecar: mapped.sidecar,
+        editableMarkdown: mapped.renderedMarkdown,
+        renderedMarkdown: mapped.renderedMarkdown,
+        updatedAt: input.syncedAt,
+      })
     } catch (error) {
       pageFailures.push({ scope: "page", key: page.id || page.title, message: errorMessage(error) })
     }
@@ -147,9 +164,10 @@ async function syncSpace(input: {
 
   input.repository.upsertSpace(mapConfluenceSpace(input.space, { lastSyncedAt: input.syncedAt, pageCount: pages.length }))
   input.repository.upsertPages(pages)
+  input.repository.upsertPageBodies(bodyArtifacts)
   input.repository.upsertLinks(links)
 
-  return { pagesIndexed: pages.length, linksIndexed: links.length, failures: pageFailures }
+  return { pagesIndexed: pages.length, linksIndexed: links.length, bodyArtifactsPersisted: bodyArtifacts.length, failures: pageFailures }
 }
 
 function ancestorsFor(page: ConfluencePage, nodeById: Map<string, ConfluencePage>) {

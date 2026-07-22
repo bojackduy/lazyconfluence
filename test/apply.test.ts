@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
-import { applyPageDraftToConfluence } from "../src/apply"
+import { applyPageCreateToConfluence, applyPageDraftToConfluence } from "../src/apply"
 import { createLocalConfig, saveLocalAuth } from "../src/config"
 import type { FetchLike } from "../src/confluence/client"
 import { mapConfluenceBody } from "../src/confluence/mapper"
@@ -99,6 +99,56 @@ describe("apply page draft", () => {
       expect(result.status === "blocked" ? result.details.join(" ") : "").toContain("Cannot safely preserve")
       expect(networkCalled).toBe(false)
       expect(repository.getPageDraft("100")?.status).toBe("staged")
+    } finally {
+      repository.close()
+      await setup.cleanup()
+    }
+  })
+
+  test("creates a staged page in Confluence and local index", async () => {
+    const setup = await createApplySetup()
+    const repository = openIndexRepository({ path: setup.dbPath })
+    const calls: Array<{ url: string; method?: string; body?: string }> = []
+
+    try {
+      seedApplyPage(repository, baseStorage)
+      repository.upsertPageCreate({
+        localId: "create-1",
+        spaceKey: "ENG",
+        parentPageId: "100",
+        title: "Launch Plan",
+        draftMarkdown: "# Launch Plan\n",
+        createdAt: "2026-07-21T10:00:00Z",
+        updatedAt: "2026-07-21T10:00:00Z",
+      })
+
+      const result = await applyPageCreateToConfluence("create-1", {
+        env: setup.env,
+        repository,
+        now: fixedClock(),
+        fetch: applyFetch(calls, {
+          "/wiki/api/v2/spaces?keys=ENG&limit=250": { results: [{ id: "10", key: "ENG", name: "Engineering" }] },
+          "/wiki/api/v2/pages": remotePage("101", "Launch Plan", 1, ""),
+          "/wiki/api/v2/pages/101?body-format=storage": remotePage("101", "Launch Plan", 1, "<h1>Launch Plan</h1>"),
+        }),
+      })
+
+      expect(result).toMatchObject({ status: "applied", pageId: "101", title: "Launch Plan", remoteVersion: 1 })
+      expect(calls.map((call) => `${call.method ?? "GET"} ${new URL(call.url).pathname}${new URL(call.url).search}`)).toEqual([
+        "GET /wiki/api/v2/spaces?keys=ENG&limit=250",
+        "POST /wiki/api/v2/pages",
+        "GET /wiki/api/v2/pages/101?body-format=storage",
+      ])
+      expect(JSON.parse(calls[1]?.body ?? "{}")).toMatchObject({
+        spaceId: "10",
+        parentId: "100",
+        status: "current",
+        title: "Launch Plan",
+        body: { representation: "storage", value: "<h1>Launch Plan</h1>" },
+      })
+      expect(repository.getPageCreate("create-1")).toBeNull()
+      expect(repository.getPage("101")).toMatchObject({ pageId: "101", parentId: "100", title: "Launch Plan", path: ["Project Architecture", "Launch Plan"] })
+      expect(repository.getPageBody("101")?.renderedMarkdown).toContain("Launch Plan")
     } finally {
       repository.close()
       await setup.cleanup()

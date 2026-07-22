@@ -125,6 +125,30 @@ describe("local index repository", () => {
       expect(repository.getStats()).toMatchObject({ draftCount: 0, stagedDraftCount: 0 })
     })
   })
+
+  test("persists staged page creates", async () => {
+    await withSeededRepository((repository) => {
+      repository.upsertPageCreate({
+        localId: "create-1",
+        spaceKey: "ENG",
+        parentPageId: "eng-home",
+        title: "New Runbook",
+        draftMarkdown: "# New Runbook\n",
+        createdAt: "2026-07-22T09:00:00Z",
+        updatedAt: "2026-07-22T09:00:00Z",
+      })
+
+      expect(repository.getStats()).toMatchObject({ createCount: 1 })
+      expect(repository.getPageCreate("create-1")?.title).toBe("New Runbook")
+      expect(repository.listPageCreates("ENG").map((create) => create.localId)).toEqual(["create-1"])
+      expect(repository.listPageCreates("OPS")).toEqual([])
+
+      repository.deletePageCreate("create-1")
+
+      expect(repository.getPageCreate("create-1")).toBeNull()
+      expect(repository.getStats()).toMatchObject({ createCount: 0 })
+    })
+  })
 })
 
 async function withSeededRepository(callback: (repository: Repository) => void | Promise<void>) {

@@ -18,7 +18,7 @@ import type { IndexedPage, ReaderPage, SearchResult, SpaceSearchResult } from ".
 import { loadCredentialStatus, type CredentialStatus } from "../config"
 import type { PageDraftStatus } from "../index/repository"
 import type { ApplyPageDraftResult } from "../apply"
-import { createRepositoryTuiDataSource, emptyPageId, emptyReaderPage, emptySpaceSummary, type TuiDataSource, type TuiDraftChange } from "./data"
+import { createRepositoryTuiDataSource, emptyPageId, emptyReaderPage, emptySpaceSummary, type TuiDataSource, type TuiStagedChange } from "./data"
 import { markdownStyle, theme } from "./theme"
 
 type TreeRow = {
@@ -63,6 +63,8 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const [pageSearchOpen, setPageSearchOpen] = createSignal(false)
   const [pageSearchQuery, setPageSearchQuery] = createSignal("")
   const [pageSearchSelectedIndex, setPageSearchSelectedIndex] = createSignal(0)
+  const [newPageOpen, setNewPageOpen] = createSignal(false)
+  const [newPageTitle, setNewPageTitle] = createSignal("")
   const [spaceSwitcherOpen, setSpaceSwitcherOpen] = createSignal(false)
   const [spaceSwitcherQuery, setSpaceSwitcherQuery] = createSignal("")
   const [spaceSwitcherSelectedIndex, setSpaceSwitcherSelectedIndex] = createSignal(0)
@@ -76,7 +78,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const [editorInputFocused, setEditorInputFocused] = createSignal(false)
   const [changesOpen, setChangesOpen] = createSignal(false)
   const [changesSelectedIndex, setChangesSelectedIndex] = createSignal(0)
-  const [selectedChangePageIds, setSelectedChangePageIds] = createSignal(new Set<string>())
+  const [selectedChangeKeys, setSelectedChangeKeys] = createSignal(new Set<string>())
   const [changesApplying, setChangesApplying] = createSignal(false)
   const [changesMessage, setChangesMessage] = createSignal("")
   const [editStatusMessage, setEditStatusMessage] = createSignal("")
@@ -109,7 +111,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const spaceSwitcherResults = createMemo(() => dataSource.searchSpaces(spaceSwitcherQuery()))
   const stagedChanges = createMemo(() => {
     draftRevision()
-    return dataSource.listStagedDraftChanges(activeSpaceKey())
+    return dataSource.listStagedChanges(activeSpaceKey())
   })
   const isNarrow = createMemo(() => dimensions().width < 96)
   const halfPageScrollAmount = createMemo(() => Math.max(6, Math.floor((dimensions().height - 9) / 2)))
@@ -202,8 +204,8 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
 
     if (changesSelectedIndex() > maxIndex) setChangesSelectedIndex(maxIndex)
 
-    setSelectedChangePageIds((current) => {
-      const available = new Set(changes.map((change) => change.page.pageId))
+    setSelectedChangeKeys((current) => {
+      const available = new Set(changes.map((change) => change.changeKey))
       const next = new Set([...current].filter((pageId) => available.has(pageId)))
 
       return next
@@ -213,6 +215,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const openPageSearch = () => {
     setSpaceSwitcherOpen(false)
     setChangesOpen(false)
+    setNewPageOpen(false)
     setPageSearchOpen(true)
     setPageSearchQuery("")
     setPageSearchSelectedIndex(0)
@@ -227,6 +230,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const openSpaceSwitcher = () => {
     setPageSearchOpen(false)
     setChangesOpen(false)
+    setNewPageOpen(false)
     setSpaceSwitcherOpen(true)
     setSpaceSwitcherQuery("")
     setSpaceSwitcherSelectedIndex(Math.max(0, dataSource.searchSpaces("").findIndex((result) => result.space.key === activeSpaceKey())))
@@ -238,15 +242,16 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     setSpaceSwitcherSelectedIndex(0)
   }
 
-  const openChanges = (focusPageId?: string) => {
+  const openChanges = (focusChangeKey?: string) => {
     setPageSearchOpen(false)
+    setNewPageOpen(false)
     setSpaceSwitcherOpen(false)
 
     const changes = stagedChanges()
-    const focusIndex = focusPageId ? changes.findIndex((change) => change.page.pageId === focusPageId) : -1
+    const focusIndex = focusChangeKey ? changes.findIndex((change) => change.changeKey === focusChangeKey) : -1
 
     setChangesSelectedIndex(focusIndex >= 0 ? focusIndex : 0)
-    setSelectedChangePageIds(new Set(changes.map((change) => change.page.pageId)))
+    setSelectedChangeKeys(new Set(changes.map((change) => change.changeKey)))
     setChangesMessage(changes.length ? `${changes.length} staged change${changes.length === 1 ? "" : "s"} in ${space().name}.` : `No staged changes in ${space().name}.`)
     setChangesOpen(true)
   }
@@ -263,34 +268,38 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     const change = stagedChanges()[changesSelectedIndex()]
     if (!change) return
 
-    setSelectedChangePageIds((current) => {
+    setSelectedChangeKeys((current) => {
       const next = new Set(current)
 
-      if (next.has(change.page.pageId)) next.delete(change.page.pageId)
-      else next.add(change.page.pageId)
+      if (next.has(change.changeKey)) next.delete(change.changeKey)
+      else next.add(change.changeKey)
 
       return next
     })
   }
 
   const selectedChangeIds = () => stagedChanges()
-    .filter((change) => selectedChangePageIds().has(change.page.pageId))
-    .map((change) => change.page.pageId)
+    .filter((change) => selectedChangeKeys().has(change.changeKey))
+    .map((change) => change.changeKey)
 
   const applySelectedChanges = () => {
-    const pageIds = selectedChangeIds()
-    if (!pageIds.length || changesApplying()) {
+    const changeKeys = selectedChangeIds()
+    if (!changeKeys.length || changesApplying()) {
       setChangesMessage("Select at least one staged change to apply.")
       return
     }
 
     setChangesApplying(true)
-    setChangesMessage(`Applying ${pageIds.length} selected staged change${pageIds.length === 1 ? "" : "s"}...`)
+    setChangesMessage(`Applying ${changeKeys.length} selected staged change${changeKeys.length === 1 ? "" : "s"}...`)
 
-    void dataSource.applyStagedDrafts(pageIds).then((results) => {
+    void dataSource.applyStagedChanges(changeKeys).then((results) => {
+      const selectedCreateIndex = changeKeys.findIndex((changeKey) => changeKey === selectedPageId() && changeKey.startsWith("create:"))
+      const selectedCreateResult = selectedCreateIndex >= 0 ? results[selectedCreateIndex] : null
+
       setDraftRevision((revision) => revision + 1)
+      if (selectedCreateResult?.status === "applied") setSelectedPageId(selectedCreateResult.pageId)
       setChangesMessage(applyBatchMessage(results))
-      setSelectedChangePageIds(new Set(stagedChanges().map((change) => change.page.pageId)))
+      setSelectedChangeKeys(new Set(stagedChanges().map((change) => change.changeKey)))
     }).catch((error) => {
       setChangesMessage(errorMessage(error))
     }).finally(() => {
@@ -305,10 +314,48 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
       return
     }
 
-    const discarded = dataSource.discardPageDrafts(pageIds)
+    const discarded = dataSource.discardStagedChanges(pageIds)
     setDraftRevision((revision) => revision + 1)
     setChangesMessage(`Discarded ${discarded} staged change${discarded === 1 ? "" : "s"}.`)
-    setSelectedChangePageIds(new Set(stagedChanges().map((change) => change.page.pageId)))
+    setSelectedChangeKeys(new Set(stagedChanges().map((change) => change.changeKey)))
+  }
+
+  const openNewPage = () => {
+    const parentPage = selectedRow()?.page
+    if (!parentPage || parentPage.pageId === emptyPageId) {
+      setEditStatusMessage("Select a parent page in the navigator before creating a page.")
+      return
+    }
+
+    setPageSearchOpen(false)
+    setSpaceSwitcherOpen(false)
+    setChangesOpen(false)
+    setNewPageTitle("")
+    setNewPageOpen(true)
+    setFocusPane("navigator")
+  }
+
+  const closeNewPage = () => {
+    setNewPageOpen(false)
+    setNewPageTitle("")
+  }
+
+  const submitNewPage = () => {
+    const parentPage = selectedRow()?.page
+    if (!parentPage) return
+
+    try {
+      const change = dataSource.stagePageCreate({ spaceKey: activeSpaceKey(), parentPageId: parentPage.pageId, title: newPageTitle() })
+
+      setDraftRevision((revision) => revision + 1)
+      closeNewPage()
+      setSelectedPageId(change.changeKey)
+      setExpandedPageIds((current) => new Set(current).add(parentPage.pageId))
+      documentScrollbox?.scrollTo(0)
+      setEditStatusMessage(`Created local page ${change.title}. Press e to edit or c Overview to apply/discard.`)
+    } catch (error) {
+      setEditStatusMessage(errorMessage(error))
+    }
   }
 
   const selectPageSearchResult = () => {
@@ -358,8 +405,8 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     }
 
     try {
-      const input = dataSource.getEditableDraftInput(pageId)
-      const markdown = input.draft?.draftMarkdown ?? input.body.editableMarkdown
+      const input = dataSource.getEditablePageInput(pageId)
+      const markdown = input.markdown
 
       setEditorPageId(pageId)
       setEditorPageTitle(input.page.title)
@@ -381,9 +428,9 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     if (!pageId) return
 
     try {
-      const result = dataSource.stagePageDraft(pageId, editorMarkdown())
+      const result = dataSource.stagePageBuffer(pageId, editorMarkdown())
       setDraftRevision((revision) => revision + 1)
-      closeEditorImmediately(result === "staged" ? `Staged changes for ${editorPageTitle()}. Open Overview to review/apply/discard.` : `No staged change remains for ${editorPageTitle()}.`)
+      closeEditorImmediately(result === "staged" ? `Staged changes for ${editorPageTitle()}. Open Overview to review/apply/discard.` : `No buffer changes staged for ${editorPageTitle()}.`)
     } catch (error) {
       setEditStatusMessage(errorMessage(error))
     }
@@ -451,6 +498,16 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
       return
     }
 
+    if (newPageOpen()) {
+      const action = pageSearchKeyAction(key)
+
+      if (action === "close") closeNewPage()
+      else if (action === "submit") submitNewPage()
+      else if (action === "delete") setNewPageTitle((title) => title.slice(0, -1))
+      else if (action === "append") setNewPageTitle((title) => title + key.sequence)
+      return
+    }
+
     if (editorOpen()) {
       if (key.name === "escape") closeEditor()
       else if (key.ctrl && key.name === "t") stageEditorBuffer()
@@ -503,6 +560,11 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
 
     if (isPlainKey(key, "e")) {
       openEditorForSelectedPage()
+      return
+    }
+
+    if (focusPane() === "navigator" && isPlainKey(key, "n")) {
+      openNewPage()
       return
     }
 
@@ -570,7 +632,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
         activeSpaceName={space().name}
         changes={stagedChanges()}
         selectedIndex={changesSelectedIndex()}
-        selectedPageIds={selectedChangePageIds()}
+        selectedChangeKeys={selectedChangeKeys()}
         message={changesMessage()}
         applying={changesApplying()}
         left={dimensions().width < 72 ? 1 : 4}
@@ -581,6 +643,13 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
         onApply={applySelectedChanges}
         onDiscard={discardSelectedChanges}
         onClose={closeChanges}
+      />
+      <NewPageOverlay
+        visible={newPageOpen()}
+        title={newPageTitle()}
+        parentPage={selectedRow()?.page ?? null}
+        left={dimensions().width < 72 ? 2 : 8}
+        width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 4 : 16))}
       />
       <PageSearchOverlay
         visible={pageSearchOpen()}
@@ -655,7 +724,7 @@ function Navigator(props: { rows: TreeRow[]; selectedPageId: string; focused: bo
       flexDirection="column"
     >
       <text height={1} fg={props.focused ? theme.accent : theme.muted} attributes={1}>NAVIGATOR</text>
-      <text height={1} fg={theme.subtle}>j/k move  h/l fold  enter read</text>
+      <text height={1} fg={theme.subtle}>j/k move  h/l fold  n new page</text>
       <box height={1} />
       <scrollbox flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
         <box flexDirection="column" width="100%">
@@ -824,7 +893,7 @@ function StatusBar(props: { focusPane: string; editorOpen: boolean; editorDirty:
   const hint = () => {
     if (props.editorOpen) return "Ctrl+T stage | Esc close without changing staged docs"
     if (props.focusPane === "document") return "/ page search | s spaces | c overview | e edit | j/k scroll line | d/u scroll doc | h navigator | q quit"
-    return "/ page search | s spaces | c overview | e edit | j/k move | h/l fold tree | d/u scroll doc | q quit"
+    return "/ page search | s spaces | c overview | n new page | e edit | j/k move | h/l fold tree | d/u scroll doc | q quit"
   }
   const status = () => {
     if (props.editorOpen) return props.editMessage || `editing transient buffer: ${props.editorDirty ? "modified" : "unchanged"}`
@@ -913,9 +982,9 @@ function EditorOverlay(props: {
 export function StagedChangesOverlay(props: {
   visible: boolean
   activeSpaceName: string
-  changes: TuiDraftChange[]
+  changes: TuiStagedChange[]
   selectedIndex: number
-  selectedPageIds: Set<string>
+  selectedChangeKeys: Set<string>
   message: string
   applying: boolean
   left: number
@@ -929,7 +998,7 @@ export function StagedChangesOverlay(props: {
 }) {
   const listWidth = createMemo(() => Math.min(40, Math.max(28, Math.floor(props.width * 0.36))))
   const selectedChange = createMemo(() => props.changes[props.selectedIndex])
-  const selectedCount = createMemo(() => props.changes.filter((change) => props.selectedPageIds.has(change.page.pageId)).length)
+  const selectedCount = createMemo(() => props.changes.filter((change) => props.selectedChangeKeys.has(change.changeKey)).length)
   const lines = createMemo(() => selectedChange()?.diffMarkdown.split("\n") ?? [])
 
   return (
@@ -962,7 +1031,7 @@ export function StagedChangesOverlay(props: {
             <scrollbox flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
               <box flexDirection="column" width="100%">
                 <For each={props.changes}>
-                  {(change, index) => <StagedChangeRow change={change} active={index() === props.selectedIndex} checked={props.selectedPageIds.has(change.page.pageId)} />}
+                  {(change, index) => <StagedChangeRow change={change} active={index() === props.selectedIndex} checked={props.selectedChangeKeys.has(change.changeKey)} />}
                 </For>
               </box>
             </scrollbox>
@@ -972,9 +1041,9 @@ export function StagedChangesOverlay(props: {
           <Show when={selectedChange()} fallback={<box flexGrow={1} alignItems="center" justifyContent="center"><text fg={theme.subtle}>Select a staged page to preview its diff.</text></box>}>
             {(change) => (
               <>
-                <text height={1} fg={theme.text}>{change().page.title}</text>
-                <text height={1} fg={theme.subtle}>ID: {change().page.pageId}  Updated: {formatDate(change().draft.updatedAt)}</text>
-                <text height={1} fg={theme.muted}>{change().page.path.join(" / ")}</text>
+                <text height={1} fg={theme.text}>{change().title}</text>
+                <text height={1} fg={theme.subtle}>{changeDetailLine(change())}</text>
+                <text height={1} fg={theme.muted}>{changePathLine(change())}</text>
                 <scrollbox flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
                   <box flexDirection="column" width="100%">
                     <For each={lines()}>{(line) => <text height={1} width="100%" content={line || " "} fg={diffLineColor(line)} />}</For>
@@ -996,23 +1065,65 @@ export function StagedChangesOverlay(props: {
   )
 }
 
-function StagedChangeRow(props: { change: TuiDraftChange; active: boolean; checked: boolean }) {
+function StagedChangeRow(props: { change: TuiStagedChange; active: boolean; checked: boolean }) {
   const marker = () => (props.active ? "▶" : " ")
   const checkbox = () => (props.checked ? "[x]" : "[ ]")
+  const kind = () => (props.change.kind === "create" ? "create" : "update")
+  const identifier = () => props.change.kind === "create" ? `parent ${props.change.parentPage.pageId}` : props.change.page.pageId
 
   return (
     <box height={3} width="100%" backgroundColor={props.active ? theme.accentSoft : undefined} paddingX={1} flexDirection="column">
-      <text height={1} fg={props.active ? theme.text : theme.muted}>{marker()} {checkbox()} {props.change.page.title}</text>
-      <text height={1} fg={theme.subtle}>    {props.change.page.pageId}</text>
-      <text height={1} fg={theme.muted}>    {formatDate(props.change.draft.updatedAt)}</text>
+      <text height={1} fg={props.active ? theme.text : theme.muted}>{marker()} {checkbox()} [{kind()}] {props.change.title}</text>
+      <text height={1} fg={theme.subtle}>    {identifier()}</text>
+      <text height={1} fg={theme.muted}>    {formatDate(props.change.updatedAt)}</text>
     </box>
   )
+}
+
+function changeDetailLine(change: TuiStagedChange) {
+  if (change.kind === "create") return `New page under parent ${change.parentPage.pageId}  Updated: ${formatDate(change.updatedAt)}`
+  return `ID: ${change.page.pageId}  Updated: ${formatDate(change.updatedAt)}`
+}
+
+function changePathLine(change: TuiStagedChange) {
+  if (change.kind === "create") return [...change.parentPage.path, change.title].join(" / ")
+  return change.page.path.join(" / ")
 }
 
 function ReviewButton(props: { label: string; color: string; disabled?: boolean; onPress: () => void }) {
   return (
     <box height={3} width={14} border borderStyle="rounded" borderColor={props.disabled ? theme.border : props.color} alignItems="center" justifyContent="center" onMouseDown={() => { if (!props.disabled) props.onPress() }}>
       <text height={1} fg={props.disabled ? theme.subtle : props.color}>{props.label}</text>
+    </box>
+  )
+}
+
+export function NewPageOverlay(props: { visible: boolean; title: string; parentPage: IndexedPage | null; left: number; width: number }) {
+  return (
+    <box
+      visible={props.visible}
+      position="absolute"
+      left={props.left}
+      top={5}
+      width={props.width}
+      height={9}
+      border
+      borderStyle="rounded"
+      borderColor={theme.borderActive}
+      backgroundColor="#08111f"
+      paddingX={2}
+      paddingY={1}
+      flexDirection="column"
+      zIndex={70}
+    >
+      <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
+        <text height={1} fg={theme.accent} attributes={1}>NEW PAGE</text>
+        <text height={1} fg={theme.muted}>type: page</text>
+      </box>
+      <text height={1} fg={theme.subtle}>Parent: {props.parentPage ? props.parentPage.title : "none"}</text>
+      <box height={1} />
+      <text height={1} fg={theme.text}>Title: {props.title || "type a title"}_</text>
+      <text height={1} fg={theme.subtle}>enter stage create  esc cancel</text>
     </box>
   )
 }
@@ -1211,7 +1322,7 @@ function moveSelection(direction: number, rows: TreeRow[], selectedIndex: number
 
 export function pageSearchKeyAction(key: SearchKeyLike): PageSearchKeyAction {
   if (key.name === "escape") return "close"
-  if (key.name === "return") return "submit"
+  if (key.name === "return" || key.name === "enter") return "submit"
   if (key.name === "backspace") return "delete"
   if (isSearchCharacter(key)) return "append"
   if (key.name === "down" || (key.ctrl && (key.name === "j" || key.name === "n"))) return "next"

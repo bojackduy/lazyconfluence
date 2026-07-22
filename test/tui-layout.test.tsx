@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
-import { App, StagedChangesOverlay } from "../src/tui/app"
+import { App, NewPageOverlay, StagedChangesOverlay } from "../src/tui/app"
 import { createLocalConfig } from "../src/config"
 import type { CredentialStatus } from "../src/config"
 import { openIndexRepository } from "../src/index/repository"
@@ -216,16 +216,26 @@ describe("main TUI layout", () => {
 
       dataSource.stagePageDraft("local-home", "# Local Engineering Home\n\nCurrent space staged draft.")
       dataSource.stagePageDraft("ops-home", "# Ops Home\n\nOther space staged draft.")
+      const createChange = dataSource.stagePageCreate({ spaceKey: "ENG", parentPageId: "local-home", title: "Launch Plan" })
 
       const currentSpaceChanges = dataSource.listStagedDraftChanges("ENG")
+      const stagedChanges = dataSource.listStagedChanges("ENG")
 
       expect(currentSpaceChanges).toHaveLength(1)
       expect(currentSpaceChanges[0]?.page.pageId).toBe("local-home")
       expect(currentSpaceChanges[0]?.diffMarkdown).toContain("+Current space staged draft.")
+      expect(stagedChanges.map((change) => change.kind).sort()).toEqual(["create", "update"])
+      expect(stagedChanges.find((change) => change.changeKey === createChange.changeKey)?.diffMarkdown).toContain("+# Launch Plan")
+      expect(dataSource.getPagesForSpace("ENG").map((page) => page.pageId)).toContain(createChange.changeKey)
+      expect(dataSource.getReaderPage(createChange.changeKey)).toMatchObject({ pageId: createChange.changeKey, parentId: "local-home", title: "Launch Plan", contentMarkdown: "# Launch Plan\n" })
+      expect(dataSource.getEditablePageInput(createChange.changeKey)).toMatchObject({ kind: "create", markdown: "# Launch Plan\n" })
+      expect(dataSource.stagePageBuffer(createChange.changeKey, "# Launch Plan\n\nDraft locally first.")).toBe("staged")
+      expect(repository.getPageCreate(createChange.create.localId)?.draftMarkdown).toBe("# Launch Plan\n\nDraft locally first.\n")
       expect(dataSource.listStagedDraftChanges("OPS")).toHaveLength(1)
 
-      expect(dataSource.discardPageDrafts(currentSpaceChanges.map((change) => change.page.pageId))).toBe(1)
+      expect(dataSource.discardStagedChanges(stagedChanges.map((change) => change.changeKey))).toBe(2)
       expect(dataSource.listStagedDraftChanges("ENG")).toHaveLength(0)
+      expect(dataSource.listStagedChanges("ENG")).toHaveLength(0)
       expect(dataSource.listStagedDraftChanges("OPS")).toHaveLength(1)
     } finally {
       dataSource.close?.()
@@ -260,14 +270,40 @@ describe("main TUI layout", () => {
     }
   })
 
+  test("TUI renders staged creates as local navigator pages", async () => {
+    const setup = await createTuiTestSetup({ bodyArtifacts: [homeBody] })
+    const repository = openIndexRepository({ path: setup.dbPath })
+    const dataSource = createRepositoryTuiDataSource(repository)
+
+    try {
+      dataSource.stagePageCreate({ spaceKey: "ENG", parentPageId: "local-home", title: "Launch Plan" })
+
+      const output = await withProcessEnv(setup.env, async () => {
+        const rendered = await testRender(() => <App credentialStatus={readyStatus} dataSource={dataSource} disableTreeSitter />, { width: 120, height: 36 })
+
+        try {
+          await rendered.renderOnce()
+          return rendered.captureCharFrame()
+        } finally {
+          rendered.renderer.destroy()
+        }
+      })
+
+      expect(output).toContain("Launch Plan")
+    } finally {
+      dataSource.close?.()
+      await setup.cleanup()
+    }
+  })
+
   test("renders current-space overview controls and selected staged diff", async () => {
     const rendered = await testRender(() => (
       <StagedChangesOverlay
         visible
         activeSpaceName="Local Engineering"
-        changes={[{ page: home, draft: stagedHomeDraft, diffMarkdown: ["--- synced", "+++ draft", "@@", "-Old body", "+New body"].join("\n") }]}
+        changes={[{ kind: "update", changeKey: "update:local-home", page: home, draft: stagedHomeDraft, title: home.title, updatedAt: stagedHomeDraft.updatedAt, diffMarkdown: ["--- synced", "+++ draft", "@@", "-Old body", "+New body"].join("\n") }]}
         selectedIndex={0}
-        selectedPageIds={new Set(["local-home"])}
+        selectedChangeKeys={new Set(["update:local-home"])}
         message="Apply blocked: Cannot safely preserve opaque Confluence content."
         applying={false}
         left={1}
@@ -288,7 +324,7 @@ describe("main TUI layout", () => {
       expect(output).toContain("OVERVIEW")
       expect(output).toContain("Local Engineering")
       expect(output).toContain("PAGES")
-      expect(output).toContain("[x] Local")
+      expect(output).toContain("[x] [update] Local")
       expect(output).toContain("Local Engineering Home")
       expect(output).toContain("ID: local-home")
       expect(output).toContain("Apply blocked: Cannot safely preserve opaque Confluence content.")
@@ -297,6 +333,23 @@ describe("main TUI layout", () => {
       expect(output).toContain("Apply")
       expect(output).toContain("Discard")
       expect(output).toContain("Close")
+    } finally {
+      rendered.renderer.destroy()
+    }
+  })
+
+  test("renders the new page title popup", async () => {
+    const rendered = await testRender(() => <NewPageOverlay visible title="Launch Plan" parentPage={home} left={1} width={60} />, { width: 80, height: 16 })
+
+    try {
+      await rendered.renderOnce()
+      const output = rendered.captureCharFrame()
+
+      expect(output).toContain("NEW PAGE")
+      expect(output).toContain("type: page")
+      expect(output).toContain("Parent: Local Engineering Home")
+      expect(output).toContain("Title: Launch Plan")
+      expect(output).toContain("enter stage create")
     } finally {
       rendered.renderer.destroy()
     }

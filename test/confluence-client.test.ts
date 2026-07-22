@@ -125,6 +125,36 @@ describe("Confluence client", () => {
     })
   })
 
+  test("creates a page with Confluence storage", async () => {
+    const calls: Array<{ url: string; method?: string; body?: string; contentType?: string }> = []
+    const client = new ConfluenceClient({
+      siteUrl: "https://example.atlassian.net/wiki",
+      email: "reader@example.com",
+      apiToken: "token",
+      fetch: async (url, init) => {
+        calls.push({ url, method: init?.method, body: init?.body, contentType: init?.headers?.["Content-Type"] })
+        return response({ id: "101", title: "New Page", parentId: "100", version: { number: 1 } })
+      },
+    })
+
+    const created = await client.createPage({ spaceId: "10", parentId: "100", title: "New Page", storageValue: "<h1>New Page</h1>" })
+
+    expect(created.id).toBe("101")
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({
+      url: "https://example.atlassian.net/wiki/api/v2/pages",
+      method: "POST",
+      contentType: "application/json",
+    })
+    expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({
+      spaceId: "10",
+      parentId: "100",
+      status: "current",
+      title: "New Page",
+      body: { representation: "storage", value: "<h1>New Page</h1>" },
+    })
+  })
+
   test("times out requests that do not finish", async () => {
     const calls: string[] = []
     const client = new ConfluenceClient({

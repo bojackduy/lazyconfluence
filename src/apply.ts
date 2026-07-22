@@ -1,5 +1,5 @@
 import { ConfluenceClient, type FetchLike } from "./confluence/client"
-import { mapConfluenceBody } from "./confluence/mapper"
+import { mapConfluenceBody, mapConfluencePage } from "./confluence/mapper"
 import { markdownToConfluenceStorage } from "./confluence/storage-writer"
 import { loadAtlassianAuth } from "./config"
 import { documentSnippet } from "./document/projection"
@@ -140,6 +140,78 @@ export async function applyPageDraftToConfluence(pageId: string, options: ApplyP
       previousRemoteVersion: remoteVersion,
       remoteVersion: updatedVersion,
       message: `Applied draft to Confluence as version ${updatedVersion}.`,
+    }
+  } finally {
+    if (shouldCloseRepository) repository.close()
+  }
+}
+
+export async function applyPageCreateToConfluence(localId: string, options: ApplyPageDraftOptions = {}): Promise<ApplyPageDraftResult> {
+  const env = options.env ?? process.env
+  const now = options.now ?? (() => new Date())
+  const repository = options.repository ?? openIndexRepository({ env })
+  const shouldCloseRepository = !options.repository
+
+  try {
+    const create = repository.getPageCreate(localId)
+    if (!create) return blocked(localId, "New page", "missing-create", [`No staged page create found for ${localId}.`])
+
+    const parent = repository.getPage(create.parentPageId)
+    if (!parent) return blocked(localId, create.title, "missing-parent", [`Parent page not found in local index: ${create.parentPageId}.`])
+
+    const converted = markdownToConfluenceStorage(create.draftMarkdown)
+    if (converted.blockedReasons.length) return blocked(localId, create.title, "unsafe-draft", converted.blockedReasons)
+
+    const auth = await loadAtlassianAuth(env)
+    if (!auth) return blocked(localId, create.title, "missing-config", ["No lazyconfluence config found. Run init before applying staged creates."])
+    if (!auth.apiToken) return blocked(localId, create.title, "missing-token", [`Atlassian API token missing. Set ${auth.config.atlassian.apiTokenEnv} or run init.`])
+
+    const client = new ConfluenceClient({ siteUrl: auth.config.atlassian.siteUrl, email: auth.config.atlassian.email, apiToken: auth.apiToken, fetch: options.fetch })
+    const [space] = await client.resolveSpaces([create.spaceKey])
+    const created = await client.createPage({
+      spaceId: space.id,
+      parentId: create.parentPageId,
+      title: create.title,
+      storageValue: converted.storageHtml,
+    })
+    const createdWithBody = await client.fetchPageBody(created.id, "storage")
+    const updatedAt = now().toISOString()
+    const mapped = mapConfluencePage({
+      page: {
+        ...createdWithBody,
+        parentId: createdWithBody.parentId ?? create.parentPageId,
+        spaceId: createdWithBody.spaceId ?? space.id,
+      },
+      space,
+      baseUrl: client.baseUrl,
+      ancestors: parent.path.map((title, index) => ({ id: index === parent.path.length - 1 ? parent.pageId : title, title })),
+      syncedAt: updatedAt,
+      treeOrder: repository.getChildren(create.parentPageId).length,
+    })
+
+    repository.upsertPage(mapped.indexedPage)
+    repository.upsertPageBody({
+      pageId: mapped.indexedPage.pageId,
+      remoteVersion: mapped.remoteVersion,
+      sourceRepresentation: mapped.sourceRepresentation,
+      sourceBody: mapped.sourceBody,
+      sourceHash: mapped.sidecar.sourceHash,
+      canonicalDocument: mapped.document,
+      sidecar: mapped.sidecar,
+      editableMarkdown: mapped.renderedMarkdown,
+      renderedMarkdown: mapped.renderedMarkdown,
+      updatedAt,
+    })
+    repository.upsertLinks(mapped.links)
+    repository.deletePageCreate(localId)
+
+    return {
+      status: "applied",
+      pageId: mapped.indexedPage.pageId,
+      title: mapped.indexedPage.title,
+      previousRemoteVersion: 0,
+      remoteVersion: mapped.remoteVersion,
+      message: `Created Confluence page ${mapped.indexedPage.title}.`,
     }
   } finally {
     if (shouldCloseRepository) repository.close()

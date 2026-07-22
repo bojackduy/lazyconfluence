@@ -70,6 +70,13 @@ export interface UpdateConfluencePageInput {
   message?: string
 }
 
+export interface CreateConfluencePageInput {
+  spaceId: string
+  parentId: string
+  title: string
+  storageValue: string
+}
+
 export class ConfluenceClientError extends Error {}
 
 export class ConfluenceClient {
@@ -135,6 +142,26 @@ export class ConfluenceClient {
     }
     const response = await this.requestJson(`/api/v2/pages/${encodeURIComponent(input.id)}`, {}, {
       method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+
+    return pageFromPayload(response)
+  }
+
+  async createPage(input: CreateConfluencePageInput) {
+    const payload = {
+      spaceId: input.spaceId,
+      parentId: input.parentId,
+      status: "current",
+      title: input.title,
+      body: {
+        representation: "storage",
+        value: input.storageValue,
+      },
+    }
+    const response = await this.requestJson("/api/v2/pages", {}, {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     })

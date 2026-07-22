@@ -58,6 +58,16 @@ interface PageDraftRow {
   staged_at: string | null
 }
 
+interface PageCreateRow {
+  local_id: string
+  space_key: string
+  parent_page_id: string
+  title: string
+  draft_markdown: string
+  created_at: string
+  updated_at: string
+}
+
 export type PageDraftStatus = "draft" | "staged"
 
 export interface PageBodyArtifact {
@@ -84,6 +94,16 @@ export interface PageDraft {
   stagedAt: string | null
 }
 
+export interface PageCreate {
+  localId: string
+  spaceKey: string
+  parentPageId: string
+  title: string
+  draftMarkdown: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface IndexRepositoryStats {
   schemaVersion: number
   spaceCount: number
@@ -92,6 +112,7 @@ export interface IndexRepositoryStats {
   bodyArtifactCount: number
   draftCount: number
   stagedDraftCount: number
+  createCount: number
 }
 
 export class IndexRepository {
@@ -329,6 +350,7 @@ export class IndexRepository {
       bodyArtifactCount: this.countRows("page_bodies"),
       draftCount: this.countRows("page_drafts"),
       stagedDraftCount: this.countRows("page_drafts", "status = 'staged'"),
+      createCount: this.countRows("page_creates"),
     }
   }
 
@@ -398,6 +420,47 @@ export class IndexRepository {
 
   deletePageDraft(pageId: string) {
     return this.database.query("DELETE FROM page_drafts WHERE page_id = ?").run(pageId).changes
+  }
+
+  upsertPageCreate(create: PageCreate) {
+    this.database.query(`
+      INSERT INTO page_creates (
+        local_id, space_key, parent_page_id, title, draft_markdown, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(local_id) DO UPDATE SET
+        space_key = excluded.space_key,
+        parent_page_id = excluded.parent_page_id,
+        title = excluded.title,
+        draft_markdown = excluded.draft_markdown,
+        updated_at = excluded.updated_at
+    `).run(
+      create.localId,
+      create.spaceKey,
+      create.parentPageId,
+      create.title,
+      create.draftMarkdown,
+      create.createdAt,
+      create.updatedAt,
+    )
+  }
+
+  getPageCreate(localId: string): PageCreate | null {
+    const row = this.database.query("SELECT * FROM page_creates WHERE local_id = ?").get(localId) as PageCreateRow | null
+
+    return row ? pageCreateFromRow(row) : null
+  }
+
+  listPageCreates(spaceKey?: string): PageCreate[] {
+    const rows = spaceKey
+      ? this.database.query("SELECT * FROM page_creates WHERE space_key = ? ORDER BY updated_at DESC, title COLLATE NOCASE").all(spaceKey) as PageCreateRow[]
+      : this.database.query("SELECT * FROM page_creates ORDER BY updated_at DESC, title COLLATE NOCASE").all() as PageCreateRow[]
+
+    return rows.map(pageCreateFromRow)
+  }
+
+  deletePageCreate(localId: string) {
+    return this.database.query("DELETE FROM page_creates WHERE local_id = ?").run(localId).changes
   }
 
   getChildren(parentPageId: string): IndexedPage[] {
@@ -551,7 +614,7 @@ export class IndexRepository {
     return Number(row?.user_version ?? 0)
   }
 
-  private countRows(table: "spaces" | "pages" | "links" | "page_bodies" | "page_drafts", where?: string) {
+  private countRows(table: "spaces" | "pages" | "links" | "page_bodies" | "page_drafts" | "page_creates", where?: string) {
     const row = this.database.query(`SELECT COUNT(*) AS count FROM ${table}${where ? ` WHERE ${where}` : ""}`).get() as { count: number } | null
 
     return Number(row?.count ?? 0)
@@ -637,5 +700,17 @@ function pageDraftFromRow(row: PageDraftRow): PageDraft {
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
     stagedAt: row.staged_at === null ? null : String(row.staged_at),
+  }
+}
+
+function pageCreateFromRow(row: PageCreateRow): PageCreate {
+  return {
+    localId: String(row.local_id),
+    spaceKey: String(row.space_key),
+    parentPageId: String(row.parent_page_id),
+    title: String(row.title),
+    draftMarkdown: String(row.draft_markdown),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
   }
 }

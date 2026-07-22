@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto"
-import { applyPageCreateToConfluence, applyPageDraftToConfluence, type ApplyPageDraftResult } from "../apply"
+import { applyPageCreateToConfluence, applyPageDeleteToConfluence, applyPageDraftToConfluence, type ApplyPageDraftResult } from "../apply"
 import type { FetchLike } from "../confluence/client"
 import { formatMarkdownDiff, readEditableDraftInput, savePageDraft, type EditableDraftInput } from "../editing"
-import { openIndexRepository, type IndexRepository, type PageCreate, type PageDraft, type PageDraftStatus } from "../index/repository"
+import { openIndexRepository, type IndexRepository, type PageCreate, type PageDelete, type PageDraft, type PageDraftStatus } from "../index/repository"
 import { compareSearchResults, scorePageSearchResult } from "../index/search"
 import type { IndexedPage, ReaderPage, SearchResult, SpaceSearchResult, SpaceSummary } from "../model"
 
@@ -31,6 +31,7 @@ export interface TuiDataSource {
   searchPagesInSpace: (spaceKey: string, query: string) => SearchResult[]
   searchSpaces: (query: string) => SpaceSearchResult[]
   stagePageCreate: (input: { spaceKey: string; parentPageId: string | null; title: string }) => TuiCreateChange
+  stagePageDelete: (pageId: string) => TuiDeleteChange
   stagePageBuffer: (pageId: string, markdown: string) => "staged" | "unchanged"
   stagePageDraft: (pageId: string, draftMarkdown: string) => "staged" | "unchanged"
   unstagePageDraft: (pageId: string) => "unstaged" | "missing"
@@ -67,7 +68,17 @@ export interface TuiCreateChange {
   diffMarkdown: string
 }
 
-export type TuiStagedChange = TuiDraftChange | TuiCreateChange
+export interface TuiDeleteChange {
+  kind: "delete"
+  changeKey: string
+  page: IndexedPage
+  deletion: PageDelete
+  title: string
+  updatedAt: string
+  diffMarkdown: string
+}
+
+export type TuiStagedChange = TuiDraftChange | TuiCreateChange | TuiDeleteChange
 
 export type TuiEditablePageInput =
   | { kind: "update"; page: IndexedPage; markdown: string; draftStatus: PageDraftStatus | null }
@@ -97,17 +108,20 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
       return results
     },
     applyStagedChanges: async (changeKeys) => {
-      const results: ApplyPageDraftResult[] = []
+      const resultsByChangeKey = new Map<string, ApplyPageDraftResult>()
 
-      for (const changeKey of changeKeys) {
+      for (const changeKey of orderChangeKeysForApply(repository, changeKeys)) {
         const parsed = parseChangeKey(changeKey)
         if (!parsed) continue
-        results.push(parsed.kind === "update"
+        const result = parsed.kind === "update"
           ? await applyPageDraftToConfluence(parsed.id, { repository, env: options.env, fetch: options.fetch, now })
-          : await applyPageCreateToConfluence(parsed.id, { repository, env: options.env, fetch: options.fetch, now }))
+          : parsed.kind === "create"
+            ? await applyPageCreateToConfluence(parsed.id, { repository, env: options.env, fetch: options.fetch, now })
+            : await applyPageDeleteToConfluence(parsed.id, { repository, env: options.env, fetch: options.fetch, now })
+        resultsByChangeKey.set(changeKey, result)
       }
 
-      return results
+      return changeKeys.map((changeKey) => resultsByChangeKey.get(changeKey)).filter((result): result is ApplyPageDraftResult => result !== undefined)
     },
     close: () => repository.close(),
     discardPageDraft: (pageId) => repository.deletePageDraft(pageId) > 0 ? "discarded" : "missing",
@@ -116,7 +130,7 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
       const parsed = parseChangeKey(changeKey)
       if (!parsed) return count
 
-      return count + (parsed.kind === "update" ? repository.deletePageDraft(parsed.id) : repository.deletePageCreate(parsed.id))
+      return count + (parsed.kind === "update" ? repository.deletePageDraft(parsed.id) : parsed.kind === "create" ? repository.deletePageCreate(parsed.id) : repository.deletePageDelete(parsed.id))
     }, 0),
     formatPageDraftDiff: (pageId, draftMarkdown) => {
       const input = readEditableDraftInput(repository, pageId)
@@ -132,7 +146,7 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
     },
     getEditableDraftInput: (pageId) => readEditableDraftInput(repository, pageId),
     getEditablePageInput: (pageId) => readEditablePageInput(repository, pageId),
-    getPageDraftStatus: (pageId) => createIdFromPageId(pageId) ? "staged" : repository.getPageDraft(pageId)?.status ?? null,
+    getPageDraftStatus: (pageId) => createIdFromPageId(pageId) || repository.getPageDelete(pageId) ? "staged" : repository.getPageDraft(pageId)?.status ?? null,
     getPagesForSpace: (spaceKey) => listPagesWithCreates(repository, spaceKey),
     getReaderPage: (pageId) => {
       const createId = createIdFromPageId(pageId)
@@ -165,6 +179,9 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
       ...repository.listPageCreates(spaceKey)
         .map((create) => createChangeFor(repository, create))
         .filter((change): change is TuiCreateChange => change !== null),
+      ...repository.listPageDeletes()
+        .map((deletion) => deleteChangeFor(repository, deletion))
+        .filter((change): change is TuiDeleteChange => change !== null && change.page.spaceKey === spaceKey),
     ].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.title.localeCompare(right.title)),
     listSpaces: () => repository.listSpaces(),
     savePageDraft: (pageId, draftMarkdown) => saveTuiPageDraft(repository, pageId, draftMarkdown, now),
@@ -177,15 +194,21 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
       const space = repository.getSpace(input.spaceKey)
       if (!space) throw new Error(`Space not found in local index: ${input.spaceKey}`)
 
-      const parentPage = input.parentPageId ? repository.getPage(input.parentPageId) : null
-      if (input.parentPageId && !parentPage) throw new Error(`Parent page not found in local index: ${input.parentPageId}`)
+      const parentCreateId = input.parentPageId ? createIdFromPageId(input.parentPageId) : null
+      const parentCreate = parentCreateId ? repository.getPageCreate(parentCreateId) : null
+      const parentPageId = input.parentPageId && !parentCreateId ? input.parentPageId : null
+      const parentPage = parentPageId ? repository.getPage(parentPageId) : null
+      if (parentCreateId && !parentCreate) throw new Error(`Parent local page not found: ${input.parentPageId}`)
+      if (parentCreate && parentCreate.spaceKey !== input.spaceKey) throw new Error(`Parent local page ${parentCreate.title} is not in ${input.spaceKey}.`)
+      if (parentPageId && !parentPage) throw new Error(`Parent page not found in local index: ${parentPageId}`)
       if (parentPage && parentPage.spaceKey !== input.spaceKey) throw new Error(`Parent page ${parentPage.title} is not in ${input.spaceKey}.`)
 
       const timestamp = now().toISOString()
       const create: PageCreate = {
         localId: randomUUID(),
         spaceKey: input.spaceKey,
-        parentPageId: input.parentPageId,
+        parentPageId,
+        parentCreateId,
         title,
         draftMarkdown: `# ${title}\n`,
         createdAt: timestamp,
@@ -196,6 +219,25 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
 
       const change = createChangeFor(repository, create)
       if (!change) throw new Error("Failed to stage new page create.")
+
+      return change
+    },
+    stagePageDelete: (pageId) => {
+      if (createIdFromPageId(pageId)) throw new Error("Local-only pages are staged creates. Open Overview and discard the create to remove it.")
+
+      const page = repository.getPage(pageId)
+      if (!page) throw new Error(`Page not found in local index: ${pageId}`)
+
+      const children = listChildrenWithCreates(repository, pageId)
+      if (children.length) throw new Error(`Delete child pages first: ${children.map((child) => child.title).join(", ")}.`)
+
+      const timestamp = now().toISOString()
+      const deletion: PageDelete = { pageId, createdAt: repository.getPageDelete(pageId)?.createdAt ?? timestamp, updatedAt: timestamp }
+      repository.deletePageDraft(pageId)
+      repository.upsertPageDelete(deletion)
+
+      const change = deleteChangeFor(repository, deletion)
+      if (!change) throw new Error("Failed to stage page delete.")
 
       return change
     },
@@ -274,6 +316,14 @@ function listChildrenWithCreates(repository: IndexRepository, parentPageId: stri
   return [...children, ...virtualCreates].sort(compareTreePages)
 }
 
+function listCreateChildren(repository: IndexRepository, parentCreateId: string) {
+  return repository.listPageCreates()
+    .filter((create) => create.parentCreateId === parentCreateId)
+    .map((create) => virtualPageForCreate(repository, create))
+    .filter((page): page is IndexedPage => page !== null)
+    .sort(compareTreePages)
+}
+
 function searchPagesWithCreates(repository: IndexRepository, spaceKey: string, query: string, limit: number): SearchResult[] {
   const byPageId = new Map<string, SearchResult>()
 
@@ -303,25 +353,33 @@ function createReaderPage(repository: IndexRepository, createId: string): Reader
 
   return {
     ...page,
-    children: [],
+    children: listCreateChildren(repository, createId),
     outgoingLinks: [],
     backlinks: [],
     outline: extractOutline(create.draftMarkdown),
   }
 }
 
-function virtualPageForCreate(repository: IndexRepository, create: PageCreate): IndexedPage | null {
+function virtualPageForCreate(repository: IndexRepository, create: PageCreate, seen = new Set<string>()): IndexedPage | null {
+  if (seen.has(create.localId)) return null
+  seen.add(create.localId)
+
   const parentPage = create.parentPageId ? repository.getPage(create.parentPageId) : null
+  const parentCreate = create.parentCreateId ? repository.getPageCreate(create.parentCreateId) : null
+  const parentCreatePage = parentCreate ? virtualPageForCreate(repository, parentCreate, seen) : null
 
   if (create.parentPageId && !parentPage) return null
+  if (create.parentCreateId && !parentCreatePage) return null
+
+  const parent = parentPage ?? parentCreatePage
 
   return {
     pageId: createChangeKey(create.localId),
     spaceKey: create.spaceKey,
     title: create.title,
     url: `local://page-create/${create.localId}`,
-    parentId: create.parentPageId,
-    path: parentPage ? [...parentPage.path, create.title] : [create.title],
+    parentId: create.parentCreateId ? createChangeKey(create.parentCreateId) : create.parentPageId,
+    path: parent ? [...parent.path, create.title] : [create.title],
     owner: "local draft",
     updatedAt: create.updatedAt,
     contentMarkdown: create.draftMarkdown,
@@ -348,9 +406,14 @@ function draftChangeFor(repository: IndexRepository, draft: PageDraft): TuiDraft
 }
 
 function createChangeFor(repository: IndexRepository, create: PageCreate): TuiCreateChange | null {
-  const parentPage = create.parentPageId ? repository.getPage(create.parentPageId) : null
+  const parentPage = create.parentPageId
+    ? repository.getPage(create.parentPageId)
+    : create.parentCreateId
+      ? virtualPageForCreate(repository, repository.getPageCreate(create.parentCreateId) ?? create)
+      : null
 
   if (create.parentPageId && !parentPage) return null
+  if (create.parentCreateId && (!parentPage || parentPage.pageId === createChangeKey(create.localId))) return null
 
   return {
     kind: "create",
@@ -363,6 +426,23 @@ function createChangeFor(repository: IndexRepository, create: PageCreate): TuiCr
   }
 }
 
+function deleteChangeFor(repository: IndexRepository, deletion: PageDelete): TuiDeleteChange | null {
+  const page = repository.getPage(deletion.pageId)
+  if (!page) return null
+
+  const bodyMarkdown = repository.getPageBody(page.pageId)?.editableMarkdown ?? page.contentMarkdown
+
+  return {
+    kind: "delete",
+    changeKey: deleteChangeKey(deletion.pageId),
+    page,
+    deletion,
+    title: page.title,
+    updatedAt: deletion.updatedAt,
+    diffMarkdown: formatMarkdownDiff(bodyMarkdown, ""),
+  }
+}
+
 function updateChangeKey(pageId: string) {
   return `update:${pageId}`
 }
@@ -371,15 +451,42 @@ function createChangeKey(localId: string) {
   return `create:${localId}`
 }
 
-function parseChangeKey(changeKey: string): { kind: "update" | "create"; id: string } | null {
+function deleteChangeKey(pageId: string) {
+  return `delete:${pageId}`
+}
+
+function parseChangeKey(changeKey: string): { kind: "update" | "create" | "delete"; id: string } | null {
   const separator = changeKey.indexOf(":")
   if (separator < 0) return null
 
   const kind = changeKey.slice(0, separator)
   const id = changeKey.slice(separator + 1)
-  if (!id || (kind !== "update" && kind !== "create")) return null
+  if (!id || (kind !== "update" && kind !== "create" && kind !== "delete")) return null
 
   return { kind, id }
+}
+
+function orderChangeKeysForApply(repository: IndexRepository, changeKeys: string[]) {
+  const selected = new Set(changeKeys)
+  const ordered: string[] = []
+  const visited = new Set<string>()
+
+  const visit = (changeKey: string) => {
+    if (visited.has(changeKey)) return
+    visited.add(changeKey)
+
+    const parsed = parseChangeKey(changeKey)
+    if (parsed?.kind === "create") {
+      const create = repository.getPageCreate(parsed.id)
+      const parentKey = create?.parentCreateId ? createChangeKey(create.parentCreateId) : null
+      if (parentKey && selected.has(parentKey)) visit(parentKey)
+    }
+
+    ordered.push(changeKey)
+  }
+
+  for (const changeKey of changeKeys) visit(changeKey)
+  return ordered
 }
 
 function compareTreePages(left: IndexedPage, right: IndexedPage) {

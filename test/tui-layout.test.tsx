@@ -36,7 +36,7 @@ describe("main TUI layout", () => {
       expect(output).toContain("c overview")
       expect(output).toContain("e edit")
       expect(output).toContain("N root")
-      expect(output).toContain("d/u scroll")
+      expect(output).toContain("D delete")
       expect(output).toContain("▾ ▣ Local Engineering Home")
       expect(output).toContain("• Real Synced Architecture")
       expect(output).toContain("Real Synced Architecture")
@@ -261,6 +261,46 @@ describe("main TUI layout", () => {
       const stagedCreate = dataSource.listStagedChanges("ENG").find((change) => change.changeKey === createChange.changeKey)
       expect(stagedCreate?.kind).toBe("create")
       if (stagedCreate?.kind === "create") expect(stagedCreate.parentPage).toBeNull()
+    } finally {
+      dataSource.close?.()
+      await setup.cleanup()
+    }
+  })
+
+  test("TUI can stage a child under a local-only created page", async () => {
+    const setup = await createTuiTestSetup({ bodyArtifacts: [homeBody] })
+    const repository = openIndexRepository({ path: setup.dbPath })
+    const dataSource = createRepositoryTuiDataSource(repository)
+
+    try {
+      const parent = dataSource.stagePageCreate({ spaceKey: "ENG", parentPageId: null, title: "Local Parent" })
+      const child = dataSource.stagePageCreate({ spaceKey: "ENG", parentPageId: parent.changeKey, title: "Local Child" })
+
+      expect(child.create).toMatchObject({ parentPageId: null, parentCreateId: parent.create.localId })
+      expect(dataSource.getReaderPage(parent.changeKey)?.children.map((page) => page.pageId)).toContain(child.changeKey)
+      expect(dataSource.getReaderPage(child.changeKey)).toMatchObject({ pageId: child.changeKey, parentId: parent.changeKey, path: ["Local Parent", "Local Child"] })
+      expect(dataSource.searchPagesInSpace("ENG", "local child").map((result) => result.page.pageId)).toContain(child.changeKey)
+    } finally {
+      dataSource.close?.()
+      await setup.cleanup()
+    }
+  })
+
+  test("TUI stages synced page deletes and blocks pages with children", async () => {
+    const setup = await createTuiTestSetup({ bodyArtifacts: [homeBody] })
+    const repository = openIndexRepository({ path: setup.dbPath })
+    const dataSource = createRepositoryTuiDataSource(repository)
+
+    try {
+      expect(() => dataSource.stagePageDelete("local-home")).toThrow("Delete child pages first")
+
+      const change = dataSource.stagePageDelete("real-architecture")
+
+      expect(change).toMatchObject({ kind: "delete", changeKey: "delete:real-architecture", title: "Real Synced Architecture" })
+      expect(dataSource.listStagedChanges("ENG").map((staged) => staged.kind)).toContain("delete")
+      expect(dataSource.getPageDraftStatus("real-architecture")).toBe("staged")
+      expect(dataSource.discardStagedChanges([change.changeKey])).toBe(1)
+      expect(repository.getPageDelete("real-architecture")).toBeNull()
     } finally {
       dataSource.close?.()
       await setup.cleanup()

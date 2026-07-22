@@ -1,6 +1,7 @@
 import { mkdtemp, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { Database } from "bun:sqlite"
 import { describe, expect, test } from "bun:test"
 import type { PageBodyArtifact } from "../src/index/repository"
 import type { IndexedPage, PageLink, SpaceSummary } from "../src/model"
@@ -132,6 +133,7 @@ describe("local index repository", () => {
         localId: "create-1",
         spaceKey: "ENG",
         parentPageId: "eng-home",
+        parentCreateId: null,
         title: "New Runbook",
         draftMarkdown: "# New Runbook\n",
         createdAt: "2026-07-22T09:00:00Z",
@@ -147,21 +149,129 @@ describe("local index repository", () => {
         localId: "create-root",
         spaceKey: "ENG",
         parentPageId: null,
+        parentCreateId: null,
         title: "Root Plan",
         draftMarkdown: "# Root Plan\n",
         createdAt: "2026-07-22T09:05:00Z",
         updatedAt: "2026-07-22T09:05:00Z",
       })
 
+      repository.upsertPageCreate({
+        localId: "create-child",
+        spaceKey: "ENG",
+        parentPageId: null,
+        parentCreateId: "create-root",
+        title: "Nested Plan",
+        draftMarkdown: "# Nested Plan\n",
+        createdAt: "2026-07-22T09:06:00Z",
+        updatedAt: "2026-07-22T09:06:00Z",
+      })
+
       expect(repository.getPageCreate("create-root")?.parentPageId).toBeNull()
-      expect(repository.listPageCreates("ENG").map((create) => create.localId)).toEqual(["create-root", "create-1"])
+      expect(repository.getPageCreate("create-child")?.parentCreateId).toBe("create-root")
+      expect(repository.listPageCreates("ENG").map((create) => create.localId)).toEqual(["create-child", "create-root", "create-1"])
+
+      repository.reparentPageCreatesFromLocalParent("create-root", "eng-home", "2026-07-22T09:07:00Z")
+
+      expect(repository.getPageCreate("create-child")).toMatchObject({ parentPageId: "eng-home", parentCreateId: null })
 
       repository.deletePageCreate("create-1")
       repository.deletePageCreate("create-root")
+      repository.deletePageCreate("create-child")
 
       expect(repository.getPageCreate("create-1")).toBeNull()
       expect(repository.getStats()).toMatchObject({ createCount: 0 })
     })
+  })
+
+  test("persists staged page deletes", async () => {
+    await withSeededRepository((repository) => {
+      repository.upsertPageDelete({ pageId: "architecture", createdAt: "2026-07-22T10:00:00Z", updatedAt: "2026-07-22T10:00:00Z" })
+
+      expect(repository.getStats()).toMatchObject({ deleteCount: 1 })
+      expect(repository.getPageDelete("architecture")).toMatchObject({ pageId: "architecture" })
+      expect(repository.listPageDeletes().map((deletion) => deletion.pageId)).toEqual(["architecture"])
+
+      repository.deletePageDelete("architecture")
+
+      expect(repository.getPageDelete("architecture")).toBeNull()
+      expect(repository.getStats()).toMatchObject({ deleteCount: 0 })
+    })
+  })
+
+  test("migrates schema v6 page creates before creating v7 indexes", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lazyconfluence-v6-index-"))
+    const dbPath = join(dir, "index.sqlite3")
+    const database = new Database(dbPath)
+    let databaseClosed = false
+
+    try {
+      database.exec(`
+        CREATE TABLE spaces (
+          key TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          last_synced_at TEXT,
+          sync_state TEXT NOT NULL CHECK(sync_state IN ('fresh', 'stale', 'not-synced'))
+        );
+
+        CREATE TABLE pages (
+          page_id TEXT PRIMARY KEY,
+          space_key TEXT NOT NULL REFERENCES spaces(key) ON DELETE CASCADE,
+          title TEXT NOT NULL,
+          url TEXT NOT NULL,
+          url_key TEXT NOT NULL,
+          parent_id TEXT,
+          path_json TEXT NOT NULL,
+          path_text TEXT NOT NULL,
+          owner TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          content_markdown TEXT NOT NULL,
+          snippet TEXT NOT NULL,
+          tree_order INTEGER NOT NULL DEFAULT 0,
+          indexed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE page_creates (
+          local_id TEXT PRIMARY KEY,
+          space_key TEXT NOT NULL REFERENCES spaces(key) ON DELETE CASCADE,
+          parent_page_id TEXT,
+          title TEXT NOT NULL,
+          draft_markdown TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX page_creates_space_updated_at_idx ON page_creates(space_key, updated_at);
+        INSERT INTO spaces (key, name, last_synced_at, sync_state) VALUES ('ENG', 'Engineering', NULL, 'fresh');
+        INSERT INTO page_creates (local_id, space_key, parent_page_id, title, draft_markdown, created_at, updated_at)
+        VALUES ('create-root', 'ENG', NULL, 'Root Plan', '# Root Plan\n', '2026-07-22T10:00:00Z', '2026-07-22T10:00:00Z');
+        PRAGMA user_version = 6;
+      `)
+      database.close()
+      databaseClosed = true
+
+      const repository = openIndexRepository({ path: dbPath })
+      try {
+        expect(repository.getStats().schemaVersion).toBe(7)
+        expect(repository.getPageCreate("create-root")).toMatchObject({ parentPageId: null, parentCreateId: null, title: "Root Plan" })
+        repository.upsertPageCreate({
+          localId: "create-child",
+          spaceKey: "ENG",
+          parentPageId: null,
+          parentCreateId: "create-root",
+          title: "Child Plan",
+          draftMarkdown: "# Child Plan\n",
+          createdAt: "2026-07-22T10:01:00Z",
+          updatedAt: "2026-07-22T10:01:00Z",
+        })
+        expect(repository.getPageCreate("create-child")?.parentCreateId).toBe("create-root")
+      } finally {
+        repository.close()
+      }
+    } finally {
+      if (!databaseClosed) database.close()
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })
 

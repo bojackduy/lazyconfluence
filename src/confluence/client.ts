@@ -169,6 +169,10 @@ export class ConfluenceClient {
     return pageFromPayload(response)
   }
 
+  async deletePage(pageId: string) {
+    await this.requestJson(`/api/v2/pages/${encodeURIComponent(pageId)}`, {}, { method: "DELETE" })
+  }
+
   private async paginatedResults<T>(path: string, params: QueryParams): Promise<T[]> {
     const results: T[] = []
     let nextPath: string | null = path
@@ -202,6 +206,8 @@ export class ConfluenceClient {
     }
 
     if (!response.ok) throw new ConfluenceClientError(`Confluence returned HTTP ${response.status} ${response.statusText} for ${url}`)
+
+    if (response.status === 204) return {}
 
     return response.json()
   }

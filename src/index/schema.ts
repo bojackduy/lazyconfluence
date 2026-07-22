@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite"
 
-export const INDEX_SCHEMA_VERSION = 6
+export const INDEX_SCHEMA_VERSION = 7
 
 export function applyIndexSchema(database: Database) {
   database.run("PRAGMA foreign_keys = ON")
@@ -10,14 +10,14 @@ export function applyIndexSchema(database: Database) {
     throw new Error(`Unsupported lazyconfluence index schema version: ${currentVersion}`)
   }
 
+  if (currentVersion > 0 && currentVersion < 7 && hasColumn(database, "page_creates", "parent_page_id") && !hasColumn(database, "page_creates", "parent_create_id")) {
+    migratePageCreatesLocalParents(database)
+  }
+
   database.exec(INDEX_SCHEMA_SQL)
 
   if (currentVersion < 3 && !hasColumn(database, "pages", "tree_order")) {
     database.run("ALTER TABLE pages ADD COLUMN tree_order INTEGER NOT NULL DEFAULT 0")
-  }
-
-  if (currentVersion > 0 && currentVersion < 6 && hasColumn(database, "page_creates", "parent_page_id")) {
-    migratePageCreatesParentNullable(database)
   }
 
   if (currentVersion < INDEX_SCHEMA_VERSION) {
@@ -37,7 +37,7 @@ function readUserVersion(database: Database) {
   return Number(row?.user_version ?? 0)
 }
 
-function migratePageCreatesParentNullable(database: Database) {
+function migratePageCreatesLocalParents(database: Database) {
   database.exec(`
     ALTER TABLE page_creates RENAME TO page_creates_old;
 
@@ -45,18 +45,21 @@ function migratePageCreatesParentNullable(database: Database) {
       local_id TEXT PRIMARY KEY,
       space_key TEXT NOT NULL REFERENCES spaces(key) ON DELETE CASCADE,
       parent_page_id TEXT REFERENCES pages(page_id) ON DELETE CASCADE,
+      parent_create_id TEXT REFERENCES page_creates(local_id) ON DELETE CASCADE,
       title TEXT NOT NULL,
       draft_markdown TEXT NOT NULL,
       created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at TEXT NOT NULL,
+      CHECK(parent_page_id IS NULL OR parent_create_id IS NULL)
     );
 
-    INSERT INTO page_creates (local_id, space_key, parent_page_id, title, draft_markdown, created_at, updated_at)
-    SELECT local_id, space_key, parent_page_id, title, draft_markdown, created_at, updated_at
+    INSERT INTO page_creates (local_id, space_key, parent_page_id, parent_create_id, title, draft_markdown, created_at, updated_at)
+    SELECT local_id, space_key, parent_page_id, NULL, title, draft_markdown, created_at, updated_at
     FROM page_creates_old;
 
     DROP TABLE page_creates_old;
     CREATE INDEX IF NOT EXISTS page_creates_space_updated_at_idx ON page_creates(space_key, updated_at);
+    CREATE INDEX IF NOT EXISTS page_creates_parent_create_idx ON page_creates(parent_create_id);
   `)
 }
 
@@ -121,13 +124,24 @@ CREATE TABLE IF NOT EXISTS page_creates (
   local_id TEXT PRIMARY KEY,
   space_key TEXT NOT NULL REFERENCES spaces(key) ON DELETE CASCADE,
   parent_page_id TEXT REFERENCES pages(page_id) ON DELETE CASCADE,
+  parent_create_id TEXT REFERENCES page_creates(local_id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   draft_markdown TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  CHECK(parent_page_id IS NULL OR parent_create_id IS NULL)
+);
+
+CREATE INDEX IF NOT EXISTS page_creates_space_updated_at_idx ON page_creates(space_key, updated_at);
+CREATE INDEX IF NOT EXISTS page_creates_parent_create_idx ON page_creates(parent_create_id);
+
+CREATE TABLE IF NOT EXISTS page_deletes (
+  page_id TEXT PRIMARY KEY REFERENCES pages(page_id) ON DELETE CASCADE,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS page_creates_space_updated_at_idx ON page_creates(space_key, updated_at);
+CREATE INDEX IF NOT EXISTS page_deletes_updated_at_idx ON page_deletes(updated_at);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS page_fts USING fts5(
   title,

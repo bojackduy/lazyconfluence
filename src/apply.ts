@@ -156,6 +156,15 @@ export async function applyPageCreateToConfluence(localId: string, options: Appl
     const create = repository.getPageCreate(localId)
     if (!create) return blocked(localId, "New page", "missing-create", [`No staged page create found for ${localId}.`])
 
+    if (create.parentCreateId) {
+      const parentCreate = repository.getPageCreate(create.parentCreateId)
+      return blocked(localId, create.title, parentCreate ? "local-parent-not-applied" : "missing-local-parent", [
+        parentCreate
+          ? `Parent page ${parentCreate.title} is still a local create. Apply it first or include it in the same Overview apply.`
+          : `Parent local create not found: ${create.parentCreateId}.`,
+      ])
+    }
+
     const parent = create.parentPageId ? repository.getPage(create.parentPageId) : null
     if (create.parentPageId && !parent) return blocked(localId, create.title, "missing-parent", [`Parent page not found in local index: ${create.parentPageId}.`])
 
@@ -203,6 +212,7 @@ export async function applyPageCreateToConfluence(localId: string, options: Appl
       updatedAt,
     })
     repository.upsertLinks(mapped.links)
+    repository.reparentPageCreatesFromLocalParent(localId, mapped.indexedPage.pageId, updatedAt)
     repository.deletePageCreate(localId)
 
     return {
@@ -212,6 +222,47 @@ export async function applyPageCreateToConfluence(localId: string, options: Appl
       previousRemoteVersion: 0,
       remoteVersion: mapped.remoteVersion,
       message: `Created Confluence page ${mapped.indexedPage.title}.`,
+    }
+  } finally {
+    if (shouldCloseRepository) repository.close()
+  }
+}
+
+export async function applyPageDeleteToConfluence(pageId: string, options: ApplyPageDraftOptions = {}): Promise<ApplyPageDraftResult> {
+  const env = options.env ?? process.env
+  const repository = options.repository ?? openIndexRepository({ env })
+  const shouldCloseRepository = !options.repository
+
+  try {
+    const page = repository.getPage(pageId)
+    if (!page) return blocked(pageId, "Deleted page", "missing-page", [`Page not found in local index: ${pageId}.`])
+
+    const deletion = repository.getPageDelete(pageId)
+    if (!deletion) return blocked(pageId, page.title, "missing-delete", [`No staged delete found for ${page.title} (${page.pageId}).`])
+
+    const children = repository.getChildren(pageId)
+    if (children.length) return blocked(pageId, page.title, "has-children", [`Delete child pages first: ${children.map((child) => child.title).join(", ")}.`])
+
+    const localChildren = repository.listPageCreates(page.spaceKey).filter((create) => create.parentPageId === pageId)
+    if (localChildren.length) return blocked(pageId, page.title, "has-local-children", [`Discard or apply local child pages first: ${localChildren.map((child) => child.title).join(", ")}.`])
+
+    const auth = await loadAtlassianAuth(env)
+    if (!auth) return blocked(pageId, page.title, "missing-config", ["No lazyconfluence config found. Run init before applying staged deletes."])
+    if (!auth.apiToken) return blocked(pageId, page.title, "missing-token", [`Atlassian API token missing. Set ${auth.config.atlassian.apiTokenEnv} or run init.`])
+
+    const client = new ConfluenceClient({ siteUrl: auth.config.atlassian.siteUrl, email: auth.config.atlassian.email, apiToken: auth.apiToken, fetch: options.fetch })
+    await client.deletePage(pageId)
+
+    const body = repository.getPageBody(pageId)
+    repository.deletePage(pageId)
+
+    return {
+      status: "applied",
+      pageId,
+      title: page.title,
+      previousRemoteVersion: body?.remoteVersion ?? 0,
+      remoteVersion: 0,
+      message: `Deleted Confluence page ${page.title}.`,
     }
   } finally {
     if (shouldCloseRepository) repository.close()

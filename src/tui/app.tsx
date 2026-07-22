@@ -306,9 +306,13 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     void dataSource.applyStagedChanges(changeKeys).then((results) => {
       const selectedCreateIndex = changeKeys.findIndex((changeKey) => changeKey === selectedPageId() && changeKey.startsWith("create:"))
       const selectedCreateResult = selectedCreateIndex >= 0 ? results[selectedCreateIndex] : null
+      const selectedDeleteIndex = changeKeys.findIndex((changeKey) => changeKey === `delete:${selectedPageId()}`)
+      const selectedDeleteResult = selectedDeleteIndex >= 0 ? results[selectedDeleteIndex] : null
+      const selectedDeletedPage = selectedDeleteIndex >= 0 ? pageById().get(selectedPageId()) : null
 
       setDraftRevision((revision) => revision + 1)
       if (selectedCreateResult?.status === "applied") setSelectedPageId(selectedCreateResult.pageId)
+      if (selectedDeleteResult?.status === "applied") setSelectedPageId(selectedDeletedPage?.parentId ?? dataSource.getDefaultPageId(activeSpaceKey()) ?? emptyPageId)
       setChangesMessage(applyBatchMessage(results))
       setSelectedChangeKeys(new Set(stagedChanges().map((change) => change.changeKey)))
     }).catch((error) => {
@@ -328,9 +332,34 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     const selectedDiscardedCreate = stagedChanges().find((change) => change.kind === "create" && change.changeKey === selectedPageId() && changeKeys.includes(change.changeKey))
     const discarded = dataSource.discardStagedChanges(changeKeys)
     setDraftRevision((revision) => revision + 1)
-    if (selectedDiscardedCreate?.kind === "create") setSelectedPageId(selectedDiscardedCreate.create.parentPageId ?? dataSource.getDefaultPageId(activeSpaceKey()) ?? emptyPageId)
+    if (selectedDiscardedCreate?.kind === "create") {
+      const parentCreateSelected = selectedDiscardedCreate.create.parentCreateId ? changeKeys.includes(`create:${selectedDiscardedCreate.create.parentCreateId}`) : false
+      setSelectedPageId(parentCreateSelected ? dataSource.getDefaultPageId(activeSpaceKey()) ?? emptyPageId : selectedDiscardedCreate.create.parentCreateId ? `create:${selectedDiscardedCreate.create.parentCreateId}` : selectedDiscardedCreate.create.parentPageId ?? dataSource.getDefaultPageId(activeSpaceKey()) ?? emptyPageId)
+    }
     setChangesMessage(`Discarded ${discarded} staged change${discarded === 1 ? "" : "s"}.`)
     setSelectedChangeKeys(new Set(stagedChanges().map((change) => change.changeKey)))
+  }
+
+  const stageDeleteSelectedPage = () => {
+    const pageId = selectedPageId()
+    if (pageId === emptyPageId) {
+      setEditStatusMessage("No page selected to delete.")
+      return
+    }
+
+    if (pageId.startsWith("create:")) {
+      setEditStatusMessage("Local-only page is already staged as a create. Open Overview and discard it to remove it.")
+      openChanges(pageId)
+      return
+    }
+
+    try {
+      const change = dataSource.stagePageDelete(pageId)
+      setDraftRevision((revision) => revision + 1)
+      setEditStatusMessage(`Staged delete for ${change.title}. Open Overview to apply/discard.`)
+    } catch (error) {
+      setEditStatusMessage(errorMessage(error))
+    }
   }
 
   const openNewPage = () => {
@@ -587,6 +616,11 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
 
     if (isPlainKey(key, "e")) {
       openEditorForSelectedPage()
+      return
+    }
+
+    if (isPlainKey(key, "D")) {
+      stageDeleteSelectedPage()
       return
     }
 
@@ -924,8 +958,8 @@ function InfoPanel(props: { title: string; items: string[]; empty: string }) {
 function StatusBar(props: { focusPane: string; editorOpen: boolean; editorDirty: boolean; editMessage: string }) {
   const hint = () => {
     if (props.editorOpen) return "Ctrl+T stage | Esc close without changing staged docs"
-    if (props.focusPane === "document") return "/ page search | s spaces | c overview | e edit | j/k scroll line | d/u scroll doc | h navigator | q quit"
-    return "/ page search | s spaces | c overview | n child | N root | e edit | j/k move | h/l fold | d/u scroll | q quit"
+    if (props.focusPane === "document") return "/ page search | s spaces | c overview | e edit | D delete | j/k scroll line | d/u scroll doc | h navigator | q quit"
+    return "/ page search | s spaces | c overview | n child | N root | e edit | D delete | j/k move | h/l fold | d/u scroll | q quit"
   }
   const status = () => {
     if (props.editorOpen) return props.editMessage || `editing transient buffer: ${props.editorDirty ? "modified" : "unchanged"}`
@@ -1100,7 +1134,7 @@ export function StagedChangesOverlay(props: {
 function StagedChangeRow(props: { change: TuiStagedChange; active: boolean; checked: boolean }) {
   const marker = () => (props.active ? "▶" : " ")
   const checkbox = () => (props.checked ? "[x]" : "[ ]")
-  const kind = () => (props.change.kind === "create" ? "create" : "update")
+  const kind = () => props.change.kind
   const identifier = () => props.change.kind === "create" ? `parent ${props.change.parentPage?.pageId ?? "space root"}` : props.change.page.pageId
 
   return (
@@ -1114,6 +1148,7 @@ function StagedChangeRow(props: { change: TuiStagedChange; active: boolean; chec
 
 function changeDetailLine(change: TuiStagedChange) {
   if (change.kind === "create") return `New page under ${change.parentPage ? `parent ${change.parentPage.pageId}` : "space root"}  Updated: ${formatDate(change.updatedAt)}`
+  if (change.kind === "delete") return `Delete page ${change.page.pageId}  Updated: ${formatDate(change.updatedAt)}`
   return `ID: ${change.page.pageId}  Updated: ${formatDate(change.updatedAt)}`
 }
 

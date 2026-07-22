@@ -178,6 +178,23 @@ describe("Confluence client", () => {
     })
   })
 
+  test("deletes a page", async () => {
+    const calls: Array<{ url: string; method?: string }> = []
+    const client = new ConfluenceClient({
+      siteUrl: "https://example.atlassian.net/wiki",
+      email: "reader@example.com",
+      apiToken: "token",
+      fetch: async (url, init) => {
+        calls.push({ url, method: init?.method })
+        return response({}, true, 204, "No Content")
+      },
+    })
+
+    await client.deletePage("101")
+
+    expect(calls).toEqual([{ url: "https://example.atlassian.net/wiki/api/v2/pages/101", method: "DELETE" }])
+  })
+
   test("times out requests that do not finish", async () => {
     const calls: string[] = []
     const client = new ConfluenceClient({

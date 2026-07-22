@@ -62,8 +62,15 @@ interface PageCreateRow {
   local_id: string
   space_key: string
   parent_page_id: string | null
+  parent_create_id: string | null
   title: string
   draft_markdown: string
+  created_at: string
+  updated_at: string
+}
+
+interface PageDeleteRow {
+  page_id: string
   created_at: string
   updated_at: string
 }
@@ -98,8 +105,15 @@ export interface PageCreate {
   localId: string
   spaceKey: string
   parentPageId: string | null
+  parentCreateId: string | null
   title: string
   draftMarkdown: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PageDelete {
+  pageId: string
   createdAt: string
   updatedAt: string
 }
@@ -113,6 +127,7 @@ export interface IndexRepositoryStats {
   draftCount: number
   stagedDraftCount: number
   createCount: number
+  deleteCount: number
 }
 
 export class IndexRepository {
@@ -351,6 +366,7 @@ export class IndexRepository {
       draftCount: this.countRows("page_drafts"),
       stagedDraftCount: this.countRows("page_drafts", "status = 'staged'"),
       createCount: this.countRows("page_creates"),
+      deleteCount: this.countRows("page_deletes"),
     }
   }
 
@@ -425,12 +441,13 @@ export class IndexRepository {
   upsertPageCreate(create: PageCreate) {
     this.database.query(`
       INSERT INTO page_creates (
-        local_id, space_key, parent_page_id, title, draft_markdown, created_at, updated_at
+        local_id, space_key, parent_page_id, parent_create_id, title, draft_markdown, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(local_id) DO UPDATE SET
         space_key = excluded.space_key,
         parent_page_id = excluded.parent_page_id,
+        parent_create_id = excluded.parent_create_id,
         title = excluded.title,
         draft_markdown = excluded.draft_markdown,
         updated_at = excluded.updated_at
@@ -438,6 +455,7 @@ export class IndexRepository {
       create.localId,
       create.spaceKey,
       create.parentPageId,
+      create.parentCreateId,
       create.title,
       create.draftMarkdown,
       create.createdAt,
@@ -461,6 +479,47 @@ export class IndexRepository {
 
   deletePageCreate(localId: string) {
     return this.database.query("DELETE FROM page_creates WHERE local_id = ?").run(localId).changes
+  }
+
+  reparentPageCreatesFromLocalParent(localId: string, parentPageId: string, updatedAt: string) {
+    return this.database.query(`
+      UPDATE page_creates
+      SET parent_page_id = ?, parent_create_id = NULL, updated_at = ?
+      WHERE parent_create_id = ?
+    `).run(parentPageId, updatedAt, localId).changes
+  }
+
+  upsertPageDelete(deletion: PageDelete) {
+    this.database.query(`
+      INSERT INTO page_deletes (page_id, created_at, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(page_id) DO UPDATE SET
+        updated_at = excluded.updated_at
+    `).run(deletion.pageId, deletion.createdAt, deletion.updatedAt)
+  }
+
+  getPageDelete(pageId: string): PageDelete | null {
+    const row = this.database.query("SELECT * FROM page_deletes WHERE page_id = ?").get(pageId) as PageDeleteRow | null
+
+    return row ? pageDeleteFromRow(row) : null
+  }
+
+  listPageDeletes(): PageDelete[] {
+    const rows = this.database.query("SELECT * FROM page_deletes ORDER BY updated_at DESC, page_id COLLATE NOCASE").all() as PageDeleteRow[]
+
+    return rows.map(pageDeleteFromRow)
+  }
+
+  deletePageDelete(pageId: string) {
+    return this.database.query("DELETE FROM page_deletes WHERE page_id = ?").run(pageId).changes
+  }
+
+  deletePage(pageId: string) {
+    return this.transaction(() => {
+      this.database.query("DELETE FROM page_fts WHERE page_id = ?").run(pageId)
+      this.database.query("DELETE FROM links WHERE from_page_id = ? OR target_page_id = ?").run(pageId, pageId)
+      return this.database.query("DELETE FROM pages WHERE page_id = ?").run(pageId).changes
+    })
   }
 
   getChildren(parentPageId: string): IndexedPage[] {
@@ -614,7 +673,7 @@ export class IndexRepository {
     return Number(row?.user_version ?? 0)
   }
 
-  private countRows(table: "spaces" | "pages" | "links" | "page_bodies" | "page_drafts" | "page_creates", where?: string) {
+  private countRows(table: "spaces" | "pages" | "links" | "page_bodies" | "page_drafts" | "page_creates" | "page_deletes", where?: string) {
     const row = this.database.query(`SELECT COUNT(*) AS count FROM ${table}${where ? ` WHERE ${where}` : ""}`).get() as { count: number } | null
 
     return Number(row?.count ?? 0)
@@ -708,8 +767,17 @@ function pageCreateFromRow(row: PageCreateRow): PageCreate {
     localId: String(row.local_id),
     spaceKey: String(row.space_key),
     parentPageId: row.parent_page_id === null ? null : String(row.parent_page_id),
+    parentCreateId: row.parent_create_id === null ? null : String(row.parent_create_id),
     title: String(row.title),
     draftMarkdown: String(row.draft_markdown),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  }
+}
+
+function pageDeleteFromRow(row: PageDeleteRow): PageDelete {
+  return {
+    pageId: String(row.page_id),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   }

@@ -2,12 +2,13 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
-import { applyPageCreateToConfluence, applyPageDraftToConfluence } from "../src/apply"
+import { applyPageCreateToConfluence, applyPageDeleteToConfluence, applyPageDraftToConfluence } from "../src/apply"
 import { createLocalConfig, saveLocalAuth } from "../src/config"
 import type { FetchLike } from "../src/confluence/client"
 import { mapConfluenceBody } from "../src/confluence/mapper"
 import { openIndexRepository, type IndexRepository, type PageBodyArtifact } from "../src/index/repository"
 import type { IndexedPage, SpaceSummary } from "../src/model"
+import { createRepositoryTuiDataSource } from "../src/tui/data"
 
 describe("apply page draft", () => {
   test("preflights and applies a staged draft to Confluence", async () => {
@@ -116,6 +117,7 @@ describe("apply page draft", () => {
         localId: "create-1",
         spaceKey: "ENG",
         parentPageId: "100",
+        parentCreateId: null,
         title: "Launch Plan",
         draftMarkdown: "# Launch Plan\n",
         createdAt: "2026-07-21T10:00:00Z",
@@ -166,6 +168,7 @@ describe("apply page draft", () => {
         localId: "create-root",
         spaceKey: "ENG",
         parentPageId: null,
+        parentCreateId: null,
         title: "Root Plan",
         draftMarkdown: "# Root Plan\n",
         createdAt: "2026-07-21T10:00:00Z",
@@ -192,6 +195,62 @@ describe("apply page draft", () => {
       })
       expect(repository.getPageCreate("create-root")).toBeNull()
       expect(repository.getPage("102")).toMatchObject({ pageId: "102", parentId: null, title: "Root Plan", path: ["Root Plan"] })
+    } finally {
+      repository.close()
+      await setup.cleanup()
+    }
+  })
+
+  test("applies nested staged creates in parent-first order", async () => {
+    const setup = await createApplySetup()
+    const repository = openIndexRepository({ path: setup.dbPath })
+    const calls: Array<{ url: string; method?: string; body?: string }> = []
+    const dataSource = createRepositoryTuiDataSource(repository, { env: setup.env, now: fixedClock(), fetch: nestedCreateFetch(calls) })
+
+    try {
+      seedApplyPage(repository, baseStorage)
+      const parent = dataSource.stagePageCreate({ spaceKey: "ENG", parentPageId: null, title: "Parent Local" })
+      const child = dataSource.stagePageCreate({ spaceKey: "ENG", parentPageId: parent.changeKey, title: "Child Local" })
+
+      expect(child.create).toMatchObject({ parentPageId: null, parentCreateId: parent.create.localId })
+
+      const results = await dataSource.applyStagedChanges([child.changeKey, parent.changeKey])
+      const postBodies = calls.filter((call) => call.method === "POST").map((call) => JSON.parse(call.body ?? "{}"))
+
+      expect(results.map((result) => result.status)).toEqual(["applied", "applied"])
+      expect(postBodies).toEqual([
+        { spaceId: "10", status: "current", title: "Parent Local", body: { representation: "storage", value: "<h1>Parent Local</h1>" } },
+        { spaceId: "10", parentId: "201", status: "current", title: "Child Local", body: { representation: "storage", value: "<h1>Child Local</h1>" } },
+      ])
+      expect(repository.getPageCreate(parent.create.localId)).toBeNull()
+      expect(repository.getPageCreate(child.create.localId)).toBeNull()
+      expect(repository.getPage("202")).toMatchObject({ title: "Child Local", parentId: "201", path: ["Parent Local", "Child Local"] })
+    } finally {
+      dataSource.close?.()
+      await setup.cleanup()
+    }
+  })
+
+  test("deletes a staged page in Confluence and local index", async () => {
+    const setup = await createApplySetup()
+    const repository = openIndexRepository({ path: setup.dbPath })
+    const calls: Array<{ url: string; method?: string; body?: string }> = []
+
+    try {
+      seedApplyPage(repository, baseStorage)
+      repository.upsertPageDelete({ pageId: "100", createdAt: "2026-07-21T10:00:00Z", updatedAt: "2026-07-21T10:00:00Z" })
+
+      const result = await applyPageDeleteToConfluence("100", {
+        env: setup.env,
+        repository,
+        fetch: applyFetch(calls, { "/wiki/api/v2/pages/100": {} }),
+      })
+
+      expect(result).toMatchObject({ status: "applied", pageId: "100", title: "Project Architecture", remoteVersion: 0 })
+      expect(calls.map((call) => `${call.method ?? "GET"} ${new URL(call.url).pathname}${new URL(call.url).search}`)).toEqual(["DELETE /wiki/api/v2/pages/100"])
+      expect(repository.getPage("100")).toBeNull()
+      expect(repository.getPageBody("100")).toBeNull()
+      expect(repository.getPageDelete("100")).toBeNull()
     } finally {
       repository.close()
       await setup.cleanup()
@@ -259,6 +318,27 @@ function applyFetch(calls: Array<{ url: string; method?: string; body?: string }
 
     if (!body) return response({ message: `missing fixture for ${key}` }, false, 404, "Not Found")
     return response(body)
+  }
+}
+
+function nestedCreateFetch(calls: Array<{ url: string; method?: string; body?: string }>): FetchLike {
+  let createCount = 0
+
+  return async (url, init) => {
+    calls.push({ url, method: init?.method, body: init?.body })
+    const key = new URL(url).pathname + new URL(url).search
+
+    if (key === "/wiki/api/v2/spaces?keys=ENG&limit=250") return response({ results: [{ id: "10", key: "ENG", name: "Engineering" }] })
+    if (key === "/wiki/api/v2/pages" && init?.method === "POST") {
+      createCount += 1
+      const body = JSON.parse(init.body ?? "{}") as { title?: string; parentId?: string }
+
+      return response({ id: createCount === 1 ? "201" : "202", title: body.title, parentId: body.parentId, version: { number: 1 } })
+    }
+    if (key === "/wiki/api/v2/pages/201?body-format=storage") return response(remotePage("201", "Parent Local", 1, "<h1>Parent Local</h1>"))
+    if (key === "/wiki/api/v2/pages/202?body-format=storage") return response({ ...remotePage("202", "Child Local", 1, "<h1>Child Local</h1>"), parentId: "201" })
+
+    return response({ message: `missing fixture for ${key}` }, false, 404, "Not Found")
   }
 }
 

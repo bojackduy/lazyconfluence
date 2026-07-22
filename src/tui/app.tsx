@@ -14,7 +14,7 @@ import {
   type TreeSitterClient,
 } from "@opentui/core"
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js"
-import type { IndexedPage, ReaderPage, SearchResult, SpaceSearchResult } from "../model"
+import type { FocusPane, IndexedPage, ReaderPage, SearchResult, SpaceSearchResult } from "../model"
 import { loadCredentialStatus, type CredentialStatus } from "../config"
 import type { PageDraftStatus } from "../index/repository"
 import type { ApplyPageDraftResult } from "../apply"
@@ -29,11 +29,12 @@ type TreeRow = {
   detached: boolean
 }
 
-type SearchKeyLike = {
+export type SearchKeyLike = {
   name: string
   sequence: string
   ctrl: boolean
   meta: boolean
+  shift?: boolean
 }
 
 type CredentialWarning = Exclude<CredentialStatus, { kind: "ready" }>
@@ -517,10 +518,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
 
     if (row?.hasChildren && !row.expanded) {
       setExpandedPageIds((current) => new Set(current).add(row.page.pageId))
-      return
     }
-
-    setFocusPane("document")
   }
 
   const collapseSelectedPage = () => {
@@ -538,7 +536,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     if (row?.page.parentId) setSelectedPageId(row.page.parentId)
   }
 
-  useKeyboard((key) => {
+  const handleKeyPress = (key: SearchKeyLike) => {
     if (key.ctrl && key.name === "c") {
       renderer.destroy()
       return
@@ -634,8 +632,8 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
       return
     }
 
-    if (key.name === "tab") {
-      setFocusPane((pane) => (pane === "navigator" ? "document" : "navigator"))
+    if (isTabKey(key) || isShiftTabKey(key)) {
+      setFocusPane(nextFocusPaneForKey(focusPane(), key))
       return
     }
 
@@ -654,19 +652,18 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
       if (key.name === "k" || key.name === "up") moveSelection(-1, treeRows(), selectedIndex(), setSelectedPageId)
       if (key.name === "l" || key.name === "right") expandSelectedPage()
       if (key.name === "h" || key.name === "left") collapseSelectedPage()
-      if (key.name === "return") setFocusPane("document")
+      if (key.name === "return") setFocusPane(nextFocusPaneForKey(focusPane(), key))
       return
     }
 
     if (focusPane() === "document") {
       if (key.name === "j" || key.name === "down") scrollDocumentBy(1)
       if (key.name === "k" || key.name === "up") scrollDocumentBy(-1)
-      if (key.name === "h" || key.name === "left") setFocusPane("navigator")
       return
     }
+  }
 
-    if (key.name === "h" || key.name === "left") setFocusPane("navigator")
-  })
+  useKeyboard(handleKeyPress)
 
   return (
     <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.bg}>
@@ -790,7 +787,7 @@ function Navigator(props: { rows: TreeRow[]; selectedPageId: string; focused: bo
       flexDirection="column"
     >
       <text height={1} fg={props.focused ? theme.accent : theme.muted} attributes={1}>NAVIGATOR</text>
-      <text height={1} fg={theme.subtle}>j/k move  h/l fold  n new page</text>
+      <text height={1} fg={theme.subtle}>j/k move  h/l fold  Tab document</text>
       <box height={1} />
       <scrollbox flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
         <box flexDirection="column" width="100%">
@@ -958,8 +955,8 @@ function InfoPanel(props: { title: string; items: string[]; empty: string }) {
 function StatusBar(props: { focusPane: string; editorOpen: boolean; editorDirty: boolean; editMessage: string }) {
   const hint = () => {
     if (props.editorOpen) return "Ctrl+T stage | Esc close without changing staged docs"
-    if (props.focusPane === "document") return "/ page search | s spaces | c overview | e edit | D delete | j/k scroll line | d/u scroll doc | h navigator | q quit"
-    return "/ page search | s spaces | c overview | n child | N root | e edit | D delete | j/k move | h/l fold | d/u scroll | q quit"
+    if (props.focusPane === "document") return "/ page search | s spaces | c overview | e edit | D delete | Shift+Tab navigator | j/k scroll line | d/u scroll doc | q quit"
+    return "/ page search | s spaces | c overview | Tab document | n child | N root | e edit | D delete | j/k move | h/l fold | q quit"
   }
   const status = () => {
     if (props.editorOpen) return props.editMessage || `editing transient buffer: ${props.editorDirty ? "modified" : "unchanged"}`
@@ -1402,14 +1399,30 @@ export function pageSearchKeyAction(key: SearchKeyLike): PageSearchKeyAction {
   return "ignore"
 }
 
+export function nextFocusPaneForKey(current: FocusPane, key: SearchKeyLike): FocusPane {
+  if (isShiftTabKey(key)) return "navigator"
+  if (isTabKey(key)) return "document"
+  if (current === "navigator" && key.name === "return") return "document"
+  return current
+}
+
 function isSearchCharacter(key: SearchKeyLike) {
   if (key.ctrl || key.meta) return false
   if (["return", "tab", "escape", "backspace"].includes(key.name)) return false
+  if (key.sequence === "\t" || key.sequence === "\x1B[Z") return false
   return key.sequence.length === 1 && key.sequence >= " "
 }
 
 function isPlainKey(key: SearchKeyLike, value: string) {
   return !key.ctrl && !key.meta && (key.name === value || key.sequence === value)
+}
+
+function isTabKey(key: SearchKeyLike) {
+  return key.name === "tab" || key.sequence === "\t"
+}
+
+function isShiftTabKey(key: SearchKeyLike) {
+  return (isTabKey(key) && key.shift) || key.name === "backtab" || key.name === "shift-tab" || key.sequence === "\x1B[Z"
 }
 
 function applyBatchMessage(results: ApplyPageDraftResult[]) {

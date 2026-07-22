@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
-import { App, NewPageOverlay, StagedChangesOverlay } from "../src/tui/app"
+import { App, NewPageOverlay, StagedChangesOverlay, nextFocusPaneForKey, type SearchKeyLike } from "../src/tui/app"
 import { createLocalConfig } from "../src/config"
 import type { CredentialStatus } from "../src/config"
 import { openIndexRepository } from "../src/index/repository"
@@ -35,6 +35,7 @@ describe("main TUI layout", () => {
       expect(output).toContain("Overview 0")
       expect(output).toContain("c overview")
       expect(output).toContain("e edit")
+      expect(output).toContain("Tab document")
       expect(output).toContain("N root")
       expect(output).toContain("D delete")
       expect(output).toContain("▾ ▣ Local Engineering Home")
@@ -203,6 +204,15 @@ describe("main TUI layout", () => {
       dataSource.close?.()
       await setup.cleanup()
     }
+  })
+
+  test("focus keys keep h/l document-local and map Tab between panes", () => {
+    expect(nextFocusPaneForKey("navigator", key("tab", "\t"))).toBe("document")
+    expect(nextFocusPaneForKey("document", key("tab", "\x1B[Z", { shift: true }))).toBe("navigator")
+    expect(nextFocusPaneForKey("document", key("h", "h"))).toBe("document")
+    expect(nextFocusPaneForKey("document", key("left", "\x1B[D"))).toBe("document")
+    expect(nextFocusPaneForKey("navigator", key("l", "l"))).toBe("navigator")
+    expect(nextFocusPaneForKey("navigator", key("return", "\r"))).toBe("document")
   })
 
   test("TUI staged changes are scoped to the current space", async () => {
@@ -467,6 +477,10 @@ async function createTuiTestSetup(overrides: { home?: IndexedPage; architecture?
     dbPath,
     cleanup: async () => rm(dir, { recursive: true, force: true }),
   }
+}
+
+function key(name: string, sequence: string, overrides: Partial<SearchKeyLike> = {}): SearchKeyLike {
+  return { name, sequence, ctrl: false, meta: false, ...overrides }
 }
 
 async function withProcessEnv<T>(env: NodeJS.ProcessEnv, callback: () => Promise<T>) {

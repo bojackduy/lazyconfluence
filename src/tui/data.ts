@@ -1,15 +1,17 @@
 import { applyPageDraftToConfluence, type ApplyPageDraftResult } from "../apply"
 import type { FetchLike } from "../confluence/client"
 import { formatMarkdownDiff, readEditableDraftInput, savePageDraft, type EditableDraftInput } from "../editing"
-import { openIndexRepository, type IndexRepository, type PageDraftStatus } from "../index/repository"
+import { openIndexRepository, type IndexRepository, type PageDraft, type PageDraftStatus } from "../index/repository"
 import type { IndexedPage, ReaderPage, SearchResult, SpaceSearchResult, SpaceSummary } from "../model"
 
 export const emptyPageId = "__lazyconfluence_empty__"
 
 export interface TuiDataSource {
   applyPageDraft: (pageId: string, draftMarkdown: string) => Promise<ApplyPageDraftResult>
+  applyStagedDrafts: (pageIds: string[]) => Promise<ApplyPageDraftResult[]>
   close?: () => void
   discardPageDraft: (pageId: string) => "discarded" | "missing"
+  discardPageDrafts: (pageIds: string[]) => number
   formatPageDraftDiff: (pageId: string, draftMarkdown: string) => string
   getDefaultSpaceKey: () => string | null
   getDefaultPageId: (spaceKey?: string) => string | null
@@ -17,6 +19,7 @@ export interface TuiDataSource {
   getPageDraftStatus: (pageId: string) => PageDraftStatus | null
   getPagesForSpace: (spaceKey: string) => IndexedPage[]
   getReaderPage: (pageId: string) => ReaderPage | null
+  listStagedDraftChanges: (spaceKey: string) => TuiDraftChange[]
   listSpaces: () => SpaceSummary[]
   savePageDraft: (pageId: string, draftMarkdown: string) => SaveTuiPageDraftResult
   searchPagesInSpace: (spaceKey: string, query: string) => SearchResult[]
@@ -36,6 +39,12 @@ export type SaveTuiPageDraftResult =
   | { status: "cleared"; pageTitle: string }
   | { status: "unchanged"; pageTitle: string }
 
+export interface TuiDraftChange {
+  page: IndexedPage
+  draft: PageDraft
+  diffMarkdown: string
+}
+
 export function createRepositoryTuiDataSource(repository: IndexRepository = openIndexRepository(), options: TuiDataSourceOptions = {}): TuiDataSource {
   const now = options.now ?? (() => new Date())
 
@@ -50,8 +59,18 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
       repository.stagePageDraft(pageId, now().toISOString())
       return applyPageDraftToConfluence(pageId, { repository, env: options.env, fetch: options.fetch, now })
     },
+    applyStagedDrafts: async (pageIds) => {
+      const results: ApplyPageDraftResult[] = []
+
+      for (const pageId of pageIds) {
+        results.push(await applyPageDraftToConfluence(pageId, { repository, env: options.env, fetch: options.fetch, now }))
+      }
+
+      return results
+    },
     close: () => repository.close(),
     discardPageDraft: (pageId) => repository.deletePageDraft(pageId) > 0 ? "discarded" : "missing",
+    discardPageDrafts: (pageIds) => pageIds.reduce((count, pageId) => count + repository.deletePageDraft(pageId), 0),
     formatPageDraftDiff: (pageId, draftMarkdown) => {
       const input = readEditableDraftInput(repository, pageId)
       return formatMarkdownDiff(input.body.editableMarkdown, draftMarkdown)
@@ -85,6 +104,9 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
         snippet: draft ? extractSnippet(contentMarkdown, page.snippet) : page.snippet,
       }
     },
+    listStagedDraftChanges: (spaceKey) => repository.listPageDrafts("staged")
+      .map((draft) => draftChangeFor(repository, draft))
+      .filter((change): change is TuiDraftChange => change !== null && change.page.spaceKey === spaceKey),
     listSpaces: () => repository.listSpaces(),
     savePageDraft: (pageId, draftMarkdown) => saveTuiPageDraft(repository, pageId, draftMarkdown, now),
     searchPagesInSpace: (spaceKey, query) => repository.searchPagesInSpace(spaceKey, query, 20),
@@ -110,6 +132,19 @@ function saveTuiPageDraft(repository: IndexRepository, pageId: string, draftMark
 
   savePageDraft(repository, input.page, input.body, input.draft, draftMarkdown, now)
   return { status: "saved", pageTitle: input.page.title }
+}
+
+function draftChangeFor(repository: IndexRepository, draft: PageDraft): TuiDraftChange | null {
+  const page = repository.getPage(draft.pageId)
+  const body = repository.getPageBody(draft.pageId)
+
+  if (!page || !body) return null
+
+  return {
+    page,
+    draft,
+    diffMarkdown: formatMarkdownDiff(body.editableMarkdown, draft.draftMarkdown),
+  }
 }
 
 export function emptySpaceSummary(spaceKey = "LOCAL"): SpaceSummary {

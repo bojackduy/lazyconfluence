@@ -3,11 +3,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
-import { App, ReviewDraftOverlay } from "../src/tui/app"
+import { App, StagedChangesOverlay } from "../src/tui/app"
 import { createLocalConfig } from "../src/config"
 import type { CredentialStatus } from "../src/config"
 import { openIndexRepository } from "../src/index/repository"
-import type { PageBodyArtifact } from "../src/index/repository"
+import type { PageBodyArtifact, PageDraft } from "../src/index/repository"
 import { createRepositoryTuiDataSource } from "../src/tui/data"
 import type { IndexedPage, SpaceSummary } from "../src/model"
 
@@ -32,6 +32,8 @@ describe("main TUI layout", () => {
       expect(output).toContain("j/k move")
       expect(output).toContain("h/l fold")
       expect(output).toContain("s spaces")
+      expect(output).toContain("Overview 0")
+      expect(output).toContain("c overview")
       expect(output).toContain("e edit")
       expect(output).toContain("d/u scroll doc")
       expect(output).toContain("▾ ▣ Local Engineering Home")
@@ -176,6 +178,61 @@ describe("main TUI layout", () => {
     }
   })
 
+  test("opening the editor with e does not insert e into the staged buffer", async () => {
+    const setup = await createTuiTestSetup({ bodyArtifacts: [homeBody] })
+    const repository = openIndexRepository({ path: setup.dbPath })
+    const dataSource = createRepositoryTuiDataSource(repository)
+
+    try {
+      const rendered = await testRender(() => <App credentialStatus={readyStatus} dataSource={dataSource} disableTreeSitter />, { width: 120, height: 36 })
+
+      try {
+        await rendered.renderOnce()
+        rendered.mockInput.pressKey("e")
+        await rendered.flush()
+        rendered.mockInput.pressKey("t", { ctrl: true })
+        await rendered.flush()
+
+        expect(repository.getPageDraft("local-home")).toBeNull()
+        await rendered.waitForVisualIdle({ quietFrames: 2, maxFrames: 8 })
+      } finally {
+        rendered.renderer.destroy()
+      }
+    } finally {
+      dataSource.close?.()
+      await setup.cleanup()
+    }
+  })
+
+  test("TUI staged changes are scoped to the current space", async () => {
+    const setup = await createTuiTestSetup({ bodyArtifacts: [homeBody] })
+    const repository = openIndexRepository({ path: setup.dbPath })
+    const dataSource = createRepositoryTuiDataSource(repository)
+
+    try {
+      repository.upsertSpace(otherSpace)
+      repository.upsertPage(otherPage)
+      repository.upsertPageBody(otherBody)
+
+      dataSource.stagePageDraft("local-home", "# Local Engineering Home\n\nCurrent space staged draft.")
+      dataSource.stagePageDraft("ops-home", "# Ops Home\n\nOther space staged draft.")
+
+      const currentSpaceChanges = dataSource.listStagedDraftChanges("ENG")
+
+      expect(currentSpaceChanges).toHaveLength(1)
+      expect(currentSpaceChanges[0]?.page.pageId).toBe("local-home")
+      expect(currentSpaceChanges[0]?.diffMarkdown).toContain("+Current space staged draft.")
+      expect(dataSource.listStagedDraftChanges("OPS")).toHaveLength(1)
+
+      expect(dataSource.discardPageDrafts(currentSpaceChanges.map((change) => change.page.pageId))).toBe(1)
+      expect(dataSource.listStagedDraftChanges("ENG")).toHaveLength(0)
+      expect(dataSource.listStagedDraftChanges("OPS")).toHaveLength(1)
+    } finally {
+      dataSource.close?.()
+      await setup.cleanup()
+    }
+  })
+
   test("reader previews saved draft content when a draft exists", async () => {
     const setup = await createTuiTestSetup({ bodyArtifacts: [homeBody] })
     const repository = openIndexRepository({ path: setup.dbPath })
@@ -203,21 +260,22 @@ describe("main TUI layout", () => {
     }
   })
 
-  test("renders draft review controls and apply feedback", async () => {
+  test("renders current-space overview controls and selected staged diff", async () => {
     const rendered = await testRender(() => (
-      <ReviewDraftOverlay
+      <StagedChangesOverlay
         visible
-        pageTitle="Local Engineering Home"
-        pageId="local-home"
-        draftStatus="staged"
-        dirty={false}
+        activeSpaceName="Local Engineering"
+        changes={[{ page: home, draft: stagedHomeDraft, diffMarkdown: ["--- synced", "+++ draft", "@@", "-Old body", "+New body"].join("\n") }]}
+        selectedIndex={0}
+        selectedPageIds={new Set(["local-home"])}
         message="Apply blocked: Cannot safely preserve opaque Confluence content."
         applying={false}
-        diffMarkdown={["--- synced", "+++ draft", "@@", "-Old body", "+New body"].join("\n")}
+        left={1}
+        top={1}
         width={80}
         height={18}
+        onToggle={() => {}}
         onApply={() => {}}
-        onStage={() => {}}
         onDiscard={() => {}}
         onClose={() => {}}
       />
@@ -227,13 +285,16 @@ describe("main TUI layout", () => {
       await rendered.renderOnce()
       const output = rendered.captureCharFrame()
 
-      expect(output).toContain("REVIEW DRAFT")
+      expect(output).toContain("OVERVIEW")
+      expect(output).toContain("Local Engineering")
+      expect(output).toContain("PAGES")
+      expect(output).toContain("[x] Local")
+      expect(output).toContain("Local Engineering Home")
       expect(output).toContain("ID: local-home")
-      expect(output).toContain("Draft: staged")
       expect(output).toContain("Apply blocked: Cannot safely preserve opaque Confluence content.")
       expect(output).toContain("+++ draft")
+      expect(output).toContain("Toggle")
       expect(output).toContain("Apply")
-      expect(output).toContain("Unstage")
       expect(output).toContain("Discard")
       expect(output).toContain("Close")
     } finally {
@@ -304,6 +365,14 @@ const space: SpaceSummary = {
   syncState: "fresh",
 }
 
+const otherSpace: SpaceSummary = {
+  key: "OPS",
+  name: "Operations",
+  lastSyncedAt: "2026-07-21T10:00:00Z",
+  pageCount: 0,
+  syncState: "fresh",
+}
+
 const home: IndexedPage = {
   pageId: "local-home",
   spaceKey: "ENG",
@@ -351,6 +420,57 @@ const homeBody: PageBodyArtifact = {
   editableMarkdown: "# Local Engineering Home\n\nLocal synced content from SQLite.",
   renderedMarkdown: "# Local Engineering Home\n\nLocal synced content from SQLite.",
   updatedAt: "2026-07-21T10:00:00Z",
+}
+
+const otherPage: IndexedPage = {
+  pageId: "ops-home",
+  spaceKey: "OPS",
+  title: "Ops Home",
+  url: "https://example.atlassian.net/wiki/spaces/OPS/pages/200/Ops+Home",
+  parentId: null,
+  path: ["Ops Home"],
+  owner: "Operations Guild",
+  updatedAt: "2026-07-21T09:00:00Z",
+  contentMarkdown: "# Ops Home\n\nOps content.",
+  snippet: "Ops content.",
+}
+
+const otherBody: PageBodyArtifact = {
+  pageId: "ops-home",
+  remoteVersion: 2,
+  sourceRepresentation: "storage",
+  sourceBody: "<h1>Ops Home</h1><p>Ops content.</p>",
+  sourceHash: "ops-source-hash",
+  canonicalDocument: {
+    schemaVersion: 1,
+    pageId: "ops-home",
+    title: "Ops Home",
+    blocks: [
+      { type: "heading", nodeId: "ops-heading", level: 1, inlines: [{ type: "text", text: "Ops Home" }] },
+      { type: "paragraph", nodeId: "ops-paragraph", inlines: [{ type: "text", text: "Ops content." }] },
+    ],
+  },
+  sidecar: {
+    schemaVersion: 1,
+    remoteVersion: 2,
+    sourceRepresentation: "storage",
+    sourceHash: "ops-source-hash",
+    nodes: {},
+  },
+  editableMarkdown: "# Ops Home\n\nOps content.",
+  renderedMarkdown: "# Ops Home\n\nOps content.",
+  updatedAt: "2026-07-21T10:00:00Z",
+}
+
+const stagedHomeDraft: PageDraft = {
+  pageId: "local-home",
+  baseRemoteVersion: 4,
+  baseSourceHash: "home-source-hash",
+  draftMarkdown: "# Local Engineering Home\n\nNew body",
+  status: "staged",
+  createdAt: "2026-07-21T10:00:00Z",
+  updatedAt: "2026-07-21T11:00:00Z",
+  stagedAt: "2026-07-21T11:00:00Z",
 }
 
 const architecture: IndexedPage = {

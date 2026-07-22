@@ -172,3 +172,19 @@ One-time setup:
 3. Make sure the package version in `package.json` is new before publishing.
 
 Publish by creating a GitHub Release, or run the `Publish to npm` workflow manually from GitHub Actions.
+
+For a manual publish from your machine, first verify npm auth and scope access:
+
+```bash
+npm login
+npm whoami
+```
+
+The `npm whoami` result must be `bojackduy`, or the logged-in account must own an npm organization named `bojackduy`. If the account cannot publish under the `@bojackduy` scope, npm returns `404 Not Found` for `@bojackduy/lazyconfluence` even when the package name is valid.
+
+Then publish:
+
+```bash
+bun run build
+npm publish --access public
+```

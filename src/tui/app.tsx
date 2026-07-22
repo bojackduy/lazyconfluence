@@ -18,7 +18,7 @@ import type { IndexedPage, ReaderPage, SearchResult, SpaceSearchResult } from ".
 import { loadCredentialStatus, type CredentialStatus } from "../config"
 import type { PageDraftStatus } from "../index/repository"
 import type { ApplyPageDraftResult } from "../apply"
-import { createRepositoryTuiDataSource, emptyPageId, emptyReaderPage, emptySpaceSummary, type SaveTuiPageDraftResult, type TuiDataSource } from "./data"
+import { createRepositoryTuiDataSource, emptyPageId, emptyReaderPage, emptySpaceSummary, type TuiDataSource, type TuiDraftChange } from "./data"
 import { markdownStyle, theme } from "./theme"
 
 type TreeRow = {
@@ -49,7 +49,7 @@ export async function renderTui() {
   })
 }
 
-export function App(props: { credentialStatus?: CredentialStatus; dataSource?: TuiDataSource } = {}) {
+export function App(props: { credentialStatus?: CredentialStatus; dataSource?: TuiDataSource; disableTreeSitter?: boolean } = {}) {
   const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
   const dataSource = props.dataSource ?? createRepositoryTuiDataSource()
@@ -73,14 +73,16 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const [editorInitialMarkdown, setEditorInitialMarkdown] = createSignal("")
   const [editorOriginalMarkdown, setEditorOriginalMarkdown] = createSignal("")
   const [editorMarkdown, setEditorMarkdown] = createSignal("")
-  const [editorDiffOpen, setEditorDiffOpen] = createSignal(false)
-  const [editorDiffMarkdown, setEditorDiffMarkdown] = createSignal("")
-  const [editorApplying, setEditorApplying] = createSignal(false)
-  const [editorCloseArmed, setEditorCloseArmed] = createSignal(false)
-  const [editorDiscardArmed, setEditorDiscardArmed] = createSignal(false)
+  const [editorInputFocused, setEditorInputFocused] = createSignal(false)
+  const [changesOpen, setChangesOpen] = createSignal(false)
+  const [changesSelectedIndex, setChangesSelectedIndex] = createSignal(0)
+  const [selectedChangePageIds, setSelectedChangePageIds] = createSignal(new Set<string>())
+  const [changesApplying, setChangesApplying] = createSignal(false)
+  const [changesMessage, setChangesMessage] = createSignal("")
   const [editStatusMessage, setEditStatusMessage] = createSignal("")
   const [treeSitterClient, setTreeSitterClient] = createSignal<TreeSitterClient | undefined>()
   let documentScrollbox: ScrollBoxRenderable | undefined
+  let editorFocusTimer: ReturnType<typeof setTimeout> | undefined
 
   const spaces = createMemo(() => dataSource.listSpaces())
   const space = createMemo(() => spaces().find((candidate) => candidate.key === activeSpaceKey()) ?? emptySpaceSummary(activeSpaceKey()))
@@ -105,6 +107,10 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const editorDirty = createMemo(() => editorOpen() && editorMarkdown() !== editorOriginalMarkdown())
   const pageSearchResults = createMemo(() => dataSource.searchPagesInSpace(activeSpaceKey(), pageSearchQuery()))
   const spaceSwitcherResults = createMemo(() => dataSource.searchSpaces(spaceSwitcherQuery()))
+  const stagedChanges = createMemo(() => {
+    draftRevision()
+    return dataSource.listStagedDraftChanges(activeSpaceKey())
+  })
   const isNarrow = createMemo(() => dimensions().width < 96)
   const halfPageScrollAmount = createMemo(() => Math.max(6, Math.floor((dimensions().height - 9) / 2)))
   const credentialWarning = createMemo<CredentialWarning | null>(() => {
@@ -127,6 +133,8 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   })
 
   onMount(() => {
+    if (props.disableTreeSitter) return
+
     const client = getTreeSitterClient()
     let cancelled = false
 
@@ -143,8 +151,25 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   })
 
   onCleanup(() => {
+    clearEditorFocusTimer()
     if (!props.dataSource) dataSource.close?.()
   })
+
+  const clearEditorFocusTimer = () => {
+    if (!editorFocusTimer) return
+
+    clearTimeout(editorFocusTimer)
+    editorFocusTimer = undefined
+  }
+
+  const focusEditorInputAfterOpen = (pageId: string) => {
+    clearEditorFocusTimer()
+    setEditorInputFocused(false)
+    editorFocusTimer = setTimeout(() => {
+      editorFocusTimer = undefined
+      if (editorPageId() === pageId) setEditorInputFocused(true)
+    }, 0)
+  }
 
   createEffect(() => {
     const ancestors = getAncestorPageIds(selectedPageId(), pageById())
@@ -171,8 +196,23 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     if (spaceSwitcherSelectedIndex() > maxIndex) setSpaceSwitcherSelectedIndex(maxIndex)
   })
 
+  createEffect(() => {
+    const changes = stagedChanges()
+    const maxIndex = Math.max(0, changes.length - 1)
+
+    if (changesSelectedIndex() > maxIndex) setChangesSelectedIndex(maxIndex)
+
+    setSelectedChangePageIds((current) => {
+      const available = new Set(changes.map((change) => change.page.pageId))
+      const next = new Set([...current].filter((pageId) => available.has(pageId)))
+
+      return next
+    })
+  })
+
   const openPageSearch = () => {
     setSpaceSwitcherOpen(false)
+    setChangesOpen(false)
     setPageSearchOpen(true)
     setPageSearchQuery("")
     setPageSearchSelectedIndex(0)
@@ -186,6 +226,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
 
   const openSpaceSwitcher = () => {
     setPageSearchOpen(false)
+    setChangesOpen(false)
     setSpaceSwitcherOpen(true)
     setSpaceSwitcherQuery("")
     setSpaceSwitcherSelectedIndex(Math.max(0, dataSource.searchSpaces("").findIndex((result) => result.space.key === activeSpaceKey())))
@@ -195,6 +236,79 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     setSpaceSwitcherOpen(false)
     setSpaceSwitcherQuery("")
     setSpaceSwitcherSelectedIndex(0)
+  }
+
+  const openChanges = (focusPageId?: string) => {
+    setPageSearchOpen(false)
+    setSpaceSwitcherOpen(false)
+
+    const changes = stagedChanges()
+    const focusIndex = focusPageId ? changes.findIndex((change) => change.page.pageId === focusPageId) : -1
+
+    setChangesSelectedIndex(focusIndex >= 0 ? focusIndex : 0)
+    setSelectedChangePageIds(new Set(changes.map((change) => change.page.pageId)))
+    setChangesMessage(changes.length ? `${changes.length} staged change${changes.length === 1 ? "" : "s"} in ${space().name}.` : `No staged changes in ${space().name}.`)
+    setChangesOpen(true)
+  }
+
+  const closeChanges = () => {
+    setChangesOpen(false)
+  }
+
+  const moveChangesSelection = (direction: number) => {
+    setChangesSelectedIndex((current) => Math.max(0, Math.min(stagedChanges().length - 1, current + direction)))
+  }
+
+  const toggleSelectedChange = () => {
+    const change = stagedChanges()[changesSelectedIndex()]
+    if (!change) return
+
+    setSelectedChangePageIds((current) => {
+      const next = new Set(current)
+
+      if (next.has(change.page.pageId)) next.delete(change.page.pageId)
+      else next.add(change.page.pageId)
+
+      return next
+    })
+  }
+
+  const selectedChangeIds = () => stagedChanges()
+    .filter((change) => selectedChangePageIds().has(change.page.pageId))
+    .map((change) => change.page.pageId)
+
+  const applySelectedChanges = () => {
+    const pageIds = selectedChangeIds()
+    if (!pageIds.length || changesApplying()) {
+      setChangesMessage("Select at least one staged change to apply.")
+      return
+    }
+
+    setChangesApplying(true)
+    setChangesMessage(`Applying ${pageIds.length} selected staged change${pageIds.length === 1 ? "" : "s"}...`)
+
+    void dataSource.applyStagedDrafts(pageIds).then((results) => {
+      setDraftRevision((revision) => revision + 1)
+      setChangesMessage(applyBatchMessage(results))
+      setSelectedChangePageIds(new Set(stagedChanges().map((change) => change.page.pageId)))
+    }).catch((error) => {
+      setChangesMessage(errorMessage(error))
+    }).finally(() => {
+      setChangesApplying(false)
+    })
+  }
+
+  const discardSelectedChanges = () => {
+    const pageIds = selectedChangeIds()
+    if (!pageIds.length || changesApplying()) {
+      setChangesMessage("Select at least one staged change to discard.")
+      return
+    }
+
+    const discarded = dataSource.discardPageDrafts(pageIds)
+    setDraftRevision((revision) => revision + 1)
+    setChangesMessage(`Discarded ${discarded} staged change${discarded === 1 ? "" : "s"}.`)
+    setSelectedChangePageIds(new Set(stagedChanges().map((change) => change.page.pageId)))
   }
 
   const selectPageSearchResult = () => {
@@ -252,147 +366,47 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
       setEditorInitialMarkdown(markdown)
       setEditorOriginalMarkdown(markdown)
       setEditorMarkdown(markdown)
-      setEditorDiffMarkdown("")
-      setEditorDiffOpen(false)
-      setEditorCloseArmed(false)
-      setEditorDiscardArmed(false)
+      setEditorInputFocused(false)
       setEditorOpen(true)
       setFocusPane("document")
-      setEditStatusMessage(`Editing local draft for ${input.page.title}.`)
+      setEditStatusMessage(`Editing ${input.page.title}. Press Ctrl+T to stage, or Esc to leave staged changes untouched.`)
+      focusEditorInputAfterOpen(pageId)
     } catch (error) {
       setEditStatusMessage(errorMessage(error))
     }
   }
 
-  const saveEditorDraft = () => {
+  const stageEditorBuffer = () => {
     const pageId = editorPageId()
     if (!pageId) return
 
     try {
-      const result = dataSource.savePageDraft(pageId, editorMarkdown())
-
-      setDraftRevision((revision) => revision + 1)
-      setEditorOriginalMarkdown(editorMarkdown())
-      setEditorCloseArmed(false)
-      setEditorDiscardArmed(false)
-      setEditStatusMessage(editorSaveMessage(result))
-    } catch (error) {
-      setEditStatusMessage(errorMessage(error))
-    }
-  }
-
-  const toggleEditorStage = () => {
-    const pageId = editorPageId()
-    if (!pageId) return
-
-    try {
-      if (editorDraftStatus() === "staged" && !editorDirty()) {
-        const result = dataSource.unstagePageDraft(pageId)
-        setDraftRevision((revision) => revision + 1)
-        setEditStatusMessage(result === "unstaged" ? `Draft unstaged for ${editorPageTitle()}.` : `No staged draft for ${editorPageTitle()}.`)
-        return
-      }
-
       const result = dataSource.stagePageDraft(pageId, editorMarkdown())
       setDraftRevision((revision) => revision + 1)
-      setEditorOriginalMarkdown(editorMarkdown())
-      setEditorCloseArmed(false)
-      setEditorDiscardArmed(false)
-      setEditStatusMessage(result === "staged" ? `Draft staged for ${editorPageTitle()}.` : `No draft changes to stage for ${editorPageTitle()}.`)
-    } catch (error) {
-      setEditStatusMessage(errorMessage(error))
-    }
-  }
-
-  const discardEditorDraft = () => {
-    const pageId = editorPageId()
-    if (!pageId) return
-
-    if (editorDirty() && !editorDiscardArmed()) {
-      setEditorDiscardArmed(true)
-      setEditStatusMessage("Unsaved editor changes. Press Ctrl+R again to discard the draft and close.")
-      return
-    }
-
-    try {
-      const result = dataSource.discardPageDraft(pageId)
-      setDraftRevision((revision) => revision + 1)
-      closeEditorImmediately(result === "discarded" ? `Draft discarded for ${editorPageTitle()}.` : `No saved draft for ${editorPageTitle()}.`)
+      closeEditorImmediately(result === "staged" ? `Staged changes for ${editorPageTitle()}. Open Overview to review/apply/discard.` : `No staged change remains for ${editorPageTitle()}.`)
     } catch (error) {
       setEditStatusMessage(errorMessage(error))
     }
   }
 
   const closeEditor = () => {
-    if (editorDiffOpen()) {
-      setEditorDiffOpen(false)
-      return
-    }
-
-    if (editorDirty() && !editorCloseArmed()) {
-      setEditorCloseArmed(true)
-      setEditStatusMessage("Unsaved editor buffer. Press Esc again to close without saving, or Ctrl+S to save.")
-      return
-    }
-
-    closeEditorImmediately(`Closed editor for ${editorPageTitle()}.`)
+    closeEditorImmediately(`Closed editor for ${editorPageTitle()}; staged changes were not changed.`)
   }
 
   const closeEditorImmediately = (message: string) => {
+    clearEditorFocusTimer()
     setEditorOpen(false)
+    setEditorInputFocused(false)
     setEditorPageId(null)
     setEditorPageTitle("")
     setEditorInitialMarkdown("")
     setEditorOriginalMarkdown("")
     setEditorMarkdown("")
-    setEditorDiffMarkdown("")
-    setEditorDiffOpen(false)
-    setEditorApplying(false)
-    setEditorCloseArmed(false)
-    setEditorDiscardArmed(false)
     setEditStatusMessage(message)
-  }
-
-  const showEditorDiff = () => {
-    const pageId = editorPageId()
-    if (!pageId) return
-
-    try {
-      setEditorDiffMarkdown(dataSource.formatPageDraftDiff(pageId, editorMarkdown()))
-      setEditorDiffOpen(true)
-      setEditStatusMessage(`Showing local diff for ${editorPageTitle()}.`)
-    } catch (error) {
-      setEditStatusMessage(errorMessage(error))
-    }
-  }
-
-  const applyEditorDraft = () => {
-    const pageId = editorPageId()
-    if (!pageId || editorApplying()) return
-
-    setEditorDiffOpen(true)
-    setEditorApplying(true)
-    setEditStatusMessage(`Applying ${editorPageTitle()} to Confluence...`)
-
-    void dataSource.applyPageDraft(pageId, editorMarkdown()).then((result) => {
-      setDraftRevision((revision) => revision + 1)
-      if (result.status === "applied") {
-        closeEditorImmediately(result.message)
-        return
-      }
-
-      setEditStatusMessage(applyResultMessage(result))
-    }).catch((error) => {
-      setEditStatusMessage(errorMessage(error))
-    }).finally(() => {
-      setEditorApplying(false)
-    })
   }
 
   const setEditorMarkdownFromTextarea = (markdown: string) => {
     setEditorMarkdown(markdown)
-    setEditorCloseArmed(false)
-    setEditorDiscardArmed(false)
   }
 
   const expandSelectedPage = () => {
@@ -427,15 +441,19 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
       return
     }
 
+    if (changesOpen()) {
+      if (key.name === "escape") closeChanges()
+      else if (key.name === "j" || key.name === "down") moveChangesSelection(1)
+      else if (key.name === "k" || key.name === "up") moveChangesSelection(-1)
+      else if (key.sequence === " ") toggleSelectedChange()
+      else if (isPlainKey(key, "a")) applySelectedChanges()
+      else if (isPlainKey(key, "d")) discardSelectedChanges()
+      return
+    }
+
     if (editorOpen()) {
-      if (editorDiffOpen() && isPlainKey(key, "a")) applyEditorDraft()
-      else if (editorDiffOpen() && isPlainKey(key, "s")) toggleEditorStage()
-      else if (editorDiffOpen() && isPlainKey(key, "d")) discardEditorDraft()
-      else if (key.name === "escape") closeEditor()
-      else if (key.ctrl && key.name === "s") saveEditorDraft()
-      else if (key.ctrl && key.name === "t") toggleEditorStage()
-      else if (key.ctrl && key.name === "o") showEditorDiff()
-      else if (key.ctrl && key.name === "r") discardEditorDraft()
+      if (key.name === "escape") closeEditor()
+      else if (key.ctrl && key.name === "t") stageEditorBuffer()
       return
     }
 
@@ -475,6 +493,11 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
 
     if (key.name === "s") {
       openSpaceSwitcher()
+      return
+    }
+
+    if (isPlainKey(key, "c")) {
+      openChanges()
       return
     }
 
@@ -519,7 +542,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
 
   return (
     <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.bg}>
-      <Header page={readerPage()} spaceName={space().name} syncState={space().syncState} draftStatus={draftStatus()} />
+      <Header page={readerPage()} spaceName={space().name} syncState={space().syncState} draftStatus={draftStatus()} stagedCount={stagedChanges().length} onOpenOverview={() => openChanges()} />
       <Show when={credentialWarning()} fallback={<box height={0} />}>{(status) => <CredentialNotice status={status()} />}</Show>
       <box flexGrow={1} minHeight={0} flexDirection={isNarrow() ? "column" : "row"} paddingX={1}>
         <Navigator rows={treeRows()} selectedPageId={selectedPageId()} focused={focusPane() === "navigator"} />
@@ -533,21 +556,32 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
           initialMarkdown={editorInitialMarkdown()}
           dirty={editorDirty()}
           draftStatus={editorDraftStatus()}
+          inputFocused={editorInputFocused()}
           message={editStatusMessage()}
-          diffOpen={editorDiffOpen()}
-          diffMarkdown={editorDiffMarkdown()}
-          applying={editorApplying()}
           left={dimensions().width < 72 ? 1 : 4}
           top={2}
           width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 2 : 8))}
           height={Math.max(10, dimensions().height - 4)}
           onMarkdownChange={setEditorMarkdownFromTextarea}
-          onApply={applyEditorDraft}
-          onStage={toggleEditorStage}
-          onDiscard={discardEditorDraft}
-          onCloseReview={() => setEditorDiffOpen(false)}
         />
       </Show>
+      <StagedChangesOverlay
+        visible={changesOpen()}
+        activeSpaceName={space().name}
+        changes={stagedChanges()}
+        selectedIndex={changesSelectedIndex()}
+        selectedPageIds={selectedChangePageIds()}
+        message={changesMessage()}
+        applying={changesApplying()}
+        left={dimensions().width < 72 ? 1 : 4}
+        top={2}
+        width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 2 : 8))}
+        height={Math.max(10, dimensions().height - 4)}
+        onToggle={toggleSelectedChange}
+        onApply={applySelectedChanges}
+        onDiscard={discardSelectedChanges}
+        onClose={closeChanges}
+      />
       <PageSearchOverlay
         visible={pageSearchOpen()}
         query={pageSearchQuery()}
@@ -582,7 +616,7 @@ function CredentialNotice(props: { status: CredentialWarning }) {
   )
 }
 
-function Header(props: { page: ReaderPage; spaceName: string; syncState: string; draftStatus: PageDraftStatus | null }) {
+function Header(props: { page: ReaderPage; spaceName: string; syncState: string; draftStatus: PageDraftStatus | null; stagedCount: number; onOpenOverview: () => void }) {
   const syncColor = () => (props.syncState === "fresh" ? theme.good : props.syncState === "stale" ? theme.warn : theme.danger)
   const statusColor = () => (props.draftStatus === "staged" ? theme.good : props.draftStatus === "draft" ? theme.warn : syncColor())
   const statusText = () => props.draftStatus ? `${props.draftStatus} · ${props.syncState}` : props.syncState
@@ -591,7 +625,12 @@ function Header(props: { page: ReaderPage; spaceName: string; syncState: string;
     <box height={6} border borderStyle="single" borderColor={theme.border} paddingX={1} flexDirection="column">
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
         <text height={1} fg={theme.text} attributes={1}>{props.page.title}</text>
-        <text height={1} fg={statusColor()}>{statusText()}</text>
+        <box height={1} flexDirection="row" gap={2}>
+          <box height={1} width={Math.max(12, `Overview ${props.stagedCount}`.length + 2)} onMouseDown={props.onOpenOverview}>
+            <text height={1} fg={theme.accent}>Overview {props.stagedCount}</text>
+          </box>
+          <text height={1} fg={statusColor()}>{statusText()}</text>
+        </box>
       </box>
       <text height={1} fg={theme.muted}>{props.spaceName} / {props.page.path.join(" / ")}</text>
       <text height={1} fg={theme.subtle}>ID: {props.page.pageId}  Space: {props.page.spaceKey}  Parent: {props.page.parentId ?? "root"}</text>
@@ -783,12 +822,12 @@ function InfoPanel(props: { title: string; items: string[]; empty: string }) {
 
 function StatusBar(props: { focusPane: string; editorOpen: boolean; editorDirty: boolean; editMessage: string }) {
   const hint = () => {
-    if (props.editorOpen) return "Ctrl+S save | Ctrl+T stage | Ctrl+O review | Ctrl+R discard | Esc close"
-    if (props.focusPane === "document") return "/ page search | s spaces | e edit | j/k scroll line | d/u scroll doc | h navigator | q quit"
-    return "/ page search | s spaces | e edit | j/k move | h/l fold tree | d/u scroll doc | q quit"
+    if (props.editorOpen) return "Ctrl+T stage | Esc close without changing staged docs"
+    if (props.focusPane === "document") return "/ page search | s spaces | c overview | e edit | j/k scroll line | d/u scroll doc | h navigator | q quit"
+    return "/ page search | s spaces | c overview | e edit | j/k move | h/l fold tree | d/u scroll doc | q quit"
   }
   const status = () => {
-    if (props.editorOpen) return props.editMessage || `editing local draft: ${props.editorDirty ? "dirty" : "saved"}`
+    if (props.editorOpen) return props.editMessage || `editing transient buffer: ${props.editorDirty ? "modified" : "unchanged"}`
     return props.editMessage ? props.editMessage : `focus: ${props.focusPane}`
   }
 
@@ -806,25 +845,19 @@ function EditorOverlay(props: {
   initialMarkdown: string
   dirty: boolean
   draftStatus: PageDraftStatus | null
+  inputFocused: boolean
   message: string
-  diffOpen: boolean
-  diffMarkdown: string
-  applying: boolean
   left: number
   top: number
   width: number
   height: number
   onMarkdownChange: (markdown: string) => void
-  onApply: () => void
-  onStage: () => void
-  onDiscard: () => void
-  onCloseReview: () => void
 }) {
   let textarea: TextareaRenderable | undefined
 
   const statusText = () => {
     const persisted = props.draftStatus ?? "synced"
-    return `${props.dirty ? "unsaved" : "clean"} · ${persisted}`
+    return `${props.dirty ? "modified" : "unchanged"} · ${persisted}`
   }
 
   const updateMarkdown = (value?: unknown) => {
@@ -848,16 +881,16 @@ function EditorOverlay(props: {
       zIndex={40}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.accent} attributes={1}>LOCAL DRAFT EDITOR</text>
+        <text height={1} fg={theme.accent} attributes={1}>EDITOR</text>
         <text height={1} fg={props.dirty ? theme.warn : theme.good}>{statusText()}</text>
       </box>
       <text height={1} fg={theme.text}>{props.pageTitle}</text>
-      <text height={1} fg={theme.subtle}>ID: {props.pageId}  {props.message || "Edit Markdown locally. Nothing is sent to Confluence until Apply is approved."}</text>
+      <text height={1} fg={theme.subtle}>ID: {props.pageId}  {props.message || "Stage to keep this buffer. Esc closes without changing staged docs."}</text>
       <box height={1} />
       <textarea
         ref={(node) => { textarea = node }}
         initialValue={props.initialMarkdown}
-        focused={!props.diffOpen}
+        focused={props.inputFocused}
         flexGrow={1}
         minHeight={0}
         width="100%"
@@ -872,51 +905,39 @@ function EditorOverlay(props: {
         onContentChange={updateMarkdown}
       />
       <box height={1} />
-      <text height={1} fg={theme.muted}>Ctrl+S save  Ctrl+T stage/unstage  Ctrl+O review/apply  Ctrl+R discard  Esc close</text>
-      <ReviewDraftOverlay
-        visible={props.diffOpen}
-        pageTitle={props.pageTitle}
-        pageId={props.pageId}
-        draftStatus={props.draftStatus}
-        dirty={props.dirty}
-        message={props.message}
-        applying={props.applying}
-        diffMarkdown={props.diffMarkdown}
-        width={Math.max(24, props.width - 6)}
-        height={Math.max(8, props.height - 7)}
-        onApply={props.onApply}
-        onStage={props.onStage}
-        onDiscard={props.onDiscard}
-        onClose={props.onCloseReview}
-      />
+      <text height={1} fg={theme.muted}>Ctrl+T stage this buffer  Esc close without changing staged docs</text>
     </box>
   )
 }
 
-export function ReviewDraftOverlay(props: {
+export function StagedChangesOverlay(props: {
   visible: boolean
-  pageTitle: string
-  pageId: string
-  draftStatus: PageDraftStatus | null
-  dirty: boolean
+  activeSpaceName: string
+  changes: TuiDraftChange[]
+  selectedIndex: number
+  selectedPageIds: Set<string>
   message: string
   applying: boolean
-  diffMarkdown: string
+  left: number
+  top: number
   width: number
   height: number
+  onToggle: () => void
   onApply: () => void
-  onStage: () => void
   onDiscard: () => void
   onClose: () => void
 }) {
-  const lines = createMemo(() => props.diffMarkdown.split("\n"))
+  const listWidth = createMemo(() => Math.min(40, Math.max(28, Math.floor(props.width * 0.36))))
+  const selectedChange = createMemo(() => props.changes[props.selectedIndex])
+  const selectedCount = createMemo(() => props.changes.filter((change) => props.selectedPageIds.has(change.page.pageId)).length)
+  const lines = createMemo(() => selectedChange()?.diffMarkdown.split("\n") ?? [])
 
   return (
     <box
       visible={props.visible}
       position="absolute"
-      left={2}
-      top={3}
+      left={props.left}
+      top={props.top}
       width={props.width}
       height={props.height}
       border
@@ -926,26 +947,64 @@ export function ReviewDraftOverlay(props: {
       paddingX={1}
       paddingY={1}
       flexDirection="column"
-      zIndex={45}
+      zIndex={60}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.warn} attributes={1}>REVIEW DRAFT</text>
-        <text height={1} fg={theme.muted}>{props.applying ? "Applying..." : "a apply  s stage  d discard  esc close"}</text>
+        <text height={1} fg={theme.warn} attributes={1}>OVERVIEW</text>
+        <text height={1} fg={theme.muted}>{props.activeSpaceName}</text>
       </box>
-      <text height={1} fg={theme.text}>{props.pageTitle}</text>
-      <text height={1} fg={theme.subtle}>ID: {props.pageId}  Draft: {props.draftStatus ?? "unsaved"}  Buffer: {props.dirty ? "dirty" : "clean"}</text>
-      <text height={1} fg={reviewMessageColor(props.message)}>{props.message || "Approve applies this draft to remote Confluence after conflict checks."}</text>
-      <scrollbox flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
-        <box flexDirection="column" width="100%">
-          <For each={lines()}>{(line) => <text height={1} width="100%" content={line || " "} fg={diffLineColor(line)} />}</For>
+      <text height={1} fg={theme.subtle}>{props.applying ? "Applying selected staged changes..." : "space select  a apply selected  d discard selected  esc close"}</text>
+      <text height={1} fg={reviewMessageColor(props.message)}>{props.message || `${selectedCount()} of ${props.changes.length} staged change${props.changes.length === 1 ? "" : "s"} selected.`}</text>
+      <box flexGrow={1} minHeight={0} flexDirection="row" gap={1}>
+        <box width={listWidth()} minWidth={24} height="100%" border borderStyle="single" borderColor={theme.border} paddingX={1} flexDirection="column">
+          <text height={1} fg={theme.muted} attributes={1}>PAGES</text>
+          <Show when={props.changes.length > 0} fallback={<text height={1} fg={theme.subtle}>No staged changes in this space.</text>}>
+            <scrollbox flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
+              <box flexDirection="column" width="100%">
+                <For each={props.changes}>
+                  {(change, index) => <StagedChangeRow change={change} active={index() === props.selectedIndex} checked={props.selectedPageIds.has(change.page.pageId)} />}
+                </For>
+              </box>
+            </scrollbox>
+          </Show>
         </box>
-      </scrollbox>
-      <box height={3} flexDirection="row" gap={1} paddingTop={1}>
-        <ReviewButton label={props.applying ? "Applying" : "Apply"} color={theme.good} disabled={props.applying} onPress={props.onApply} />
-        <ReviewButton label={props.draftStatus === "staged" && !props.dirty ? "Unstage" : "Stage"} color={theme.accent} disabled={props.applying} onPress={props.onStage} />
-        <ReviewButton label="Discard" color={theme.danger} disabled={props.applying} onPress={props.onDiscard} />
-        <ReviewButton label="Close" color={theme.muted} disabled={props.applying} onPress={props.onClose} />
+        <box flexGrow={1} minWidth={0} height="100%" border borderStyle="single" borderColor={theme.border} paddingX={1} flexDirection="column">
+          <Show when={selectedChange()} fallback={<box flexGrow={1} alignItems="center" justifyContent="center"><text fg={theme.subtle}>Select a staged page to preview its diff.</text></box>}>
+            {(change) => (
+              <>
+                <text height={1} fg={theme.text}>{change().page.title}</text>
+                <text height={1} fg={theme.subtle}>ID: {change().page.pageId}  Updated: {formatDate(change().draft.updatedAt)}</text>
+                <text height={1} fg={theme.muted}>{change().page.path.join(" / ")}</text>
+                <scrollbox flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
+                  <box flexDirection="column" width="100%">
+                    <For each={lines()}>{(line) => <text height={1} width="100%" content={line || " "} fg={diffLineColor(line)} />}</For>
+                  </box>
+                </scrollbox>
+              </>
+            )}
+          </Show>
+        </box>
       </box>
+      <box height={3} flexDirection="row" gap={1} paddingTop={1}>
+        <ReviewButton label="Toggle" color={theme.accent} disabled={props.applying || props.changes.length === 0} onPress={props.onToggle} />
+        <ReviewButton label={props.applying ? "Applying" : "Apply"} color={theme.good} disabled={props.applying || selectedCount() === 0} onPress={props.onApply} />
+        <ReviewButton label="Discard" color={theme.danger} disabled={props.applying || selectedCount() === 0} onPress={props.onDiscard} />
+        <ReviewButton label="Close" color={theme.muted} disabled={props.applying} onPress={props.onClose} />
+        <text height={3} fg={theme.subtle}>{selectedCount()} selected / {props.changes.length} staged</text>
+      </box>
+    </box>
+  )
+}
+
+function StagedChangeRow(props: { change: TuiDraftChange; active: boolean; checked: boolean }) {
+  const marker = () => (props.active ? "▶" : " ")
+  const checkbox = () => (props.checked ? "[x]" : "[ ]")
+
+  return (
+    <box height={3} width="100%" backgroundColor={props.active ? theme.accentSoft : undefined} paddingX={1} flexDirection="column">
+      <text height={1} fg={props.active ? theme.text : theme.muted}>{marker()} {checkbox()} {props.change.page.title}</text>
+      <text height={1} fg={theme.subtle}>    {props.change.page.pageId}</text>
+      <text height={1} fg={theme.muted}>    {formatDate(props.change.draft.updatedAt)}</text>
     </box>
   )
 }
@@ -1170,20 +1229,20 @@ function isPlainKey(key: SearchKeyLike, value: string) {
   return !key.ctrl && !key.meta && (key.name === value || key.sequence === value)
 }
 
-function editorSaveMessage(result: SaveTuiPageDraftResult) {
-  if (result.status === "saved") return `Draft saved for ${result.pageTitle}.`
-  if (result.status === "cleared") return `Draft cleared for ${result.pageTitle}; content matches synced page.`
-  return `No draft changes for ${result.pageTitle}.`
-}
+function applyBatchMessage(results: ApplyPageDraftResult[]) {
+  const applied = results.filter((result) => result.status === "applied")
+  const conflicts = results.filter((result) => result.status === "conflict")
+  const blocked = results.filter((result) => result.status === "blocked")
+  const firstFailure = [...conflicts, ...blocked][0]
+  const summary = `${applied.length} applied, ${conflicts.length} conflict${conflicts.length === 1 ? "" : "s"}, ${blocked.length} blocked.`
 
-function applyResultMessage(result: Exclude<ApplyPageDraftResult, { status: "applied" }>) {
-  if (result.status === "conflict") return `Conflict: ${result.details.join(" ")}`
-  return `Apply blocked: ${result.details.join(" ")}`
+  if (!firstFailure) return `${applied.length} staged change${applied.length === 1 ? "" : "s"} applied to Confluence.`
+  return `${summary} ${firstFailure.title}: ${firstFailure.details.join(" ")}`
 }
 
 function reviewMessageColor(message: string) {
   if (/\b(conflict|blocked|failed|missing|cannot)\b/i.test(message)) return theme.danger
-  if (/\b(appl|stage|save|review)\b/i.test(message)) return theme.good
+  if (/\b(appl|stage|review)\b/i.test(message)) return theme.good
   return theme.subtle
 }
 

@@ -374,10 +374,10 @@ describe("main TUI layout", () => {
         top={1}
         width={80}
         height={18}
-        onToggle={() => {}}
-        onApply={() => {}}
-        onDiscard={() => {}}
-        onClose={() => {}}
+        onToggle={() => { }}
+        onApply={() => { }}
+        onDiscard={() => { }}
+        onClose={() => { }}
       />
     ), { width: 90, height: 24 })
 
@@ -414,6 +414,20 @@ describe("main TUI layout", () => {
       expect(output).toContain("Parent: Local Engineering Home")
       expect(output).toContain("Title: Launch Plan")
       expect(output).toContain("enter stage create")
+    } finally {
+      rendered.renderer.destroy()
+    }
+  })
+
+  test("renders the new page placeholder with the cursor before the prompt", async () => {
+    const rendered = await testRender(() => <NewPageOverlay visible title="" parentPage={home} left={1} width={60} />, { width: 80, height: 16 })
+
+    try {
+      await rendered.renderOnce()
+      const output = rendered.captureCharFrame()
+
+      expect(output).toContain("Title: type a title")
+      expect(output).not.toContain("Title: type a title_")
     } finally {
       rendered.renderer.destroy()
     }

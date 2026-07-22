@@ -1189,7 +1189,12 @@ export function NewPageOverlay(props: { visible: boolean; title: string; parentP
       </box>
       <text height={1} fg={theme.subtle}>Parent: {props.parentPage ? props.parentPage.title : "Space root"}</text>
       <box height={1} />
-      <text height={1} fg={theme.text}>Title: {props.title || "type a title"}_</text>
+      <box height={1} flexDirection="row">
+        <text height={1} fg={theme.text}>Title: </text>
+        <Show when={props.title} fallback={<text height={1} fg={theme.subtle}>type a title</text>}>
+          {(title) => <text height={1} fg={theme.text}>{title()}_</text>}
+        </Show>
+      </box>
       <text height={1} fg={theme.subtle}>enter stage create  esc cancel</text>
     </box>
   )

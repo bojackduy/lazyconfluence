@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { extractOutline, getDefaultPageId, getPagesForSpace, getReaderPage, mockPages, mockSpaces, searchPagesInSpace, searchSpaces } from "../src/mock-data"
+import { createMockTuiDataSource } from "../src/tui/data"
 
 describe("mock data", () => {
   test("has a default page for the active space", () => {
@@ -70,5 +71,18 @@ describe("mock data", () => {
     const ids = new Set(mockPages.map((page) => page.pageId))
 
     expect(ids.size).toBe(mockPages.length)
+  })
+
+  test("mock TUI data source is read-only and backed by safe demo pages", async () => {
+    const dataSource = createMockTuiDataSource()
+
+    expect(dataSource.getDefaultSpaceKey()).toBe("ENG")
+    expect(dataSource.getDefaultPageId("ENG")).toBe("eng-home")
+    expect(dataSource.listSpaces().map((space) => space.key)).toEqual(["ENG", "OPS", "ARCH", "PLAT", "TEAM"])
+    expect(dataSource.getReaderPage("eng-home")?.contentMarkdown).toContain("Engineering Home")
+    expect(dataSource.getEditablePageInput("eng-home").markdown).toContain("Engineering Home")
+    expect(() => dataSource.stagePageDelete("eng-home")).toThrow("Demo mode is read-only")
+    const result = await dataSource.applyPageDraft("eng-home", "# Demo")
+    expect(result).toMatchObject({ status: "blocked", reason: "demo-mode" })
   })
 })

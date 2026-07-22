@@ -1,5 +1,5 @@
 import type { FetchLike, ConfluencePage, ConfluenceSpace } from "./confluence/client"
-import { ConfluenceClient } from "./confluence/client"
+import { ConfluenceClient, ConfluenceClientError } from "./confluence/client"
 import { mapConfluenceFolder, mapConfluencePage, mapConfluenceSpace } from "./confluence/mapper"
 import { loadAtlassianAuth } from "./config"
 import { openIndexRepository, type IndexRepository, type PageBodyArtifact } from "./index/repository"
@@ -178,6 +178,12 @@ async function syncSpace(input: {
       continue
     }
 
+    if (!canSyncPageBody(page)) {
+      pages.push(mapUnavailableConfluencePage({ page, space: input.space, baseUrl: input.baseUrl, ancestors, syncedAt: input.syncedAt, treeOrder: treeOrderById.get(page.id) ?? 0 }, unsupportedConfluenceContentMessage(page), "lazyconfluence found this Confluence item, but does not sync this content type yet."))
+      emitProgress(input.onProgress, { type: "indexed-page", message: `Indexed unsupported item ${page.id}: ${page.title}.`, spaceKey: input.space.key, spaceName: input.space.name, pageId: page.id, title: page.title })
+      continue
+    }
+
     try {
       if (!hasStorageBody(page)) emitProgress(input.onProgress, { type: "fetching-page-body", message: `Fetching body for ${page.id}: ${page.title}.`, spaceKey: input.space.key, spaceName: input.space.name, pageId: page.id, title: page.title })
       const pageWithBody = hasStorageBody(page) ? page : await input.client.fetchPageBody(page.id)
@@ -233,11 +239,16 @@ async function discoverPageChildren(input: {
     if (!page.id || visited.has(page.id)) continue
 
     visited.add(page.id)
+    if (!canFetchDirectChildren(page)) continue
     emitProgress(input.onProgress, { type: "fetching-page-children", message: `Fetching children for ${page.id}: ${page.title}.`, spaceKey: input.space.key, spaceName: input.space.name, pageId: page.id, title: page.title })
 
+    let pageForChildren = page
     let children: ConfluencePage[]
     try {
-      children = await input.client.fetchDirectChildren(page.id)
+      const result = await fetchDirectChildrenForNode(input.client, page)
+      pageForChildren = result.page
+      children = result.children
+      if (pageForChildren !== page) input.nodeById.set(pageForChildren.id, pageForChildren)
     } catch (error) {
       const message = errorMessage(error)
       input.pageFailures.push({ scope: "page", key: page.id, message: `Could not fetch children: ${message}` })
@@ -248,7 +259,7 @@ async function discoverPageChildren(input: {
     for (const [childIndex, child] of children.entries()) {
       if (!child.id) continue
 
-      const childWithParent = child.parentId ? child : { ...child, parentId: page.id }
+      const childWithParent = child.parentId ? child : { ...child, parentId: pageForChildren.id }
       const existing = input.nodeById.get(child.id)
       input.treeOrderById.set(child.id, pageTreeOrder(childWithParent, childIndex))
 
@@ -260,6 +271,19 @@ async function discoverPageChildren(input: {
       input.nodeById.set(child.id, childWithParent)
       queue.push(childWithParent)
     }
+  }
+}
+
+async function fetchDirectChildrenForNode(client: ConfluenceClient, page: ConfluencePage) {
+  try {
+    return { page, children: await client.fetchDirectChildren(page.id, 250, confluenceContentType(page)) }
+  } catch (error) {
+    if (confluenceContentType(page) === "page" && isConfluenceNotFound(error)) {
+      const folderPage = { ...page, type: "folder" }
+      return { page: folderPage, children: await client.fetchDirectChildren(page.id, 250, "folder") }
+    }
+
+    throw error
   }
 }
 
@@ -282,7 +306,7 @@ async function backfillMissingParentPages(input: {
     for (const parentId of missingParentIds) {
       try {
         emitProgress(input.onProgress, { type: "fetching-page-body", message: `Fetching missing parent ${parentId}.`, spaceKey: input.space.key, spaceName: input.space.name, pageId: parentId })
-        const parent = await input.client.fetchPageBody(parentId)
+        const parent = await input.client.fetchPageOrFolder(parentId)
         const existing = input.nodeById.get(parent.id)
 
         input.nodeById.set(parent.id, existing ? mergeConfluencePage(existing, parent) : parent)
@@ -317,6 +341,29 @@ function pageTreeOrder(page: ConfluencePage, fallback: number) {
   return Number.isFinite(page.position) ? Number(page.position) : fallback
 }
 
+function confluenceContentType(page: ConfluencePage): "page" | "folder" {
+  return page.type === "folder" ? "folder" : "page"
+}
+
+function canFetchDirectChildren(page: ConfluencePage) {
+  return page.type === "folder" || canSyncPageBody(page)
+}
+
+function canSyncPageBody(page: ConfluencePage) {
+  return (!page.type || page.type === "page") && (!page.status || page.status === "current")
+}
+
+function unsupportedConfluenceContentMessage(page: ConfluencePage) {
+  if (page.type && page.type !== "page" && page.type !== "folder") return `Unsupported Confluence content type: ${page.type}`
+  if (page.status && page.status !== "current") return `Unsupported Confluence page status: ${page.status}`
+
+  return "Unsupported Confluence content."
+}
+
+function isConfluenceNotFound(error: unknown) {
+  return error instanceof ConfluenceClientError && error.status === 404
+}
+
 function mergeConfluencePage(existing: ConfluencePage, incoming: ConfluencePage): ConfluencePage {
   return {
     ...incoming,
@@ -328,7 +375,7 @@ function mergeConfluencePage(existing: ConfluencePage, incoming: ConfluencePage)
   }
 }
 
-function mapUnavailableConfluencePage(input: Parameters<typeof mapConfluenceFolder>[0], message: string): IndexedPage {
+function mapUnavailableConfluencePage(input: Parameters<typeof mapConfluenceFolder>[0], message: string, intro = "lazyconfluence found this page in Confluence, but could not fetch its body during the last sync."): IndexedPage {
   const page = mapConfluenceFolder(input)
 
   return {
@@ -336,7 +383,7 @@ function mapUnavailableConfluencePage(input: Parameters<typeof mapConfluenceFold
     contentMarkdown: [
       `# ${page.title || page.pageId}`,
       "",
-      "lazyconfluence found this page in Confluence, but could not fetch its body during the last sync.",
+      intro,
       "",
       `Page ID: ${page.pageId}`,
       `Error: ${message}`,

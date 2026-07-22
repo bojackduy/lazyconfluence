@@ -8,7 +8,7 @@ import { createLocalConfig } from "../src/config"
 import type { CredentialStatus } from "../src/config"
 import { openIndexRepository } from "../src/index/repository"
 import type { PageBodyArtifact, PageDraft } from "../src/index/repository"
-import { createRepositoryTuiDataSource } from "../src/tui/data"
+import { createMockTuiDataSource, createRepositoryTuiDataSource } from "../src/tui/data"
 import type { IndexedPage, SpaceSummary } from "../src/model"
 
 describe("main TUI layout", () => {
@@ -51,6 +51,20 @@ describe("main TUI layout", () => {
     } finally {
       await setup.cleanup()
     }
+  })
+
+  test("renders synthetic demo pages without the local index", async () => {
+    const rendered = await testRender(() => <App credentialStatus={readyStatus} dataSource={createMockTuiDataSource()} disableTreeSitter />, { width: 120, height: 36 })
+
+    await rendered.renderOnce()
+
+    const frame = rendered.captureCharFrame()
+    rendered.renderer.destroy()
+
+    expect(frame).toContain("Engineering Home")
+    expect(frame).toContain("Project Architecture")
+    expect(frame).toContain("Start here for engineering norms")
+    expect(frame).not.toContain("Local synced content from SQLite")
   })
 
   test("renders pages with missing updated timestamps without crashing", async () => {

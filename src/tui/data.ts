@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto"
 import { applyPageCreateToConfluence, applyPageDeleteToConfluence, applyPageDraftToConfluence, type ApplyPageDraftResult } from "../apply"
 import type { FetchLike } from "../confluence/client"
 import { formatMarkdownDiff, readEditableDraftInput, savePageDraft, type EditableDraftInput } from "../editing"
-import { openIndexRepository, type IndexRepository, type PageCreate, type PageDelete, type PageDraft, type PageDraftStatus } from "../index/repository"
+import { openIndexRepository, type IndexRepository, type PageBodyArtifact, type PageCreate, type PageDelete, type PageDraft, type PageDraftStatus } from "../index/repository"
 import { compareSearchResults, scorePageSearchResult } from "../index/search"
+import { getDefaultPageId as getDefaultMockPageId, getPagesForSpace as getMockPagesForSpace, getReaderPage as getMockReaderPage, mockPages, mockSpaces, searchPagesInSpace as searchMockPagesInSpace, searchSpaces as searchMockSpaces } from "../mock-data"
 import type { IndexedPage, ReaderPage, SearchResult, SpaceSearchResult, SpaceSummary } from "../model"
 
 export const emptyPageId = "__lazyconfluence_empty__"
@@ -259,6 +260,106 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
     },
     unstagePageDraft: (pageId) => repository.unstagePageDraft(pageId, now().toISOString()) > 0 ? "unstaged" : "missing",
   }
+}
+
+export function createMockTuiDataSource(): TuiDataSource {
+  return {
+    applyPageDraft: async (pageId) => demoBlockedResult(pageId),
+    applyStagedDrafts: async (pageIds) => pageIds.map((pageId) => demoBlockedResult(pageId)),
+    applyStagedChanges: async (changeKeys) => changeKeys.map((changeKey) => demoBlockedResult(changeKey)),
+    close: () => {},
+    discardPageDraft: () => "missing",
+    discardPageDrafts: () => 0,
+    discardStagedChanges: () => 0,
+    formatPageDraftDiff: (pageId, draftMarkdown) => {
+      const input = readMockEditableDraftInput(pageId)
+      return formatMarkdownDiff(input.body.editableMarkdown, draftMarkdown)
+    },
+    getDefaultSpaceKey: () => mockSpaces[0]?.key ?? null,
+    getDefaultPageId: (spaceKey) => getDefaultMockPageId(spaceKey ?? mockSpaces[0]?.key),
+    getEditableDraftInput: (pageId) => readMockEditableDraftInput(pageId),
+    getEditablePageInput: (pageId) => {
+      const input = readMockEditableDraftInput(pageId)
+      return { kind: "update", page: input.page, markdown: input.body.editableMarkdown, draftStatus: null }
+    },
+    getPageDraftStatus: () => null,
+    getPagesForSpace: (spaceKey) => getMockPagesForSpace(spaceKey),
+    getReaderPage: (pageId) => getMockReaderPage(pageId),
+    listStagedDraftChanges: () => [],
+    listStagedChanges: () => [],
+    listSpaces: () => mockSpaces,
+    savePageDraft: (pageId) => ({ status: "unchanged", pageTitle: mockPageTitle(pageId) }),
+    searchPagesInSpace: (spaceKey, query) => searchMockPagesInSpace(spaceKey, query),
+    searchSpaces: (query) => searchMockSpaces(query),
+    stagePageCreate: () => {
+      throw demoReadOnlyError()
+    },
+    stagePageDelete: () => {
+      throw demoReadOnlyError()
+    },
+    stagePageBuffer: () => {
+      throw demoReadOnlyError()
+    },
+    stagePageDraft: () => {
+      throw demoReadOnlyError()
+    },
+    unstagePageDraft: () => "missing",
+  }
+}
+
+function readMockEditableDraftInput(pageId: string): EditableDraftInput {
+  const page = mockPages.find((candidate) => candidate.pageId === pageId)
+  if (!page) throw new Error(`Unknown demo page: ${pageId}`)
+
+  return {
+    page,
+    body: mockBodyArtifact(page),
+    draft: null,
+  }
+}
+
+function mockBodyArtifact(page: IndexedPage): PageBodyArtifact {
+  return {
+    pageId: page.pageId,
+    remoteVersion: 1,
+    sourceRepresentation: "storage",
+    sourceBody: page.contentMarkdown,
+    sourceHash: `mock:${page.pageId}`,
+    canonicalDocument: {
+      schemaVersion: 1,
+      pageId: page.pageId,
+      title: page.title,
+      blocks: [],
+    },
+    sidecar: {
+      schemaVersion: 1,
+      remoteVersion: 1,
+      sourceRepresentation: "storage",
+      sourceHash: `mock:${page.pageId}`,
+      nodes: {},
+    },
+    editableMarkdown: page.contentMarkdown,
+    renderedMarkdown: page.contentMarkdown,
+    updatedAt: page.updatedAt,
+  }
+}
+
+function demoBlockedResult(pageId: string): ApplyPageDraftResult {
+  return {
+    status: "blocked",
+    pageId,
+    title: mockPageTitle(pageId),
+    reason: "demo-mode",
+    details: ["Demo mode is read-only and uses synthetic Confluence data only."],
+  }
+}
+
+function mockPageTitle(pageId: string) {
+  return mockPages.find((page) => page.pageId === pageId)?.title ?? pageId
+}
+
+function demoReadOnlyError() {
+  return new Error("Demo mode is read-only and uses synthetic Confluence data only.")
 }
 
 function saveTuiPageDraft(repository: IndexRepository, pageId: string, draftMarkdown: string, now: () => Date): SaveTuiPageDraftResult {

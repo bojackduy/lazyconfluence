@@ -13,8 +13,14 @@ export async function runCli(args: string[]) {
 
   switch (command) {
     case undefined:
+      await renderTui({ demo: isDemoEnv() })
+      return
     case "tui":
-      await renderTui()
+      await runTuiCommand(args.slice(1))
+      return
+    case "--demo":
+    case "demo":
+      await renderTui({ demo: true })
       return
     case "init":
       await runInit()
@@ -57,9 +63,31 @@ export async function runCli(args: string[]) {
       return
     default:
       console.error(`Unknown command: ${command}`)
-      console.error("Usage: lazyconfluence [tui|init|doctor|sync|repair|search|edit|draft|drafts|stage|unstage|discard|diff|preview]")
+      console.error("Usage: lazyconfluence [tui|demo|init|doctor|sync|repair|search|edit|draft|drafts|stage|unstage|discard|diff|preview]")
       process.exitCode = 1
   }
+}
+
+async function runTuiCommand(args: string[]) {
+  let demo = isDemoEnv()
+
+  for (const arg of args) {
+    if (arg === "--demo") {
+      demo = true
+      continue
+    }
+
+    console.error(`Unknown tui option: ${arg}`)
+    console.error("Usage: lazyconfluence tui [--demo]")
+    process.exitCode = 1
+    return
+  }
+
+  await renderTui({ demo })
+}
+
+function isDemoEnv() {
+  return process.env.LAZYCONFLUENCE_DEMO === "1"
 }
 
 async function runSyncCommand(args: string[]) {

@@ -18,7 +18,7 @@ import type { FocusPane, IndexedPage, ReaderPage, SearchResult, SpaceSearchResul
 import { loadCredentialStatus, type CredentialStatus } from "../config"
 import type { PageDraftStatus } from "../index/repository"
 import type { ApplyPageDraftResult } from "../apply"
-import { createRepositoryTuiDataSource, emptyPageId, emptyReaderPage, emptySpaceSummary, type TuiDataSource, type TuiStagedChange } from "./data"
+import { createMockTuiDataSource, createRepositoryTuiDataSource, emptyPageId, emptyReaderPage, emptySpaceSummary, type TuiDataSource, type TuiStagedChange } from "./data"
 import { markdownStyle, theme } from "./theme"
 
 type TreeRow = {
@@ -49,8 +49,36 @@ type CredentialWarning = Exclude<CredentialStatus, { kind: "ready" }>
 
 export type PageSearchKeyAction = "append" | "delete" | "submit" | "close" | "next" | "previous" | "ignore"
 
-export async function renderTui() {
-  render(() => <App />, {
+export interface RenderTuiOptions {
+  demo?: boolean
+}
+
+const demoCredentialStatus: CredentialStatus = {
+  kind: "ready",
+  auth: {
+    config: {
+      version: 1,
+      atlassian: {
+        siteUrl: "https://example.atlassian.net",
+        email: "demo@example.com",
+        spaceKeys: ["ENG", "OPS", "ARCH", "PLAT", "TEAM"],
+        defaultSpaceKey: "ENG",
+        apiTokenEnv: "ATLASSIAN_API_TOKEN",
+      },
+    },
+    apiToken: null,
+    paths: {
+      configDir: "demo://lazyconfluence",
+      configFile: "demo://lazyconfluence/config.json",
+      credentialFile: "demo://lazyconfluence/atlassian.env",
+    },
+  },
+}
+
+export async function renderTui(options: RenderTuiOptions = {}) {
+  const dataSource = options.demo ? createMockTuiDataSource() : undefined
+
+  render(() => <App credentialStatus={options.demo ? demoCredentialStatus : undefined} dataSource={dataSource} />, {
     targetFps: 30,
     exitOnCtrlC: true,
     backgroundColor: theme.bg,

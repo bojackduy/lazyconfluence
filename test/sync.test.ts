@@ -79,7 +79,7 @@ describe("sync service", () => {
             _links: {},
           },
           "/wiki/api/v2/pages/101/direct-children?limit=250": { results: [], _links: {} },
-          "/wiki/api/v2/pages/900/direct-children?limit=250": {
+          "/wiki/api/v2/folders/900/direct-children?limit=250": {
             results: [pagePayload("901", "Nested Design", "900")],
             _links: {},
           },
@@ -191,14 +191,16 @@ describe("sync service", () => {
             _links: {},
           },
           "/wiki/api/v2/pages/backend-docs/direct-children?limit=250": { results: [], _links: {} },
-          "/wiki/api/v2/pages/backend-folder?body-format=storage": pagePayload("backend-folder", "Technical Document for Backend", "technical-doc", "<p>Backend folder.</p>"),
-          "/wiki/api/v2/pages/backend-folder/direct-children?limit=250": {
-            results: [pagePayload("devex", "DevEx workaround because of poor setup", "backend-folder", "<p>DevEx.</p>"), pagePayload("backend-docs", "Backend Scraping And Pricing Documentation", "backend-folder", "<p>Backend docs.</p>")],
+          "/wiki/api/v2/pages/backend-folder?body-format=storage": response({ message: "not a page" }, false, 404, "Not Found"),
+          "/wiki/api/v2/folders/backend-folder": folderPayload("backend-folder", "Technical Document for Backend", "technical-doc"),
+          "/wiki/api/v2/folders/backend-folder/direct-children?limit=250": {
+            results: [folderPayload("devex", "DevEx workaround because of poor setup", "backend-folder"), pagePayload("backend-docs", "Backend Scraping And Pricing Documentation", "backend-folder", "<p>Backend docs.</p>")],
             _links: {},
           },
-          "/wiki/api/v2/pages/technical-doc?body-format=storage": pagePayload("technical-doc", "Technical Document", "root", "<p>Technical folder.</p>"),
-          "/wiki/api/v2/pages/technical-doc/direct-children?limit=250": {
-            results: [pagePayload("frontend-docs", "Technical Document for Frontend", "technical-doc", "<p>Frontend docs.</p>"), pagePayload("backend-folder", "Technical Document for Backend", "technical-doc", "<p>Backend folder.</p>")],
+          "/wiki/api/v2/pages/technical-doc?body-format=storage": response({ message: "not a page" }, false, 404, "Not Found"),
+          "/wiki/api/v2/folders/technical-doc": folderPayload("technical-doc", "Technical Document", "root"),
+          "/wiki/api/v2/folders/technical-doc/direct-children?limit=250": {
+            results: [pagePayload("frontend-docs", "Technical Document for Frontend", "technical-doc", "<p>Frontend docs.</p>"), folderPayload("backend-folder", "Technical Document for Backend", "technical-doc")],
             _links: {},
           },
           "/wiki/api/v2/pages/root?body-format=storage": pagePayload("root", "PlayLab Home", null, "<p>Home.</p>"),
@@ -206,23 +208,107 @@ describe("sync service", () => {
             results: [pagePayload("technical-doc", "Technical Document", "root", "<p>Technical folder.</p>")],
             _links: {},
           },
-          "/wiki/api/v2/pages/devex/direct-children?limit=250": { results: [], _links: {} },
+          "/wiki/api/v2/folders/devex/direct-children?limit=250": { results: [], _links: {} },
           "/wiki/api/v2/pages/frontend-docs/direct-children?limit=250": { results: [], _links: {} },
         }),
       })
 
       expect(report).toMatchObject({ complete: true, pagesIndexed: 6, failures: [] })
-      expect(calls).toContain("https://example.atlassian.net/wiki/api/v2/pages/backend-folder?body-format=storage")
-      expect(calls).toContain("https://example.atlassian.net/wiki/api/v2/pages/technical-doc?body-format=storage")
+      expect(calls).toContain("https://example.atlassian.net/wiki/api/v2/folders/backend-folder")
+      expect(calls).toContain("https://example.atlassian.net/wiki/api/v2/folders/technical-doc")
       expect(calls).toContain("https://example.atlassian.net/wiki/api/v2/pages/root?body-format=storage")
-      expect(calls).toContain("https://example.atlassian.net/wiki/api/v2/pages/backend-folder/direct-children?limit=250")
-      expect(calls).toContain("https://example.atlassian.net/wiki/api/v2/pages/technical-doc/direct-children?limit=250")
+      expect(calls).toContain("https://example.atlassian.net/wiki/api/v2/folders/backend-folder/direct-children?limit=250")
+      expect(calls).toContain("https://example.atlassian.net/wiki/api/v2/folders/technical-doc/direct-children?limit=250")
 
       const repository = openIndexRepository({ path: setup.dbPath })
       try {
         expect(repository.getPage("backend-docs")?.path).toEqual(["PlayLab Home", "Technical Document", "Technical Document for Backend", "Backend Scraping And Pricing Documentation"])
         expect(repository.getChildren("technical-doc").map((page) => page.pageId)).toEqual(["frontend-docs", "backend-folder"])
         expect(repository.getChildren("backend-folder").map((page) => page.pageId)).toEqual(["devex", "backend-docs"])
+      } finally {
+        repository.close()
+      }
+    } finally {
+      await setup.cleanup()
+    }
+  })
+
+  test("falls back to folder children for page-listed folders", async () => {
+    const setup = await createSyncTestSetup()
+    const calls: string[] = []
+
+    try {
+      const report = await syncConfluence({
+        env: setup.env,
+        now: fixedClock(),
+        fetch: jsonFetch(calls, {
+          "/wiki/api/v2/spaces?keys=ENG&limit=250": {
+            results: [{ id: "10", key: "ENG", name: "Engineering", homepageId: "folderish" }],
+          },
+          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage": {
+            results: [pagePayload("folderish", "Folderish", null)],
+            _links: {},
+          },
+          "/wiki/api/v2/pages/folderish/direct-children?limit=250": response({ message: "not a page" }, false, 404, "Not Found"),
+          "/wiki/api/v2/folders/folderish/direct-children?limit=250": {
+            results: [pagePayload("child", "Child Page", "folderish")],
+            _links: {},
+          },
+          "/wiki/api/v2/pages/child/direct-children?limit=250": { results: [], _links: {} },
+          "/wiki/api/v2/pages/child?body-format=storage": pagePayload("child", "Child Page", "folderish", "<p>Child.</p>"),
+        }),
+      })
+
+      expect(report).toMatchObject({ complete: true, pagesIndexed: 2, bodyArtifactsPersisted: 1, failures: [] })
+      expect(calls).toContain("https://example.atlassian.net/wiki/api/v2/pages/folderish/direct-children?limit=250")
+      expect(calls).toContain("https://example.atlassian.net/wiki/api/v2/folders/folderish/direct-children?limit=250")
+      expect(calls).not.toContain("https://example.atlassian.net/wiki/api/v2/pages/folderish?body-format=storage")
+
+      const repository = openIndexRepository({ path: setup.dbPath })
+      try {
+        expect(repository.getPage("folderish")?.snippet).toBe("")
+        expect(repository.getChildren("folderish").map((page) => page.pageId)).toEqual(["child"])
+      } finally {
+        repository.close()
+      }
+    } finally {
+      await setup.cleanup()
+    }
+  })
+
+  test("keeps unsupported Confluence items visible without sync failures", async () => {
+    const setup = await createSyncTestSetup()
+    const calls: string[] = []
+
+    try {
+      const report = await syncConfluence({
+        env: setup.env,
+        now: fixedClock(),
+        fetch: jsonFetch(calls, {
+          "/wiki/api/v2/spaces?keys=ENG&limit=250": {
+            results: [{ id: "10", key: "ENG", name: "Engineering", homepageId: "100" }],
+          },
+          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage": {
+            results: [pagePayload("100", "Engineering Home", null, "<p>Home.</p>")],
+            _links: {},
+          },
+          "/wiki/api/v2/pages/100/direct-children?limit=250": {
+            results: [typedPayload("whiteboard", "Stakeholder Flow", "100", "whiteboard", "current"), typedPayload("draft", "Pitch Draft", "100", "page", "draft")],
+            _links: {},
+          },
+        }),
+      })
+
+      expect(report).toMatchObject({ complete: true, pagesIndexed: 3, bodyArtifactsPersisted: 1, failures: [] })
+      expect(calls).not.toContain("https://example.atlassian.net/wiki/api/v2/pages/whiteboard/direct-children?limit=250")
+      expect(calls).not.toContain("https://example.atlassian.net/wiki/api/v2/pages/whiteboard?body-format=storage")
+      expect(calls).not.toContain("https://example.atlassian.net/wiki/api/v2/pages/draft/direct-children?limit=250")
+      expect(calls).not.toContain("https://example.atlassian.net/wiki/api/v2/pages/draft?body-format=storage")
+
+      const repository = openIndexRepository({ path: setup.dbPath })
+      try {
+        expect(repository.getPage("whiteboard")?.contentMarkdown).toContain("Unsupported Confluence content type: whiteboard")
+        expect(repository.getPage("draft")?.contentMarkdown).toContain("Unsupported Confluence page status: draft")
       } finally {
         repository.close()
       }
@@ -355,6 +441,27 @@ function pagePayload(id: string, title: string, parentId: string | null, storage
     version: { number: 1, createdAt: "2026-07-21T09:00:00Z" },
     _links: { webui: `/wiki/spaces/ENG/pages/${id}/${title.replace(/\s+/g, "+")}` },
     ...(storageHtml ? { body: { storage: { value: storageHtml } } } : {}),
+  }
+}
+
+function folderPayload(id: string, title: string, parentId: string | null) {
+  return {
+    id,
+    title,
+    type: "folder",
+    parentId,
+    _links: { webui: `/wiki/spaces/ENG/folder/${id}/${title.replace(/\s+/g, "+")}` },
+  }
+}
+
+function typedPayload(id: string, title: string, parentId: string | null, type: string, status: string) {
+  return {
+    id,
+    title,
+    type,
+    status,
+    parentId,
+    _links: { webui: `/wiki/spaces/ENG/pages/${id}/${title.replace(/\s+/g, "+")}` },
   }
 }
 

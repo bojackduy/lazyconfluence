@@ -33,6 +33,7 @@ export interface ConfluencePage {
   id: string
   title: string
   type?: string
+  status?: string
   parentId?: string | null
   spaceId?: string
   ownerId?: string
@@ -77,7 +78,11 @@ export interface CreateConfluencePageInput {
   storageValue: string
 }
 
-export class ConfluenceClientError extends Error {}
+export class ConfluenceClientError extends Error {
+  constructor(message: string, readonly status?: number) {
+    super(message)
+  }
+}
 
 export class ConfluenceClient {
   readonly baseUrl: string
@@ -122,8 +127,24 @@ export class ConfluenceClient {
     return pageFromPayload(payload)
   }
 
-  async fetchDirectChildren(pageId: string, limit = 250) {
-    return this.paginatedResults<ConfluencePage>(`/api/v2/pages/${encodeURIComponent(pageId)}/direct-children`, { limit })
+  async fetchFolder(folderId: string) {
+    const payload = await this.requestJson(`/api/v2/folders/${encodeURIComponent(folderId)}`)
+
+    return pageFromPayload(payload)
+  }
+
+  async fetchPageOrFolder(pageId: string, bodyFormat: "storage" | "atlas_doc_format" = "storage") {
+    try {
+      return await this.fetchPageBody(pageId, bodyFormat)
+    } catch (error) {
+      if (error instanceof ConfluenceClientError && error.status === 404) return this.fetchFolder(pageId)
+      throw error
+    }
+  }
+
+  async fetchDirectChildren(contentId: string, limit = 250, contentType: "page" | "folder" = "page") {
+    const resource = contentType === "folder" ? "folders" : "pages"
+    return this.paginatedResults<ConfluencePage>(`/api/v2/${resource}/${encodeURIComponent(contentId)}/direct-children`, { limit })
   }
 
   async updatePage(input: UpdateConfluencePageInput) {
@@ -205,7 +226,7 @@ export class ConfluenceClient {
       clearTimeout(timeout)
     }
 
-    if (!response.ok) throw new ConfluenceClientError(`Confluence returned HTTP ${response.status} ${response.statusText} for ${url}`)
+    if (!response.ok) throw new ConfluenceClientError(`Confluence returned HTTP ${response.status} ${response.statusText} for ${url}`, response.status)
 
     if (response.status === 204) return {}
 

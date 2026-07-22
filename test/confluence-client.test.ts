@@ -95,6 +95,34 @@ describe("Confluence client", () => {
     ])
   })
 
+  test("fetches folders and folder children", async () => {
+    const calls: string[] = []
+    const client = new ConfluenceClient({
+      siteUrl: "https://example.atlassian.net/wiki",
+      email: "reader@example.com",
+      apiToken: "token",
+      fetch: jsonFetch(calls, {
+        "/wiki/api/v2/pages/200?body-format=storage": response({ message: "not a page" }, false, 404, "Not Found"),
+        "/wiki/api/v2/folders/200": { id: "200", title: "Folder", type: "folder", parentId: "100" },
+        "/wiki/api/v2/folders/200/direct-children?limit=250": {
+          results: [{ id: "201", title: "Folder Child", parentId: "200" }],
+          _links: {},
+        },
+      }),
+    })
+
+    const folder = await client.fetchPageOrFolder("200")
+    const children = await client.fetchDirectChildren("200", 250, "folder")
+
+    expect(folder).toMatchObject({ id: "200", title: "Folder", type: "folder", parentId: "100" })
+    expect(children.map((child) => child.title)).toEqual(["Folder Child"])
+    expect(calls).toEqual([
+      "https://example.atlassian.net/wiki/api/v2/pages/200?body-format=storage",
+      "https://example.atlassian.net/wiki/api/v2/folders/200",
+      "https://example.atlassian.net/wiki/api/v2/folders/200/direct-children?limit=250",
+    ])
+  })
+
   test("updates a page with Confluence storage", async () => {
     const calls: Array<{ url: string; method?: string; body?: string; contentType?: string }> = []
     const client = new ConfluenceClient({
@@ -234,6 +262,8 @@ function jsonFetch(calls: string[], responses: Record<string, unknown>): FetchLi
       return response({ message: `missing fixture for ${path}` }, false, 404, "Not Found")
     }
 
+    if (isResponseLike(body)) return body
+
     return response(body)
   }
 }
@@ -245,4 +275,8 @@ function response(body: unknown, ok = true, status = 200, statusText = "OK") {
     statusText,
     json: async () => body,
   }
+}
+
+function isResponseLike(value: unknown): value is ReturnType<typeof response> {
+  return typeof value === "object" && value !== null && "ok" in value && "json" in value
 }

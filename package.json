@@ -2,6 +2,7 @@
   "name": "@bojackduy/lazyconfluence",
   "version": "2.0.0",
   "description": "Terminal-first Confluence document browser.",
+  "homepage": "https://bojackduy.github.io/lazyconfluence/",
   "private": false,
   "type": "module",
   "license": "MIT",
@@ -9,6 +10,17 @@
     "type": "git",
     "url": "git+https://github.com/bojackduy/lazyconfluence.git"
   },
+  "bugs": {
+    "url": "https://github.com/bojackduy/lazyconfluence/issues"
+  },
+  "keywords": [
+    "atlassian",
+    "cli",
+    "confluence",
+    "documentation",
+    "terminal",
+    "tui"
+  ],
   "bin": {
     "lazyconfluence": "dist/main.js"
   },

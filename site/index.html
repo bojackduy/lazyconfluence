@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>lazyconfluence - Terminal-first Confluence browser</title>
+    <meta name="description" content="lazyconfluence is a terminal-first Confluence document browser that syncs spaces locally for fast reading, search, links, backlinks, and drafts.">
+    <meta name="theme-color" content="#171524">
+    <meta name="robots" content="index,follow">
+    <link rel="canonical" href="https://bojackduy.github.io/lazyconfluence/">
+    <link rel="stylesheet" href="./styles.css">
+
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="lazyconfluence - Terminal-first Confluence browser">
+    <meta property="og:description" content="Browse synced Confluence pages locally from your terminal.">
+    <meta property="og:url" content="https://bojackduy.github.io/lazyconfluence/">
+    <meta property="og:image" content="https://bojackduy.github.io/lazyconfluence/assets/og.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="865">
+
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="lazyconfluence - Terminal-first Confluence browser">
+    <meta name="twitter:description" content="Browse synced Confluence pages locally from your terminal.">
+    <meta name="twitter:image" content="https://bojackduy.github.io/lazyconfluence/assets/og.png">
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "lazyconfluence",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "macOS, Linux, Windows",
+        "description": "A terminal-first Confluence document browser that syncs spaces locally for fast reading, search, links, backlinks, and drafts.",
+        "url": "https://bojackduy.github.io/lazyconfluence/",
+        "downloadUrl": "https://www.npmjs.com/package/@bojackduy/lazyconfluence",
+        "codeRepository": "https://github.com/bojackduy/lazyconfluence",
+        "programmingLanguage": "TypeScript",
+        "runtimePlatform": "Bun"
+      }
+    </script>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="lazyconfluence home">
+        <span class="brand-mark">lc</span>
+        <span>lazyconfluence</span>
+      </a>
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a href="#demo">Demo</a>
+        <a href="#features">Features</a>
+        <a href="#quick-start">Quick start</a>
+        <a href="https://github.com/bojackduy/lazyconfluence">GitHub</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow">Terminal-first Confluence reader</p>
+          <h1 id="hero-title">Browse Confluence without leaving your terminal.</h1>
+          <p class="hero-lede">Sync the spaces you care about, read pages locally, follow links, search docs, and keep remote calls explicit.</p>
+
+          <div class="install-card" aria-label="Install command">
+            <span class="prompt">$</span>
+            <code>npm install -g @bojackduy/lazyconfluence</code>
+          </div>
+
+          <div class="hero-actions">
+            <a class="button primary" href="#quick-start">Get started</a>
+            <a class="button secondary" href="https://www.npmjs.com/package/@bojackduy/lazyconfluence">npm package</a>
+            <a class="button ghost" href="https://github.com/bojackduy/lazyconfluence">View source</a>
+          </div>
+        </div>
+
+        <figure id="demo" class="demo-frame">
+          <div class="window-bar" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <img src="./assets/demo2.gif" alt="lazyconfluence terminal UI browsing synthetic Confluence demo pages" width="1647" height="1434" decoding="async">
+          <figcaption>Demo mode uses synthetic pages, spaces, links, and owners for safe recordings. <a href="./assets/demo2.png">Open high-resolution still.</a></figcaption>
+        </figure>
+      </section>
+
+      <section class="section split" aria-labelledby="why-title">
+        <div>
+          <p class="eyebrow">Why it exists</p>
+          <h2 id="why-title">A focused reader, not another browser tab.</h2>
+        </div>
+        <p>Confluence is useful, but jumping between browser tabs breaks terminal flow. lazyconfluence keeps the read path local-first after sync, so browsing a page tree, scanning content, and searching docs feels fast and keyboard-native.</p>
+      </section>
+
+      <section id="features" class="feature-grid" aria-labelledby="features-title">
+        <div class="section-heading">
+          <p class="eyebrow">Features</p>
+          <h2 id="features-title">Built around terminal document work.</h2>
+        </div>
+        <article class="feature-card">
+          <h3>Local-first after sync</h3>
+          <p>Remote Confluence requests happen only when you explicitly run sync. Normal reading uses your local SQLite index.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Space and page navigation</h3>
+          <p>Start from one active space, move through the page tree, and switch spaces without losing keyboard flow.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Readable terminal documents</h3>
+          <p>Headings, lists, tables, links, and code blocks are rendered for quick scanning in the terminal.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Search and relationships</h3>
+          <p>Search synced pages, inspect child pages, outgoing links, backlinks, and page outlines from the same interface.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Draft locally</h3>
+          <p>Create local drafts, preview differences, stage changes, and keep remote write-back explicit.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Safe demo mode</h3>
+          <p>Run with synthetic data for screenshots, recordings, demos, and bug reports without exposing company docs.</p>
+        </article>
+      </section>
+
+      <section id="quick-start" class="quick-start" aria-labelledby="quick-title">
+        <div class="section-heading">
+          <p class="eyebrow">Quick start</p>
+          <h2 id="quick-title">Install, configure, sync, read.</h2>
+        </div>
+        <ol class="steps">
+          <li>
+            <span>Install Bun.</span>
+            <code>curl -fsSL https://bun.sh/install | bash</code>
+          </li>
+          <li>
+            <span>Install lazyconfluence.</span>
+            <code>npm install -g @bojackduy/lazyconfluence</code>
+          </li>
+          <li>
+            <span>Configure Atlassian credentials.</span>
+            <code>lazyconfluence init</code>
+          </li>
+          <li>
+            <span>Sync configured spaces.</span>
+            <code>lazyconfluence sync</code>
+          </li>
+          <li>
+            <span>Open the terminal reader.</span>
+            <code>lazyconfluence</code>
+          </li>
+        </ol>
+      </section>
+
+      <section class="section split" aria-labelledby="privacy-title">
+        <div>
+          <p class="eyebrow">Privacy model</p>
+          <h2 id="privacy-title">No surprise remote reads while browsing.</h2>
+        </div>
+        <p>Your Atlassian token is stored in your local user config directory. Synced content stays in your local index, and the TUI reads that index instead of calling Confluence while you browse.</p>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>lazyconfluence is open source on <a href="https://github.com/bojackduy/lazyconfluence">GitHub</a> and published on <a href="https://www.npmjs.com/package/@bojackduy/lazyconfluence">npm</a>.</p>
+    </footer>
+  </body>
+</html>

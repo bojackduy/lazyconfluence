@@ -1,6 +1,18 @@
 # lazyconfluence
 
+[![npm version](https://img.shields.io/npm/v/@bojackduy/lazyconfluence.svg)](https://www.npmjs.com/package/@bojackduy/lazyconfluence)
+[![GitHub Pages](https://img.shields.io/badge/site-GitHub%20Pages-9dffcb)](https://bojackduy.github.io/lazyconfluence/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
+
 `lazyconfluence` is a terminal-first Confluence document browser. It syncs the Confluence spaces you choose into a local index, then lets you browse and read pages from the terminal without making remote calls during normal navigation.
+
+Website: <https://bojackduy.github.io/lazyconfluence/>
+
+## Demo
+
+![lazyconfluence terminal demo](https://raw.githubusercontent.com/bojackduy/lazyconfluence/main/assets/demo2.gif)
+
+The demo above uses synthetic data from `lazyconfluence demo`, not real company Confluence content.
 
 ## Install
 
@@ -20,6 +32,12 @@ Run it:
 
 ```bash
 lazyconfluence
+```
+
+To open the safe synthetic demo mode:
+
+```bash
+lazyconfluence demo
 ```
 
 ## Atlassian Setup
@@ -95,6 +113,8 @@ Normal browsing reads from the local index. Remote Confluence requests happen on
 ```bash
 lazyconfluence                 # open the TUI
 lazyconfluence tui             # open the TUI explicitly
+lazyconfluence demo            # open the TUI with synthetic demo data only
+lazyconfluence tui --demo      # same demo mode through a flag
 lazyconfluence init            # configure Atlassian credentials
 lazyconfluence doctor          # inspect local config and index state
 lazyconfluence sync            # fetch configured spaces into the local index
@@ -103,7 +123,7 @@ lazyconfluence search runbook
 lazyconfluence search --all runbook
 ```
 
-Local draft commands are available, but remote Confluence write-back is not implemented yet:
+Local draft commands are available, but remote Confluence write-back is still intentionally explicit:
 
 ```bash
 lazyconfluence edit <page-id>
@@ -127,6 +147,7 @@ Useful environment variables:
 
 - `LAZYCONFLUENCE_CONFIG_HOME`: override the config directory.
 - `LAZYCONFLUENCE_DB_PATH`: override the local SQLite index path.
+- `LAZYCONFLUENCE_DEMO=1`: open the TUI with synthetic demo data instead of local synced pages.
 - `ATLASSIAN_API_TOKEN`: provide the API token from the environment instead of the generated credential file.
 
 ## Developer Setup
@@ -161,9 +182,20 @@ The current product and implementation planning lives in `docs/`:
 
 `lazylens/` is a read-only submodule used only as reference material. Do not edit it.
 
-## npm Publishing
+## Landing Page
 
-This repository publishes `@bojackduy/lazyconfluence` to npm from GitHub Actions using npm trusted publishing.
+The static landing page lives in `site/` and deploys to GitHub Pages from `.github/workflows/pages.yml`.
+
+GitHub repository setup:
+
+1. Open repository `Settings`.
+2. Open `Pages`.
+3. Set source to `GitHub Actions`.
+4. Push changes to `main` or run `Deploy GitHub Pages` manually.
+
+## npm and GitHub Releases
+
+This repository publishes `@bojackduy/lazyconfluence` to npm from GitHub Actions using npm trusted publishing. Version tags also create GitHub Releases with generated release notes.
 
 One-time npm setup:
 
@@ -178,28 +210,16 @@ One-time npm setup:
 9. Select `npm publish` as an allowed action.
 10. Save the trusted publisher.
 
-Publish by creating a GitHub Release, or run the `Publish to npm` workflow manually from GitHub Actions.
+Release a new version:
+
+```bash
+bun run release:patch
+```
+
+Use `release:minor` or `release:major` when the version bump needs it. The release script runs checks, creates a version commit and tag, pushes both, then GitHub Actions publishes to npm and creates a GitHub Release.
 
 Trusted publishing does not use an `NPM_TOKEN` GitHub secret. GitHub grants the workflow an OIDC identity via `id-token: write`, and npm exchanges that identity for a short-lived publish credential. npm automatically generates provenance for public packages published this way.
 
-For a manual publish from your machine, first verify npm auth and scope access:
+## License
 
-```bash
-npm login
-npm whoami
-```
-
-The `npm whoami` result must be `bojackduy`, or the logged-in account must own an npm organization named `bojackduy`. If the account cannot publish under the `@bojackduy` scope, npm returns `404 Not Found` for `@bojackduy/lazyconfluence` even when the package name is valid.
-
-Then publish:
-
-```bash
-bun run build
-npm publish --access public
-```
-
-Or use the repo script to avoid mistyping the npm publish flags:
-
-```bash
-bun run publish:npm
-```
+MIT

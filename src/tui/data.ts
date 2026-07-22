@@ -3,6 +3,7 @@ import { applyPageCreateToConfluence, applyPageDraftToConfluence, type ApplyPage
 import type { FetchLike } from "../confluence/client"
 import { formatMarkdownDiff, readEditableDraftInput, savePageDraft, type EditableDraftInput } from "../editing"
 import { openIndexRepository, type IndexRepository, type PageCreate, type PageDraft, type PageDraftStatus } from "../index/repository"
+import { compareSearchResults, scorePageSearchResult } from "../index/search"
 import type { IndexedPage, ReaderPage, SearchResult, SpaceSearchResult, SpaceSummary } from "../model"
 
 export const emptyPageId = "__lazyconfluence_empty__"
@@ -29,7 +30,7 @@ export interface TuiDataSource {
   savePageDraft: (pageId: string, draftMarkdown: string) => SaveTuiPageDraftResult
   searchPagesInSpace: (spaceKey: string, query: string) => SearchResult[]
   searchSpaces: (query: string) => SpaceSearchResult[]
-  stagePageCreate: (input: { spaceKey: string; parentPageId: string; title: string }) => TuiCreateChange
+  stagePageCreate: (input: { spaceKey: string; parentPageId: string | null; title: string }) => TuiCreateChange
   stagePageBuffer: (pageId: string, markdown: string) => "staged" | "unchanged"
   stagePageDraft: (pageId: string, draftMarkdown: string) => "staged" | "unchanged"
   unstagePageDraft: (pageId: string) => "unstaged" | "missing"
@@ -60,7 +61,7 @@ export interface TuiCreateChange {
   kind: "create"
   changeKey: string
   create: PageCreate
-  parentPage: IndexedPage
+  parentPage: IndexedPage | null
   title: string
   updatedAt: string
   diffMarkdown: string
@@ -126,7 +127,7 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
       const key = spaceKey ?? repository.listSpaces()[0]?.key
       if (!key) return null
 
-      const pages = repository.listPagesInSpace(key)
+      const pages = listPagesWithCreates(repository, key)
       return pages.find((page) => page.parentId === null)?.pageId ?? pages[0]?.pageId ?? null
     },
     getEditableDraftInput: (pageId) => readEditableDraftInput(repository, pageId),
@@ -147,7 +148,7 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
       return {
         ...page,
         contentMarkdown,
-        children: repository.getChildren(page.pageId),
+        children: listChildrenWithCreates(repository, page.pageId),
         outgoingLinks: repository.getOutgoingLinks(page.pageId),
         backlinks: repository.getIncomingLinks(page.pageId),
         outline: extractOutline(contentMarkdown),
@@ -167,15 +168,18 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
     ].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.title.localeCompare(right.title)),
     listSpaces: () => repository.listSpaces(),
     savePageDraft: (pageId, draftMarkdown) => saveTuiPageDraft(repository, pageId, draftMarkdown, now),
-    searchPagesInSpace: (spaceKey, query) => repository.searchPagesInSpace(spaceKey, query, 20),
+    searchPagesInSpace: (spaceKey, query) => searchPagesWithCreates(repository, spaceKey, query, 20),
     searchSpaces: (query) => searchSpaces(repository.listSpaces(), query),
     stagePageCreate: (input) => {
       const title = input.title.trim()
       if (!title) throw new Error("New page title is required.")
 
-      const parentPage = repository.getPage(input.parentPageId)
-      if (!parentPage) throw new Error(`Parent page not found in local index: ${input.parentPageId}`)
-      if (parentPage.spaceKey !== input.spaceKey) throw new Error(`Parent page ${parentPage.title} is not in ${input.spaceKey}.`)
+      const space = repository.getSpace(input.spaceKey)
+      if (!space) throw new Error(`Space not found in local index: ${input.spaceKey}`)
+
+      const parentPage = input.parentPageId ? repository.getPage(input.parentPageId) : null
+      if (input.parentPageId && !parentPage) throw new Error(`Parent page not found in local index: ${input.parentPageId}`)
+      if (parentPage && parentPage.spaceKey !== input.spaceKey) throw new Error(`Parent page ${parentPage.title} is not in ${input.spaceKey}.`)
 
       const timestamp = now().toISOString()
       const create: PageCreate = {
@@ -260,6 +264,36 @@ function listPagesWithCreates(repository: IndexRepository, spaceKey: string) {
   return [...pages, ...virtualCreates]
 }
 
+function listChildrenWithCreates(repository: IndexRepository, parentPageId: string) {
+  const children = repository.getChildren(parentPageId)
+  const virtualCreates = repository.listPageCreates()
+    .filter((create) => create.parentPageId === parentPageId)
+    .map((create) => virtualPageForCreate(repository, create))
+    .filter((page): page is IndexedPage => page !== null)
+
+  return [...children, ...virtualCreates].sort(compareTreePages)
+}
+
+function searchPagesWithCreates(repository: IndexRepository, spaceKey: string, query: string, limit: number): SearchResult[] {
+  const byPageId = new Map<string, SearchResult>()
+
+  for (const result of repository.searchPagesInSpace(spaceKey, query, limit)) {
+    byPageId.set(result.page.pageId, result)
+  }
+
+  for (const create of repository.listPageCreates(spaceKey)) {
+    const page = virtualPageForCreate(repository, create)
+    if (!page) continue
+
+    const result = scorePageSearchResult(page, query)
+    if (!result) continue
+
+    byPageId.set(page.pageId, { ...result, score: result.score + 5 })
+  }
+
+  return [...byPageId.values()].sort(compareSearchResults).slice(0, limit)
+}
+
 function createReaderPage(repository: IndexRepository, createId: string): ReaderPage | null {
   const create = repository.getPageCreate(createId)
   if (!create) return null
@@ -277,9 +311,9 @@ function createReaderPage(repository: IndexRepository, createId: string): Reader
 }
 
 function virtualPageForCreate(repository: IndexRepository, create: PageCreate): IndexedPage | null {
-  const parentPage = repository.getPage(create.parentPageId)
+  const parentPage = create.parentPageId ? repository.getPage(create.parentPageId) : null
 
-  if (!parentPage) return null
+  if (create.parentPageId && !parentPage) return null
 
   return {
     pageId: createChangeKey(create.localId),
@@ -287,7 +321,7 @@ function virtualPageForCreate(repository: IndexRepository, create: PageCreate): 
     title: create.title,
     url: `local://page-create/${create.localId}`,
     parentId: create.parentPageId,
-    path: [...parentPage.path, create.title],
+    path: parentPage ? [...parentPage.path, create.title] : [create.title],
     owner: "local draft",
     updatedAt: create.updatedAt,
     contentMarkdown: create.draftMarkdown,
@@ -314,9 +348,9 @@ function draftChangeFor(repository: IndexRepository, draft: PageDraft): TuiDraft
 }
 
 function createChangeFor(repository: IndexRepository, create: PageCreate): TuiCreateChange | null {
-  const parentPage = repository.getPage(create.parentPageId)
+  const parentPage = create.parentPageId ? repository.getPage(create.parentPageId) : null
 
-  if (!parentPage) return null
+  if (create.parentPageId && !parentPage) return null
 
   return {
     kind: "create",
@@ -346,6 +380,10 @@ function parseChangeKey(changeKey: string): { kind: "update" | "create"; id: str
   if (!id || (kind !== "update" && kind !== "create")) return null
 
   return { kind, id }
+}
+
+function compareTreePages(left: IndexedPage, right: IndexedPage) {
+  return (left.treeOrder ?? 0) - (right.treeOrder ?? 0) || left.title.localeCompare(right.title)
 }
 
 function createIdFromPageId(pageId: string) {

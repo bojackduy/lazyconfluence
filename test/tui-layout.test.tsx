@@ -35,7 +35,8 @@ describe("main TUI layout", () => {
       expect(output).toContain("Overview 0")
       expect(output).toContain("c overview")
       expect(output).toContain("e edit")
-      expect(output).toContain("d/u scroll doc")
+      expect(output).toContain("N root")
+      expect(output).toContain("d/u scroll")
       expect(output).toContain("▾ ▣ Local Engineering Home")
       expect(output).toContain("• Real Synced Architecture")
       expect(output).toContain("Real Synced Architecture")
@@ -228,6 +229,8 @@ describe("main TUI layout", () => {
       expect(stagedChanges.find((change) => change.changeKey === createChange.changeKey)?.diffMarkdown).toContain("+# Launch Plan")
       expect(dataSource.getPagesForSpace("ENG").map((page) => page.pageId)).toContain(createChange.changeKey)
       expect(dataSource.getReaderPage(createChange.changeKey)).toMatchObject({ pageId: createChange.changeKey, parentId: "local-home", title: "Launch Plan", contentMarkdown: "# Launch Plan\n" })
+      expect(dataSource.getReaderPage("local-home")?.children.map((page) => page.pageId)).toContain(createChange.changeKey)
+      expect(dataSource.searchPagesInSpace("ENG", "launch").map((result) => result.page.pageId)).toContain(createChange.changeKey)
       expect(dataSource.getEditablePageInput(createChange.changeKey)).toMatchObject({ kind: "create", markdown: "# Launch Plan\n" })
       expect(dataSource.stagePageBuffer(createChange.changeKey, "# Launch Plan\n\nDraft locally first.")).toBe("staged")
       expect(repository.getPageCreate(createChange.create.localId)?.draftMarkdown).toBe("# Launch Plan\n\nDraft locally first.\n")
@@ -237,6 +240,27 @@ describe("main TUI layout", () => {
       expect(dataSource.listStagedDraftChanges("ENG")).toHaveLength(0)
       expect(dataSource.listStagedChanges("ENG")).toHaveLength(0)
       expect(dataSource.listStagedDraftChanges("OPS")).toHaveLength(1)
+    } finally {
+      dataSource.close?.()
+      await setup.cleanup()
+    }
+  })
+
+  test("TUI staged root creates are searchable local root pages", async () => {
+    const setup = await createTuiTestSetup({ bodyArtifacts: [homeBody] })
+    const repository = openIndexRepository({ path: setup.dbPath })
+    const dataSource = createRepositoryTuiDataSource(repository)
+
+    try {
+      const createChange = dataSource.stagePageCreate({ spaceKey: "ENG", parentPageId: null, title: "Root Launch Plan" })
+      const page = dataSource.getReaderPage(createChange.changeKey)
+
+      expect(page).toMatchObject({ pageId: createChange.changeKey, parentId: null, title: "Root Launch Plan", path: ["Root Launch Plan"] })
+      expect(dataSource.getPagesForSpace("ENG").filter((candidate) => candidate.parentId === null).map((candidate) => candidate.pageId)).toContain(createChange.changeKey)
+      expect(dataSource.searchPagesInSpace("ENG", "root launch").map((result) => result.page.pageId)).toContain(createChange.changeKey)
+      const stagedCreate = dataSource.listStagedChanges("ENG").find((change) => change.changeKey === createChange.changeKey)
+      expect(stagedCreate?.kind).toBe("create")
+      if (stagedCreate?.kind === "create") expect(stagedCreate.parentPage).toBeNull()
     } finally {
       dataSource.close?.()
       await setup.cleanup()
@@ -350,6 +374,21 @@ describe("main TUI layout", () => {
       expect(output).toContain("Parent: Local Engineering Home")
       expect(output).toContain("Title: Launch Plan")
       expect(output).toContain("enter stage create")
+    } finally {
+      rendered.renderer.destroy()
+    }
+  })
+
+  test("renders the new root page popup", async () => {
+    const rendered = await testRender(() => <NewPageOverlay visible title="Root Plan" parentPage={null} left={1} width={60} />, { width: 80, height: 16 })
+
+    try {
+      await rendered.renderOnce()
+      const output = rendered.captureCharFrame()
+
+      expect(output).toContain("NEW PAGE")
+      expect(output).toContain("Parent: Space root")
+      expect(output).toContain("Title: Root Plan")
     } finally {
       rendered.renderer.destroy()
     }

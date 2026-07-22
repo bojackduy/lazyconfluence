@@ -72,7 +72,7 @@ export interface UpdateConfluencePageInput {
 
 export interface CreateConfluencePageInput {
   spaceId: string
-  parentId: string
+  parentId?: string | null
   title: string
   storageValue: string
 }
@@ -152,13 +152,13 @@ export class ConfluenceClient {
   async createPage(input: CreateConfluencePageInput) {
     const payload = {
       spaceId: input.spaceId,
-      parentId: input.parentId,
       status: "current",
       title: input.title,
       body: {
         representation: "storage",
         value: input.storageValue,
       },
+      ...(input.parentId ? { parentId: input.parentId } : {}),
     }
     const response = await this.requestJson("/api/v2/pages", {}, {
       method: "POST",

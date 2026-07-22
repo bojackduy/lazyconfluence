@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite"
 
-export const INDEX_SCHEMA_VERSION = 5
+export const INDEX_SCHEMA_VERSION = 6
 
 export function applyIndexSchema(database: Database) {
   database.run("PRAGMA foreign_keys = ON")
@@ -14,6 +14,10 @@ export function applyIndexSchema(database: Database) {
 
   if (currentVersion < 3 && !hasColumn(database, "pages", "tree_order")) {
     database.run("ALTER TABLE pages ADD COLUMN tree_order INTEGER NOT NULL DEFAULT 0")
+  }
+
+  if (currentVersion > 0 && currentVersion < 6 && hasColumn(database, "page_creates", "parent_page_id")) {
+    migratePageCreatesParentNullable(database)
   }
 
   if (currentVersion < INDEX_SCHEMA_VERSION) {
@@ -31,6 +35,29 @@ function readUserVersion(database: Database) {
   const row = database.query("PRAGMA user_version").get() as { user_version: number } | null
 
   return Number(row?.user_version ?? 0)
+}
+
+function migratePageCreatesParentNullable(database: Database) {
+  database.exec(`
+    ALTER TABLE page_creates RENAME TO page_creates_old;
+
+    CREATE TABLE page_creates (
+      local_id TEXT PRIMARY KEY,
+      space_key TEXT NOT NULL REFERENCES spaces(key) ON DELETE CASCADE,
+      parent_page_id TEXT REFERENCES pages(page_id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      draft_markdown TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    INSERT INTO page_creates (local_id, space_key, parent_page_id, title, draft_markdown, created_at, updated_at)
+    SELECT local_id, space_key, parent_page_id, title, draft_markdown, created_at, updated_at
+    FROM page_creates_old;
+
+    DROP TABLE page_creates_old;
+    CREATE INDEX IF NOT EXISTS page_creates_space_updated_at_idx ON page_creates(space_key, updated_at);
+  `)
 }
 
 const INDEX_SCHEMA_SQL = `
@@ -93,7 +120,7 @@ CREATE INDEX IF NOT EXISTS page_drafts_status_idx ON page_drafts(status, updated
 CREATE TABLE IF NOT EXISTS page_creates (
   local_id TEXT PRIMARY KEY,
   space_key TEXT NOT NULL REFERENCES spaces(key) ON DELETE CASCADE,
-  parent_page_id TEXT NOT NULL REFERENCES pages(page_id) ON DELETE CASCADE,
+  parent_page_id TEXT REFERENCES pages(page_id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   draft_markdown TEXT NOT NULL,
   created_at TEXT NOT NULL,

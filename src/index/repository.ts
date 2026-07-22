@@ -61,7 +61,7 @@ interface PageDraftRow {
 interface PageCreateRow {
   local_id: string
   space_key: string
-  parent_page_id: string
+  parent_page_id: string | null
   title: string
   draft_markdown: string
   created_at: string
@@ -97,7 +97,7 @@ export interface PageDraft {
 export interface PageCreate {
   localId: string
   spaceKey: string
-  parentPageId: string
+  parentPageId: string | null
   title: string
   draftMarkdown: string
   createdAt: string
@@ -707,7 +707,7 @@ function pageCreateFromRow(row: PageCreateRow): PageCreate {
   return {
     localId: String(row.local_id),
     spaceKey: String(row.space_key),
-    parentPageId: String(row.parent_page_id),
+    parentPageId: row.parent_page_id === null ? null : String(row.parent_page_id),
     title: String(row.title),
     draftMarkdown: String(row.draft_markdown),
     createdAt: String(row.created_at),

@@ -19,7 +19,7 @@ describe("local CLI integration", () => {
       expect(output.stdout).toContain("lazyconfluence local config")
       expect(output.stdout).toContain("Default space: ENG")
       expect(output.stdout).toContain(`Database: ${setup.dbPath}`)
-      expect(output.stdout).toContain("Schema version: 5")
+      expect(output.stdout).toContain("Schema version: 6")
       expect(output.stdout).toContain("Spaces indexed: 2")
       expect(output.stdout).toContain("Pages indexed: 3")
       expect(output.stdout).toContain("Local drafts: 0")

@@ -143,7 +143,21 @@ describe("local index repository", () => {
       expect(repository.listPageCreates("ENG").map((create) => create.localId)).toEqual(["create-1"])
       expect(repository.listPageCreates("OPS")).toEqual([])
 
+      repository.upsertPageCreate({
+        localId: "create-root",
+        spaceKey: "ENG",
+        parentPageId: null,
+        title: "Root Plan",
+        draftMarkdown: "# Root Plan\n",
+        createdAt: "2026-07-22T09:05:00Z",
+        updatedAt: "2026-07-22T09:05:00Z",
+      })
+
+      expect(repository.getPageCreate("create-root")?.parentPageId).toBeNull()
+      expect(repository.listPageCreates("ENG").map((create) => create.localId)).toEqual(["create-root", "create-1"])
+
       repository.deletePageCreate("create-1")
+      repository.deletePageCreate("create-root")
 
       expect(repository.getPageCreate("create-1")).toBeNull()
       expect(repository.getStats()).toMatchObject({ createCount: 0 })

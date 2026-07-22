@@ -155,6 +155,29 @@ describe("Confluence client", () => {
     })
   })
 
+  test("creates a root page without sending parentId", async () => {
+    const calls: Array<{ url: string; method?: string; body?: string; contentType?: string }> = []
+    const client = new ConfluenceClient({
+      siteUrl: "https://example.atlassian.net/wiki",
+      email: "reader@example.com",
+      apiToken: "token",
+      fetch: async (url, init) => {
+        calls.push({ url, method: init?.method, body: init?.body, contentType: init?.headers?.["Content-Type"] })
+        return response({ id: "101", title: "Root Page", version: { number: 1 } })
+      },
+    })
+
+    const created = await client.createPage({ spaceId: "10", parentId: null, title: "Root Page", storageValue: "<h1>Root Page</h1>" })
+
+    expect(created.id).toBe("101")
+    expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({
+      spaceId: "10",
+      status: "current",
+      title: "Root Page",
+      body: { representation: "storage", value: "<h1>Root Page</h1>" },
+    })
+  })
+
   test("times out requests that do not finish", async () => {
     const calls: string[] = []
     const client = new ConfluenceClient({

@@ -156,8 +156,8 @@ export async function applyPageCreateToConfluence(localId: string, options: Appl
     const create = repository.getPageCreate(localId)
     if (!create) return blocked(localId, "New page", "missing-create", [`No staged page create found for ${localId}.`])
 
-    const parent = repository.getPage(create.parentPageId)
-    if (!parent) return blocked(localId, create.title, "missing-parent", [`Parent page not found in local index: ${create.parentPageId}.`])
+    const parent = create.parentPageId ? repository.getPage(create.parentPageId) : null
+    if (create.parentPageId && !parent) return blocked(localId, create.title, "missing-parent", [`Parent page not found in local index: ${create.parentPageId}.`])
 
     const converted = markdownToConfluenceStorage(create.draftMarkdown)
     if (converted.blockedReasons.length) return blocked(localId, create.title, "unsafe-draft", converted.blockedReasons)
@@ -184,9 +184,9 @@ export async function applyPageCreateToConfluence(localId: string, options: Appl
       },
       space,
       baseUrl: client.baseUrl,
-      ancestors: parent.path.map((title, index) => ({ id: index === parent.path.length - 1 ? parent.pageId : title, title })),
+      ancestors: parent ? parent.path.map((title, index) => ({ id: index === parent.path.length - 1 ? parent.pageId : title, title })) : [],
       syncedAt: updatedAt,
-      treeOrder: repository.getChildren(create.parentPageId).length,
+      treeOrder: create.parentPageId ? repository.getChildren(create.parentPageId).length : repository.listPagesInSpace(create.spaceKey).filter((page) => page.parentId === null).length,
     })
 
     repository.upsertPage(mapped.indexedPage)

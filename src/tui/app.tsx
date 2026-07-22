@@ -65,6 +65,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const [pageSearchSelectedIndex, setPageSearchSelectedIndex] = createSignal(0)
   const [newPageOpen, setNewPageOpen] = createSignal(false)
   const [newPageTitle, setNewPageTitle] = createSignal("")
+  const [newPageParentPageId, setNewPageParentPageId] = createSignal<string | null>(null)
   const [spaceSwitcherOpen, setSpaceSwitcherOpen] = createSignal(false)
   const [spaceSwitcherQuery, setSpaceSwitcherQuery] = createSignal("")
   const [spaceSwitcherSelectedIndex, setSpaceSwitcherSelectedIndex] = createSignal(0)
@@ -88,11 +89,18 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
 
   const spaces = createMemo(() => dataSource.listSpaces())
   const space = createMemo(() => spaces().find((candidate) => candidate.key === activeSpaceKey()) ?? emptySpaceSummary(activeSpaceKey()))
-  const pages = createMemo(() => dataSource.getPagesForSpace(activeSpaceKey()))
+  const pages = createMemo(() => {
+    draftRevision()
+    return dataSource.getPagesForSpace(activeSpaceKey())
+  })
   const pageById = createMemo(() => new Map(pages().map((page) => [page.pageId, page])))
   const treeRows = createMemo(() => buildTreeRows(pages(), expandedPageIds()))
   const selectedIndex = createMemo(() => treeRows().findIndex((row) => row.page.pageId === selectedPageId()))
   const selectedRow = createMemo(() => treeRows().find((row) => row.page.pageId === selectedPageId()))
+  const newPageParentPage = createMemo(() => {
+    const parentPageId = newPageParentPageId()
+    return parentPageId ? pageById().get(parentPageId) ?? null : null
+  })
   const readerPage = createMemo(() => {
     draftRevision()
     return dataSource.getReaderPage(selectedPageId()) ?? emptyReaderPage(space())
@@ -107,7 +115,10 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     return pageId ? dataSource.getPageDraftStatus(pageId) : null
   })
   const editorDirty = createMemo(() => editorOpen() && editorMarkdown() !== editorOriginalMarkdown())
-  const pageSearchResults = createMemo(() => dataSource.searchPagesInSpace(activeSpaceKey(), pageSearchQuery()))
+  const pageSearchResults = createMemo(() => {
+    draftRevision()
+    return dataSource.searchPagesInSpace(activeSpaceKey(), pageSearchQuery())
+  })
   const spaceSwitcherResults = createMemo(() => dataSource.searchSpaces(spaceSwitcherQuery()))
   const stagedChanges = createMemo(() => {
     draftRevision()
@@ -308,14 +319,16 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   }
 
   const discardSelectedChanges = () => {
-    const pageIds = selectedChangeIds()
-    if (!pageIds.length || changesApplying()) {
+    const changeKeys = selectedChangeIds()
+    if (!changeKeys.length || changesApplying()) {
       setChangesMessage("Select at least one staged change to discard.")
       return
     }
 
-    const discarded = dataSource.discardStagedChanges(pageIds)
+    const selectedDiscardedCreate = stagedChanges().find((change) => change.kind === "create" && change.changeKey === selectedPageId() && changeKeys.includes(change.changeKey))
+    const discarded = dataSource.discardStagedChanges(changeKeys)
     setDraftRevision((revision) => revision + 1)
+    if (selectedDiscardedCreate?.kind === "create") setSelectedPageId(selectedDiscardedCreate.create.parentPageId ?? dataSource.getDefaultPageId(activeSpaceKey()) ?? emptyPageId)
     setChangesMessage(`Discarded ${discarded} staged change${discarded === 1 ? "" : "s"}.`)
     setSelectedChangeKeys(new Set(stagedChanges().map((change) => change.changeKey)))
   }
@@ -323,14 +336,28 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const openNewPage = () => {
     const parentPage = selectedRow()?.page
     if (!parentPage || parentPage.pageId === emptyPageId) {
-      setEditStatusMessage("Select a parent page in the navigator before creating a page.")
+      if (pages().length > 0) {
+        setEditStatusMessage("Select a parent page in the navigator before creating a child page, or press N for a root page.")
+        return
+      }
+
+      openRootNewPage()
       return
     }
 
+    openNewPageWithParent(parentPage.pageId)
+  }
+
+  const openRootNewPage = () => {
+    openNewPageWithParent(null)
+  }
+
+  const openNewPageWithParent = (parentPageId: string | null) => {
     setPageSearchOpen(false)
     setSpaceSwitcherOpen(false)
     setChangesOpen(false)
     setNewPageTitle("")
+    setNewPageParentPageId(parentPageId)
     setNewPageOpen(true)
     setFocusPane("navigator")
   }
@@ -338,19 +365,19 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const closeNewPage = () => {
     setNewPageOpen(false)
     setNewPageTitle("")
+    setNewPageParentPageId(null)
   }
 
   const submitNewPage = () => {
-    const parentPage = selectedRow()?.page
-    if (!parentPage) return
+    const parentPageId = newPageParentPageId()
 
     try {
-      const change = dataSource.stagePageCreate({ spaceKey: activeSpaceKey(), parentPageId: parentPage.pageId, title: newPageTitle() })
+      const change = dataSource.stagePageCreate({ spaceKey: activeSpaceKey(), parentPageId, title: newPageTitle() })
 
       setDraftRevision((revision) => revision + 1)
       closeNewPage()
       setSelectedPageId(change.changeKey)
-      setExpandedPageIds((current) => new Set(current).add(parentPage.pageId))
+      if (parentPageId) setExpandedPageIds((current) => new Set(current).add(parentPageId))
       documentScrollbox?.scrollTo(0)
       setEditStatusMessage(`Created local page ${change.title}. Press e to edit or c Overview to apply/discard.`)
     } catch (error) {
@@ -563,6 +590,11 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
       return
     }
 
+    if (focusPane() === "navigator" && isPlainKey(key, "N")) {
+      openRootNewPage()
+      return
+    }
+
     if (focusPane() === "navigator" && isPlainKey(key, "n")) {
       openNewPage()
       return
@@ -647,7 +679,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
       <NewPageOverlay
         visible={newPageOpen()}
         title={newPageTitle()}
-        parentPage={selectedRow()?.page ?? null}
+        parentPage={newPageParentPage()}
         left={dimensions().width < 72 ? 2 : 8}
         width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 4 : 16))}
       />
@@ -893,7 +925,7 @@ function StatusBar(props: { focusPane: string; editorOpen: boolean; editorDirty:
   const hint = () => {
     if (props.editorOpen) return "Ctrl+T stage | Esc close without changing staged docs"
     if (props.focusPane === "document") return "/ page search | s spaces | c overview | e edit | j/k scroll line | d/u scroll doc | h navigator | q quit"
-    return "/ page search | s spaces | c overview | n new page | e edit | j/k move | h/l fold tree | d/u scroll doc | q quit"
+    return "/ page search | s spaces | c overview | n child | N root | e edit | j/k move | h/l fold | d/u scroll | q quit"
   }
   const status = () => {
     if (props.editorOpen) return props.editMessage || `editing transient buffer: ${props.editorDirty ? "modified" : "unchanged"}`
@@ -1069,7 +1101,7 @@ function StagedChangeRow(props: { change: TuiStagedChange; active: boolean; chec
   const marker = () => (props.active ? "▶" : " ")
   const checkbox = () => (props.checked ? "[x]" : "[ ]")
   const kind = () => (props.change.kind === "create" ? "create" : "update")
-  const identifier = () => props.change.kind === "create" ? `parent ${props.change.parentPage.pageId}` : props.change.page.pageId
+  const identifier = () => props.change.kind === "create" ? `parent ${props.change.parentPage?.pageId ?? "space root"}` : props.change.page.pageId
 
   return (
     <box height={3} width="100%" backgroundColor={props.active ? theme.accentSoft : undefined} paddingX={1} flexDirection="column">
@@ -1081,12 +1113,12 @@ function StagedChangeRow(props: { change: TuiStagedChange; active: boolean; chec
 }
 
 function changeDetailLine(change: TuiStagedChange) {
-  if (change.kind === "create") return `New page under parent ${change.parentPage.pageId}  Updated: ${formatDate(change.updatedAt)}`
+  if (change.kind === "create") return `New page under ${change.parentPage ? `parent ${change.parentPage.pageId}` : "space root"}  Updated: ${formatDate(change.updatedAt)}`
   return `ID: ${change.page.pageId}  Updated: ${formatDate(change.updatedAt)}`
 }
 
 function changePathLine(change: TuiStagedChange) {
-  if (change.kind === "create") return [...change.parentPage.path, change.title].join(" / ")
+  if (change.kind === "create") return [...(change.parentPage?.path ?? []), change.title].join(" / ")
   return change.page.path.join(" / ")
 }
 
@@ -1120,7 +1152,7 @@ export function NewPageOverlay(props: { visible: boolean; title: string; parentP
         <text height={1} fg={theme.accent} attributes={1}>NEW PAGE</text>
         <text height={1} fg={theme.muted}>type: page</text>
       </box>
-      <text height={1} fg={theme.subtle}>Parent: {props.parentPage ? props.parentPage.title : "none"}</text>
+      <text height={1} fg={theme.subtle}>Parent: {props.parentPage ? props.parentPage.title : "Space root"}</text>
       <box height={1} />
       <text height={1} fg={theme.text}>Title: {props.title || "type a title"}_</text>
       <text height={1} fg={theme.subtle}>enter stage create  esc cancel</text>

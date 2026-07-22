@@ -154,6 +154,49 @@ describe("apply page draft", () => {
       await setup.cleanup()
     }
   })
+
+  test("creates a staged root page in Confluence and local index", async () => {
+    const setup = await createApplySetup()
+    const repository = openIndexRepository({ path: setup.dbPath })
+    const calls: Array<{ url: string; method?: string; body?: string }> = []
+
+    try {
+      seedApplyPage(repository, baseStorage)
+      repository.upsertPageCreate({
+        localId: "create-root",
+        spaceKey: "ENG",
+        parentPageId: null,
+        title: "Root Plan",
+        draftMarkdown: "# Root Plan\n",
+        createdAt: "2026-07-21T10:00:00Z",
+        updatedAt: "2026-07-21T10:00:00Z",
+      })
+
+      const result = await applyPageCreateToConfluence("create-root", {
+        env: setup.env,
+        repository,
+        now: fixedClock(),
+        fetch: applyFetch(calls, {
+          "/wiki/api/v2/spaces?keys=ENG&limit=250": { results: [{ id: "10", key: "ENG", name: "Engineering" }] },
+          "/wiki/api/v2/pages": remotePage("102", "Root Plan", 1, ""),
+          "/wiki/api/v2/pages/102?body-format=storage": remotePage("102", "Root Plan", 1, "<h1>Root Plan</h1>"),
+        }),
+      })
+
+      expect(result).toMatchObject({ status: "applied", pageId: "102", title: "Root Plan", remoteVersion: 1 })
+      expect(JSON.parse(calls[1]?.body ?? "{}")).toEqual({
+        spaceId: "10",
+        status: "current",
+        title: "Root Plan",
+        body: { representation: "storage", value: "<h1>Root Plan</h1>" },
+      })
+      expect(repository.getPageCreate("create-root")).toBeNull()
+      expect(repository.getPage("102")).toMatchObject({ pageId: "102", parentId: null, title: "Root Plan", path: ["Root Plan"] })
+    } finally {
+      repository.close()
+      await setup.cleanup()
+    }
+  })
 })
 
 async function createApplySetup() {

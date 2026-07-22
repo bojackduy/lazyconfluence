@@ -163,15 +163,24 @@ The current product and implementation planning lives in `docs/`:
 
 ## npm Publishing
 
-This repository publishes `@bojackduy/lazyconfluence` to npm from GitHub Actions.
+This repository publishes `@bojackduy/lazyconfluence` to npm from GitHub Actions using npm trusted publishing.
 
-One-time setup:
+One-time npm setup:
 
-1. Create an npm automation or granular publish token for the `@bojackduy` scope.
-2. Add it to this GitHub repository as an Actions secret named `NPM_TOKEN`.
-3. Make sure the package version in `package.json` is new before publishing.
+1. Open the package on npm: `https://www.npmjs.com/package/@bojackduy/lazyconfluence`.
+2. Go to `Settings`.
+3. Find `Trusted Publisher`.
+4. Select `GitHub Actions`.
+5. Set `Organization or user` to `bojackduy`.
+6. Set `Repository` to `lazyconfluence`.
+7. Set `Workflow filename` to `npm-publish.yml`.
+8. Leave `Environment name` blank unless the workflow uses a GitHub Environment.
+9. Select `npm publish` as an allowed action.
+10. Save the trusted publisher.
 
 Publish by creating a GitHub Release, or run the `Publish to npm` workflow manually from GitHub Actions.
+
+Trusted publishing does not use an `NPM_TOKEN` GitHub secret. GitHub grants the workflow an OIDC identity via `id-token: write`, and npm exchanges that identity for a short-lived publish credential. npm automatically generates provenance for public packages published this way.
 
 For a manual publish from your machine, first verify npm auth and scope access:
 
@@ -187,4 +196,10 @@ Then publish:
 ```bash
 bun run build
 npm publish --access public
+```
+
+Or use the repo script to avoid mistyping the npm publish flags:
+
+```bash
+bun run publish:npm
 ```

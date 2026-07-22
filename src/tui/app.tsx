@@ -29,6 +29,14 @@ type TreeRow = {
   detached: boolean
 }
 
+type NavigatorCollapseRow = {
+  page: { parentId: string | null }
+  hasChildren: boolean
+  expanded: boolean
+}
+
+const documentHorizontalScrollColumns = 8
+
 export type SearchKeyLike = {
   name: string
   sequence: string
@@ -452,6 +460,11 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     setFocusPane("document")
   }
 
+  const scrollDocumentHorizontallyBy = (columns: number) => {
+    documentScrollbox?.scrollBy({ x: columns, y: 0 })
+    setFocusPane("document")
+  }
+
   const openEditorForSelectedPage = () => {
     if (editorOpen()) return
     const pageId = selectedPageId()
@@ -533,7 +546,8 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
       return
     }
 
-    if (row?.page.parentId) setSelectedPageId(row.page.parentId)
+    const nextPageId = nextNavigatorSelectionForCollapse(row, pageById())
+    if (nextPageId) setSelectedPageId(nextPageId)
   }
 
   const handleKeyPress = (key: SearchKeyLike) => {
@@ -657,8 +671,11 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     }
 
     if (focusPane() === "document") {
+      const horizontalDelta = documentHorizontalScrollDeltaForKey(key)
+
       if (key.name === "j" || key.name === "down") scrollDocumentBy(1)
       if (key.name === "k" || key.name === "up") scrollDocumentBy(-1)
+      if (horizontalDelta !== 0) scrollDocumentHorizontallyBy(horizontalDelta)
       return
     }
   }
@@ -787,7 +804,7 @@ function Navigator(props: { rows: TreeRow[]; selectedPageId: string; focused: bo
       flexDirection="column"
     >
       <text height={1} fg={props.focused ? theme.accent : theme.muted} attributes={1}>NAVIGATOR</text>
-      <text height={1} fg={theme.subtle}>j/k move  h/l fold  Tab document</text>
+      <text height={1} fg={theme.subtle}>j/k move  h/l fold  Tab panes</text>
       <box height={1} />
       <scrollbox flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
         <box flexDirection="column" width="100%">
@@ -871,7 +888,7 @@ function Reader(props: { page: ReaderPage; focused: boolean; narrow: boolean; tr
           <text height={1} fg={props.focused ? theme.accent : theme.muted} attributes={1}>DOCUMENT</text>
           <text height={1} fg={theme.subtle}>{props.page.snippet}</text>
           <box height={1} />
-          <scrollbox id="document-scrollbox" ref={props.setDocumentScrollbox} flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
+          <scrollbox id="document-scrollbox" ref={props.setDocumentScrollbox} flexGrow={1} minHeight={0} scrollX scrollbarOptions={{ showArrows: false }} horizontalScrollbarOptions={{ showArrows: false }}>
             <markdown
               content={props.page.contentMarkdown}
               syntaxStyle={markdownStyle}
@@ -955,8 +972,8 @@ function InfoPanel(props: { title: string; items: string[]; empty: string }) {
 function StatusBar(props: { focusPane: string; editorOpen: boolean; editorDirty: boolean; editMessage: string }) {
   const hint = () => {
     if (props.editorOpen) return "Ctrl+T stage | Esc close without changing staged docs"
-    if (props.focusPane === "document") return "/ page search | s spaces | c overview | e edit | D delete | Shift+Tab navigator | j/k scroll line | d/u scroll doc | q quit"
-    return "/ page search | s spaces | c overview | Tab document | n child | N root | e edit | D delete | j/k move | h/l fold | q quit"
+    if (props.focusPane === "document") return "/ page search | s spaces | c overview | e edit | D delete | Tab/Shift+Tab panes | j/k scroll line | h/l scroll wide doc | d/u scroll doc | q quit"
+    return "/ page search | s spaces | c overview | Tab/Shift+Tab panes | n child | N root | e edit | D delete | j/k move | h/l fold | q quit"
   }
   const status = () => {
     if (props.editorOpen) return props.editMessage || `editing transient buffer: ${props.editorDirty ? "modified" : "unchanged"}`
@@ -1400,10 +1417,22 @@ export function pageSearchKeyAction(key: SearchKeyLike): PageSearchKeyAction {
 }
 
 export function nextFocusPaneForKey(current: FocusPane, key: SearchKeyLike): FocusPane {
-  if (isShiftTabKey(key)) return "navigator"
-  if (isTabKey(key)) return "document"
+  if (isShiftTabKey(key) || isTabKey(key)) return current === "navigator" ? "document" : "navigator"
   if (current === "navigator" && key.name === "return") return "document"
   return current
+}
+
+export function nextNavigatorSelectionForCollapse(row: NavigatorCollapseRow | undefined, knownPages: { has: (pageId: string) => boolean }): string | null {
+  if (!row || (row.hasChildren && row.expanded)) return null
+
+  const parentId = row.page.parentId
+  return parentId && knownPages.has(parentId) ? parentId : null
+}
+
+export function documentHorizontalScrollDeltaForKey(key: SearchKeyLike): number {
+  if (key.name === "l" || key.name === "right") return documentHorizontalScrollColumns
+  if (key.name === "h" || key.name === "left") return -documentHorizontalScrollColumns
+  return 0
 }
 
 function isSearchCharacter(key: SearchKeyLike) {

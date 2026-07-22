@@ -42,7 +42,7 @@ Status values: `Not started`, `In progress`, `Blocked`, `Partial`, `Done`.
 - Local editing is started: CLI drafts can be created from a markdown file or `$EDITOR`, staged, unstaged, discarded, previewed, and diffed against the synced body artifact. The TUI opens an in-app Markdown editor with `e`; `Ctrl+T` stages the transient editor buffer, `Esc` closes without changing staged docs, `n` on the navigator creates a local child page immediately, `N` creates a local root page, `D` stages deletion for synced leaf pages, and normal-view Overview shows current-space staged update/create/delete diffs for selecting changes to apply or discard. Broader preservation for opaque Confluence content remains.
 - Sync observability is done for the first remote slice: Confluence requests time out by default, service-level progress events cover remote wait points, and CLI `sync` prints progress unless `--quiet` is set.
 - TUI date rendering is defensive: existing rows with missing or invalid timestamps display `unknown`, and future syncs use the sync timestamp when Confluence omits page dates.
-- TUI focus keys are polished for the current reader slice: `Tab` moves to the document pane, `Shift+Tab` returns to the navigator, and `h/l` stay navigator-local for folding instead of acting as document focus shortcuts.
+- TUI focus keys are polished for the current reader slice: `Tab` and `Shift+Tab` cycle between the navigator and document panes, navigator `h/l` fold/unfold without selecting missing detached parents, and document `h/l` scroll wide content horizontally.
 - Keymap and command registry are not started.
 - Quality and integration are not started.
 
@@ -96,7 +96,7 @@ YYYY-MM-DD  ID  Result  Verification  Follow-up
 2026-07-22  tui-local-first-create  Staged page creates now appear immediately as virtual local pages in the navigator/reader and can be edited with the same transient editor before Overview apply/discard.  bun run typecheck; bun test (78 pass, 0 fail, 354 assertions).  Next: split diff rendering or command palette/help wiring if needed.
 2026-07-22  tui-root-create-search  Root-level staged creates, local-create search, parent related-panel consistency, and valid selection after local-create discard implemented.  bun run typecheck; bun test (82 pass, 0 fail, 373 assertions).  Next: command palette/help wiring or split diff rendering.
 2026-07-22  tui-nested-create-delete  Nested local creates under local-only parents, parent-first create apply, and staged synced-page deletes via `D` implemented.  bun run typecheck; bun test (88 pass, 0 fail, 402 assertions).  Next: command palette/help wiring, split diff rendering, or safer delete confirmation UX.
-2026-07-22  tui-focus-keys  Polished pane focus keys so Tab targets document, Shift+Tab targets navigator, and document-pane h/left no longer jump focus.  bun run typecheck; bun test (91 pass, 0 fail, 414 assertions).  Next: command palette/help wiring or broader keymap registry.
+2026-07-22  tui-focus-keys  Polished pane focus keys so Tab/Shift+Tab cycle the two panes, navigator h on detached root-visible pages no-ops instead of selecting missing parents, and document h/l scroll horizontally.  bun run typecheck; bun test (93 pass, 0 fail, 425 assertions).  Next: command palette/help wiring or broader keymap registry.
 ```
 
 ## Contract Changes

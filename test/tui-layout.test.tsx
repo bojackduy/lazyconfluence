@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
-import { App, NewPageOverlay, StagedChangesOverlay, nextFocusPaneForKey, type SearchKeyLike } from "../src/tui/app"
+import { App, NewPageOverlay, StagedChangesOverlay, documentHorizontalScrollDeltaForKey, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, type SearchKeyLike } from "../src/tui/app"
 import { createLocalConfig } from "../src/config"
 import type { CredentialStatus } from "../src/config"
 import { openIndexRepository } from "../src/index/repository"
@@ -35,7 +35,7 @@ describe("main TUI layout", () => {
       expect(output).toContain("Overview 0")
       expect(output).toContain("c overview")
       expect(output).toContain("e edit")
-      expect(output).toContain("Tab document")
+      expect(output).toContain("Tab panes")
       expect(output).toContain("N root")
       expect(output).toContain("D delete")
       expect(output).toContain("▾ ▣ Local Engineering Home")
@@ -208,11 +208,30 @@ describe("main TUI layout", () => {
 
   test("focus keys keep h/l document-local and map Tab between panes", () => {
     expect(nextFocusPaneForKey("navigator", key("tab", "\t"))).toBe("document")
+    expect(nextFocusPaneForKey("document", key("tab", "\t"))).toBe("navigator")
     expect(nextFocusPaneForKey("document", key("tab", "\x1B[Z", { shift: true }))).toBe("navigator")
+    expect(nextFocusPaneForKey("navigator", key("tab", "\x1B[Z", { shift: true }))).toBe("document")
     expect(nextFocusPaneForKey("document", key("h", "h"))).toBe("document")
     expect(nextFocusPaneForKey("document", key("left", "\x1B[D"))).toBe("document")
     expect(nextFocusPaneForKey("navigator", key("l", "l"))).toBe("navigator")
     expect(nextFocusPaneForKey("navigator", key("return", "\r"))).toBe("document")
+  })
+
+  test("document h/l keys scroll horizontally", () => {
+    expect(documentHorizontalScrollDeltaForKey(key("h", "h"))).toBe(-8)
+    expect(documentHorizontalScrollDeltaForKey(key("left", "\x1B[D"))).toBe(-8)
+    expect(documentHorizontalScrollDeltaForKey(key("l", "l"))).toBe(8)
+    expect(documentHorizontalScrollDeltaForKey(key("right", "\x1B[C"))).toBe(8)
+    expect(documentHorizontalScrollDeltaForKey(key("j", "j"))).toBe(0)
+  })
+
+  test("navigator collapse does not select missing detached parents", () => {
+    const knownPages = new Map([["visible-parent", home]])
+
+    expect(nextNavigatorSelectionForCollapse({ page: { parentId: "visible-parent" }, hasChildren: false, expanded: false }, knownPages)).toBe("visible-parent")
+    expect(nextNavigatorSelectionForCollapse({ page: { parentId: "missing-parent" }, hasChildren: false, expanded: false }, knownPages)).toBeNull()
+    expect(nextNavigatorSelectionForCollapse({ page: { parentId: null }, hasChildren: false, expanded: false }, knownPages)).toBeNull()
+    expect(nextNavigatorSelectionForCollapse({ page: { parentId: "visible-parent" }, hasChildren: true, expanded: true }, knownPages)).toBeNull()
   })
 
   test("TUI staged changes are scoped to the current space", async () => {

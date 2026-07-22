@@ -174,6 +174,98 @@ describe("sync service", () => {
     }
   })
 
+  test("backfills missing parents and discovers their children", async () => {
+    const setup = await createSyncTestSetup()
+    const calls: string[] = []
+
+    try {
+      const report = await syncConfluence({
+        env: setup.env,
+        now: fixedClock(),
+        fetch: jsonFetch(calls, {
+          "/wiki/api/v2/spaces?keys=ENG&limit=250": {
+            results: [{ id: "10", key: "ENG", name: "Engineering", homepageId: "root" }],
+          },
+          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage": {
+            results: [pagePayload("backend-docs", "Backend Scraping And Pricing Documentation", "backend-folder", "<p>Backend docs.</p>")],
+            _links: {},
+          },
+          "/wiki/api/v2/pages/backend-docs/direct-children?limit=250": { results: [], _links: {} },
+          "/wiki/api/v2/pages/backend-folder?body-format=storage": pagePayload("backend-folder", "Technical Document for Backend", "technical-doc", "<p>Backend folder.</p>"),
+          "/wiki/api/v2/pages/backend-folder/direct-children?limit=250": {
+            results: [pagePayload("devex", "DevEx workaround because of poor setup", "backend-folder", "<p>DevEx.</p>"), pagePayload("backend-docs", "Backend Scraping And Pricing Documentation", "backend-folder", "<p>Backend docs.</p>")],
+            _links: {},
+          },
+          "/wiki/api/v2/pages/technical-doc?body-format=storage": pagePayload("technical-doc", "Technical Document", "root", "<p>Technical folder.</p>"),
+          "/wiki/api/v2/pages/technical-doc/direct-children?limit=250": {
+            results: [pagePayload("frontend-docs", "Technical Document for Frontend", "technical-doc", "<p>Frontend docs.</p>"), pagePayload("backend-folder", "Technical Document for Backend", "technical-doc", "<p>Backend folder.</p>")],
+            _links: {},
+          },
+          "/wiki/api/v2/pages/root?body-format=storage": pagePayload("root", "PlayLab Home", null, "<p>Home.</p>"),
+          "/wiki/api/v2/pages/root/direct-children?limit=250": {
+            results: [pagePayload("technical-doc", "Technical Document", "root", "<p>Technical folder.</p>")],
+            _links: {},
+          },
+          "/wiki/api/v2/pages/devex/direct-children?limit=250": { results: [], _links: {} },
+          "/wiki/api/v2/pages/frontend-docs/direct-children?limit=250": { results: [], _links: {} },
+        }),
+      })
+
+      expect(report).toMatchObject({ complete: true, pagesIndexed: 6, failures: [] })
+      expect(calls).toContain("https://example.atlassian.net/wiki/api/v2/pages/backend-folder?body-format=storage")
+      expect(calls).toContain("https://example.atlassian.net/wiki/api/v2/pages/technical-doc?body-format=storage")
+      expect(calls).toContain("https://example.atlassian.net/wiki/api/v2/pages/root?body-format=storage")
+      expect(calls).toContain("https://example.atlassian.net/wiki/api/v2/pages/backend-folder/direct-children?limit=250")
+      expect(calls).toContain("https://example.atlassian.net/wiki/api/v2/pages/technical-doc/direct-children?limit=250")
+
+      const repository = openIndexRepository({ path: setup.dbPath })
+      try {
+        expect(repository.getPage("backend-docs")?.path).toEqual(["PlayLab Home", "Technical Document", "Technical Document for Backend", "Backend Scraping And Pricing Documentation"])
+        expect(repository.getChildren("technical-doc").map((page) => page.pageId)).toEqual(["frontend-docs", "backend-folder"])
+        expect(repository.getChildren("backend-folder").map((page) => page.pageId)).toEqual(["devex", "backend-docs"])
+      } finally {
+        repository.close()
+      }
+    } finally {
+      await setup.cleanup()
+    }
+  })
+
+  test("keeps detached children visible when missing parent backfill fails", async () => {
+    const setup = await createSyncTestSetup()
+
+    try {
+      const report = await syncConfluence({
+        env: setup.env,
+        now: fixedClock(),
+        fetch: jsonFetch([], {
+          "/wiki/api/v2/spaces?keys=ENG&limit=250": {
+            results: [{ id: "10", key: "ENG", name: "Engineering", homepageId: "root" }],
+          },
+          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage": {
+            results: [pagePayload("orphan", "Orphaned Child", "missing-parent", "<p>Still visible.</p>")],
+            _links: {},
+          },
+          "/wiki/api/v2/pages/orphan/direct-children?limit=250": { results: [], _links: {} },
+          "/wiki/api/v2/pages/missing-parent?body-format=storage": response({ message: "missing" }, false, 404, "Not Found"),
+        }),
+      })
+
+      expect(report.complete).toBe(false)
+      expect(report.failures).toEqual([{ scope: "page", key: "missing-parent", message: expect.stringContaining("Could not fetch missing parent") }])
+
+      const repository = openIndexRepository({ path: setup.dbPath })
+      try {
+        expect(repository.getPage("orphan")?.parentId).toBe("missing-parent")
+        expect(repository.getPage("orphan")?.path).toEqual(["Orphaned Child"])
+      } finally {
+        repository.close()
+      }
+    } finally {
+      await setup.cleanup()
+    }
+  })
+
   test("records page failures while preserving existing local pages", async () => {
     const setup = await createSyncTestSetup()
     const repository = openIndexRepository({ path: setup.dbPath })

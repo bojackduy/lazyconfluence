@@ -163,6 +163,7 @@ async function syncSpace(input: {
   }
 
   await discoverPageChildren({ ...input, seedPages: listedPages, nodeById, treeOrderById, pageFailures })
+  await backfillMissingParentPages({ ...input, nodeById, treeOrderById, pageFailures })
 
   const pages: IndexedPage[] = []
   const links: PageLink[] = []
@@ -260,6 +261,56 @@ async function discoverPageChildren(input: {
       queue.push(childWithParent)
     }
   }
+}
+
+async function backfillMissingParentPages(input: {
+  client: ConfluenceClient
+  space: ConfluenceSpace
+  nodeById: Map<string, ConfluencePage>
+  treeOrderById: Map<string, number>
+  pageFailures: SyncFailure[]
+  onProgress?: (event: SyncProgressEvent) => void
+}) {
+  const failedParentIds = new Set<string>()
+
+  while (true) {
+    const missingParentIds = missingParentPageIds(input.nodeById, failedParentIds)
+    if (!missingParentIds.length) return
+
+    const backfilledParents: ConfluencePage[] = []
+
+    for (const parentId of missingParentIds) {
+      try {
+        emitProgress(input.onProgress, { type: "fetching-page-body", message: `Fetching missing parent ${parentId}.`, spaceKey: input.space.key, spaceName: input.space.name, pageId: parentId })
+        const parent = await input.client.fetchPageBody(parentId)
+        const existing = input.nodeById.get(parent.id)
+
+        input.nodeById.set(parent.id, existing ? mergeConfluencePage(existing, parent) : parent)
+        if (!input.treeOrderById.has(parent.id)) input.treeOrderById.set(parent.id, pageTreeOrder(parent, input.treeOrderById.size))
+        backfilledParents.push(input.nodeById.get(parent.id) ?? parent)
+      } catch (error) {
+        const message = errorMessage(error)
+        failedParentIds.add(parentId)
+        input.pageFailures.push({ scope: "page", key: parentId, message: `Could not fetch missing parent: ${message}` })
+        emitProgress(input.onProgress, { type: "failed-page", message: `Failed missing parent ${parentId}: ${message}`, spaceKey: input.space.key, spaceName: input.space.name, pageId: parentId })
+      }
+    }
+
+    if (backfilledParents.length) {
+      await discoverPageChildren({ ...input, seedPages: backfilledParents, pageFailures: input.pageFailures })
+    }
+  }
+}
+
+function missingParentPageIds(nodeById: Map<string, ConfluencePage>, failedParentIds: Set<string>) {
+  const ids = new Set<string>()
+
+  for (const page of nodeById.values()) {
+    const parentId = page.parentId || null
+    if (parentId && !nodeById.has(parentId) && !failedParentIds.has(parentId)) ids.add(parentId)
+  }
+
+  return [...ids]
 }
 
 function pageTreeOrder(page: ConfluencePage, fallback: number) {

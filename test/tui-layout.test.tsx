@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
-import { App, NewPageOverlay, StagedChangesOverlay, documentHorizontalScrollDeltaForKey, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, type SearchKeyLike } from "../src/tui/app"
+import { App, NewPageOverlay, StagedChangesOverlay, documentHorizontalScrollDeltaForKey, imageRenderModeForCapabilities, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, type SearchKeyLike } from "../src/tui/app"
 import { createLocalConfig } from "../src/config"
 import type { CredentialStatus } from "../src/config"
 import { openIndexRepository } from "../src/index/repository"
@@ -234,6 +234,8 @@ describe("main TUI layout", () => {
       expect(output).toContain("IMAGE PREVIEW")
       expect(output).toContain("System overview")
       expect(output).toContain("cached PNG 1x1")
+      expect(output).toContain("color cells")
+      expect(output).toContain("▀")
     } finally {
       repository?.close()
       await setup.cleanup()
@@ -373,6 +375,15 @@ describe("main TUI layout", () => {
     expect(documentHorizontalScrollDeltaForKey(key("l", "l"))).toBe(8)
     expect(documentHorizontalScrollDeltaForKey(key("right", "\x1B[C"))).toBe(8)
     expect(documentHorizontalScrollDeltaForKey(key("j", "j"))).toBe(0)
+  })
+
+  test("image render mode progressively falls back from native protocols to cells", () => {
+    expect(imageRenderModeForCapabilities(null)).toBe("cell-color")
+    expect(imageRenderModeForCapabilities({ kitty_graphics: true, sixel: true, rgb: true })).toBe("cell-color")
+    expect(imageRenderModeForCapabilities({ kitty_graphics: true, sixel: true, rgb: true }, { nativeProtocols: true })).toBe("kitty")
+    expect(imageRenderModeForCapabilities({ kitty_graphics: false, sixel: true, rgb: true }, { nativeProtocols: true })).toBe("sixel")
+    expect(imageRenderModeForCapabilities({ kitty_graphics: false, sixel: false, rgb: true })).toBe("cell-color")
+    expect(imageRenderModeForCapabilities({ kitty_graphics: false, sixel: false, rgb: false })).toBe("cell-mono")
   })
 
   test("navigator collapse does not select missing detached parents", () => {

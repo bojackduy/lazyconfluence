@@ -3,24 +3,24 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>lazyconfluence - Terminal-first Confluence browser</title>
-    <meta name="description" content="lazyconfluence is a terminal-first Confluence document browser that syncs spaces locally for fast reading, search, links, backlinks, and drafts.">
+    <title>lazyconfluence - Terminal Confluence browser with image previews</title>
+    <meta name="description" content="lazyconfluence is a terminal-first Confluence browser with local sync, search, backlinks, drafts, cached PNG image previews, and progressive image placeholders.">
     <meta name="theme-color" content="#171524">
     <meta name="robots" content="index,follow">
     <link rel="canonical" href="https://bojackduy.github.io/lazyconfluence/">
     <link rel="stylesheet" href="./styles.css">
 
     <meta property="og:type" content="website">
-    <meta property="og:title" content="lazyconfluence - Terminal-first Confluence browser">
-    <meta property="og:description" content="Browse synced Confluence pages locally from your terminal.">
+    <meta property="og:title" content="lazyconfluence - Terminal Confluence browser with image previews">
+    <meta property="og:description" content="Browse synced Confluence pages, search docs, and preview cached Confluence images locally from your terminal.">
     <meta property="og:url" content="https://bojackduy.github.io/lazyconfluence/">
     <meta property="og:image" content="https://bojackduy.github.io/lazyconfluence/assets/og.png">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="865">
 
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="lazyconfluence - Terminal-first Confluence browser">
-    <meta name="twitter:description" content="Browse synced Confluence pages locally from your terminal.">
+    <meta name="twitter:title" content="lazyconfluence - Terminal Confluence browser with image previews">
+    <meta name="twitter:description" content="Browse synced Confluence pages, search docs, and preview cached Confluence images locally from your terminal.">
     <meta name="twitter:image" content="https://bojackduy.github.io/lazyconfluence/assets/og.png">
 
     <script type="application/ld+json">
@@ -30,7 +30,8 @@
         "name": "lazyconfluence",
         "applicationCategory": "DeveloperApplication",
         "operatingSystem": "macOS, Linux, Windows",
-        "description": "A terminal-first Confluence document browser that syncs spaces locally for fast reading, search, links, backlinks, and drafts.",
+        "description": "A terminal-first Confluence document browser that syncs spaces locally for fast reading, search, links, backlinks, drafts, cached PNG image previews, and progressive image placeholders.",
+        "keywords": "Confluence terminal browser, terminal image previews, Confluence image previews, progressive image rendering, terminal image fallback, local-first documentation",
         "url": "https://bojackduy.github.io/lazyconfluence/",
         "downloadUrl": "https://www.npmjs.com/package/@bojackduy/lazyconfluence",
         "codeRepository": "https://github.com/bojackduy/lazyconfluence",
@@ -57,8 +58,8 @@
       <section class="hero" aria-labelledby="hero-title">
         <div class="hero-copy">
           <p class="eyebrow">Terminal-first Confluence reader</p>
-          <h1 id="hero-title">Browse Confluence without leaving your terminal.</h1>
-          <p class="hero-lede">Sync the spaces you care about, read pages locally, follow links, search docs, and keep remote calls explicit.</p>
+          <h1 id="hero-title">Browse Confluence docs and image-heavy pages in your terminal.</h1>
+          <p class="hero-lede">Sync the spaces you care about, read pages locally, preview cached Confluence images, and keep readable placeholders when image previews are unavailable.</p>
 
           <div class="install-card" aria-label="Install command">
             <span class="prompt">$</span>
@@ -78,8 +79,8 @@
             <span></span>
             <span></span>
           </div>
-          <img src="./assets/demo2.png" alt="lazyconfluence terminal UI browsing synthetic Confluence demo pages" width="6240" height="4500" decoding="async">
-          <figcaption>Demo mode uses synthetic pages, spaces, links, and owners for safe recordings. <a href="./assets/demo2.gif">Watch animated demo.</a></figcaption>
+          <img src="./assets/demo2.png" alt="lazyconfluence terminal UI with Confluence page tree, document reader, and image previews" width="6240" height="4500" decoding="async">
+          <figcaption>Demo mode uses synthetic pages, spaces, links, owners, and image previews for safe recordings. <a href="./assets/demo2.gif">Watch animated demo.</a></figcaption>
         </figure>
       </section>
 
@@ -94,7 +95,7 @@
       <section id="features" class="feature-grid" aria-labelledby="features-title">
         <div class="section-heading">
           <p class="eyebrow">Features</p>
-          <h2 id="features-title">Built around terminal document work.</h2>
+          <h2 id="features-title">Built around terminal document work, including images.</h2>
         </div>
         <article class="feature-card">
           <h3>Local-first after sync</h3>
@@ -105,8 +106,8 @@
           <p>Start from one active space, move through the page tree, and switch spaces without losing keyboard flow.</p>
         </article>
         <article class="feature-card">
-          <h3>Readable terminal documents</h3>
-          <p>Headings, lists, tables, links, and code blocks are rendered for quick scanning in the terminal.</p>
+          <h3>Progressive image rendering</h3>
+          <p>Cached Confluence PNG attachments render as terminal previews without native image protocols; unsupported media and terminals without preview support keep labeled placeholders.</p>
         </article>
         <article class="feature-card">
           <h3>Search and relationships</h3>

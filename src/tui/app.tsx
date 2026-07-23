@@ -13,6 +13,7 @@ import {
   type MarkdownOptions,
   type RenderContext,
   type ScrollBoxRenderable,
+  type TerminalCapabilities,
   type TreeSitterClient,
 } from "@opentui/core"
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js"
@@ -55,6 +56,10 @@ export type SearchKeyLike = {
 type CredentialWarning = Exclude<CredentialStatus, { kind: "ready" }>
 
 export type PageSearchKeyAction = "append" | "delete" | "submit" | "close" | "next" | "previous" | "ignore"
+
+export type ImageRenderMode = "kitty" | "sixel" | "cell-color" | "cell-mono" | "placeholder"
+
+type ImageTerminalCapabilities = Pick<TerminalCapabilities, "kitty_graphics" | "sixel" | "rgb">
 
 export interface RenderTuiOptions {
   env?: RuntimeEnv
@@ -958,6 +963,7 @@ function navigatorDocumentKind(row: TreeRow): NavigatorDocumentKind {
 function Reader(props: { page: ReaderPage; focused: boolean; narrow: boolean; treeSitterClient?: TreeSitterClient; setDocumentScrollbox: (scrollbox: ScrollBoxRenderable) => void }) {
   const renderer = useRenderer()
   const renderCodeBlock = createReadableCodeBlockRenderer(renderer)
+  const imageRenderMode = createMemo(() => imageRenderModeForCapabilities(renderer.capabilities))
   const contentParts = createMemo(() => splitReaderImagePlaceholders(props.page.contentMarkdown, props.page.mediaAssets ?? []))
 
   return (
@@ -997,7 +1003,7 @@ function Reader(props: { page: ReaderPage; focused: boolean; narrow: boolean; tr
                   renderNode={renderCodeBlock}
                   tableOptions={{ style: "grid", widthMode: "full", columnFitter: "balanced", wrapMode: "word", cellPaddingX: 1, borderStyle: "rounded", borderColor: theme.codeBorder, selectable: true }}
                 />
-              ) : <ImagePreviewCard part={part} narrow={props.narrow} />}</For>
+              ) : <ImagePreviewCard part={part} narrow={props.narrow} renderMode={imageRenderMode()} />}</For>
             </box>
           </scrollbox>
         </box>
@@ -1007,7 +1013,7 @@ function Reader(props: { page: ReaderPage; focused: boolean; narrow: boolean; tr
   )
 }
 
-function ImagePreviewCard(props: { part: Extract<ReaderContentPart, { kind: "image" }>; narrow: boolean }) {
+function ImagePreviewCard(props: { part: Extract<ReaderContentPart, { kind: "image" }>; narrow: boolean; renderMode: ImageRenderMode }) {
   const loaded = createMemo(() => loadImagePreview(props.part.asset))
   const image = createMemo(() => imageFromLoadResult(loaded()))
   const fallbackMessage = createMemo(() => messageFromLoadResult(loaded()))
@@ -1020,8 +1026,8 @@ function ImagePreviewCard(props: { part: Extract<ReaderContentPart, { kind: "ima
       <Show when={image()} fallback={<ImagePreviewFallback part={props.part} message={fallbackMessage()} />}>
         {(decoded) => (
           <box flexDirection="column" width="100%">
-            <text height={1} fg={theme.subtle}>cached PNG {decoded().width}x{decoded().height}</text>
-            <box width={size().width} height={size().height} backgroundColor={theme.bg} buffered renderAfter={(buffer: OptimizedBuffer) => drawImagePreview(buffer, decoded())} />
+            <text height={1} fg={theme.subtle}>cached PNG {decoded().width}x{decoded().height} · {imageRenderModeLabel(props.renderMode)}</text>
+            <box width={size().width} height={size().height} backgroundColor={theme.bg} buffered renderAfter={(buffer: OptimizedBuffer) => drawImagePreview(buffer, decoded(), props.renderMode)} />
           </box>
         )}
       </Show>
@@ -1068,8 +1074,8 @@ function messageFromLoadResult(result: ImageLoadResult) {
 }
 
 function imagePreviewSize(image: DecodedImage, narrow: boolean) {
-  const maxWidth = narrow ? 34 : 58
-  const maxHeight = narrow ? 10 : 16
+  const maxWidth = narrow ? 40 : 96
+  const maxHeight = narrow ? 12 : 26
   let width = maxWidth
   let height = Math.max(3, Math.round((width * image.height / image.width) * 0.5))
 
@@ -1081,8 +1087,137 @@ function imagePreviewSize(image: DecodedImage, narrow: boolean) {
   return { width, height }
 }
 
-function drawImagePreview(buffer: OptimizedBuffer, image: DecodedImage) {
-  buffer.drawGrayscaleBufferSupersampled(0, 0, image.grayscale, image.width, image.height, RGBA.fromHex(theme.text), RGBA.fromHex(theme.bg))
+function drawImagePreview(buffer: OptimizedBuffer, image: DecodedImage, mode: ImageRenderMode) {
+  if (mode === "cell-color" || mode === "kitty" || mode === "sixel") {
+    drawColorCellImage(buffer, image)
+    return
+  }
+
+  drawMonoCellImage(buffer, image)
+}
+
+type ScaledImage = { width: number; height: number; rgba: Uint8Array }
+
+const scaledImageCache = new WeakMap<DecodedImage, Map<string, ScaledImage>>()
+const monoRamp = " .:-=+*#%@"
+const imagePreviewBackgroundInts = RGBA.fromHex(theme.bg).toInts()
+
+function drawColorCellImage(buffer: OptimizedBuffer, image: DecodedImage) {
+  const scaled = scaledImageForCells(image, buffer.width, buffer.height)
+
+  for (let y = 0; y < buffer.height; y += 1) {
+    for (let x = 0; x < buffer.width; x += 1) {
+      buffer.setCell(x, y, "▀", pixelColor(scaled, x, y * 2), pixelColor(scaled, x, y * 2 + 1))
+    }
+  }
+}
+
+function drawMonoCellImage(buffer: OptimizedBuffer, image: DecodedImage) {
+  const scaled = scaledImageForCells(image, buffer.width, buffer.height)
+  const fg = RGBA.fromHex(theme.text)
+  const bg = RGBA.fromHex(theme.bg)
+
+  for (let y = 0; y < buffer.height; y += 1) {
+    for (let x = 0; x < buffer.width; x += 1) {
+      const top = pixelLuminance(scaled, x, y * 2)
+      const bottom = pixelLuminance(scaled, x, y * 2 + 1)
+      const char = monoRamp[Math.min(monoRamp.length - 1, Math.max(0, Math.round(((top + bottom) / 2) * (monoRamp.length - 1))))]
+      buffer.setCell(x, y, char, fg, bg)
+    }
+  }
+}
+
+function scaledImageForCells(image: DecodedImage, cellWidth: number, cellHeight: number): ScaledImage {
+  const width = Math.max(1, cellWidth)
+  const height = Math.max(1, cellHeight * 2)
+  const key = `${width}x${height}`
+  let imageCache = scaledImageCache.get(image)
+  if (!imageCache) {
+    imageCache = new Map()
+    scaledImageCache.set(image, imageCache)
+  }
+  const cached = imageCache.get(key)
+  if (cached) return cached
+
+  const scaled: ScaledImage = { width, height, rgba: resizeRgbaAverage(image.rgba, image.width, image.height, width, height) }
+  imageCache.set(key, scaled)
+
+  return scaled
+}
+
+function resizeRgbaAverage(source: Uint8Array, sourceWidth: number, sourceHeight: number, targetWidth: number, targetHeight: number) {
+  const target = new Uint8Array(targetWidth * targetHeight * 4)
+  let write = 0
+
+  for (let y = 0; y < targetHeight; y += 1) {
+    const sourceYStart = Math.floor(y * sourceHeight / targetHeight)
+    const sourceYEnd = Math.max(sourceYStart + 1, Math.ceil((y + 1) * sourceHeight / targetHeight))
+    for (let x = 0; x < targetWidth; x += 1) {
+      const sourceXStart = Math.floor(x * sourceWidth / targetWidth)
+      const sourceXEnd = Math.max(sourceXStart + 1, Math.ceil((x + 1) * sourceWidth / targetWidth))
+      let red = 0
+      let green = 0
+      let blue = 0
+      let alpha = 0
+      let count = 0
+
+      for (let sourceY = sourceYStart; sourceY < sourceYEnd; sourceY += 1) {
+        for (let sourceX = sourceXStart; sourceX < sourceXEnd; sourceX += 1) {
+          const offset = (sourceY * sourceWidth + sourceX) * 4
+          const pixelAlpha = source[offset + 3] / 255
+          red += source[offset] * pixelAlpha
+          green += source[offset + 1] * pixelAlpha
+          blue += source[offset + 2] * pixelAlpha
+          alpha += pixelAlpha
+          count += 1
+        }
+      }
+
+      const normalizedAlpha = count ? alpha / count : 0
+      target[write++] = alpha ? Math.round(red / alpha) : 0
+      target[write++] = alpha ? Math.round(green / alpha) : 0
+      target[write++] = alpha ? Math.round(blue / alpha) : 0
+      target[write++] = Math.round(normalizedAlpha * 255)
+    }
+  }
+
+  return target
+}
+
+function pixelColor(image: ScaledImage, x: number, y: number) {
+  const offset = (Math.min(image.height - 1, y) * image.width + x) * 4
+  const alpha = image.rgba[offset + 3] / 255
+
+  return RGBA.fromInts(
+    Math.round(image.rgba[offset] * alpha + imagePreviewBackgroundInts[0] * (1 - alpha)),
+    Math.round(image.rgba[offset + 1] * alpha + imagePreviewBackgroundInts[1] * (1 - alpha)),
+    Math.round(image.rgba[offset + 2] * alpha + imagePreviewBackgroundInts[2] * (1 - alpha)),
+    255,
+  )
+}
+
+function pixelLuminance(image: ScaledImage, x: number, y: number) {
+  const offset = (Math.min(image.height - 1, y) * image.width + x) * 4
+  const alpha = image.rgba[offset + 3] / 255
+
+  return ((0.2126 * image.rgba[offset] + 0.7152 * image.rgba[offset + 1] + 0.0722 * image.rgba[offset + 2]) / 255) * alpha
+}
+
+export function imageRenderModeForCapabilities(capabilities: ImageTerminalCapabilities | null | undefined, options: { nativeProtocols?: boolean } = {}): ImageRenderMode {
+  if (options.nativeProtocols && capabilities?.kitty_graphics) return "kitty"
+  if (options.nativeProtocols && capabilities?.sixel) return "sixel"
+
+  if (!capabilities || capabilities.rgb) return "cell-color"
+
+  return "cell-mono"
+}
+
+function imageRenderModeLabel(mode: ImageRenderMode) {
+  if (mode === "kitty") return "Kitty native"
+  if (mode === "sixel") return "Sixel native"
+  if (mode === "cell-color") return "color cells"
+  if (mode === "cell-mono") return "mono cells"
+  return "placeholder"
 }
 
 function createReadableCodeBlockRenderer(renderer: RenderContext): NonNullable<MarkdownOptions["renderNode"]> {

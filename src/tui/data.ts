@@ -267,6 +267,8 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
   }
 }
 
+export const createProdTuiSource = createRepositoryTuiDataSource
+
 export function createMockTuiDataSource(): TuiDataSource {
   return {
     applyPageDraft: async (pageId) => demoBlockedResult(pageId),
@@ -289,7 +291,7 @@ export function createMockTuiDataSource(): TuiDataSource {
     },
     getPageDraftStatus: () => null,
     getPagesForSpace: (spaceKey, view = "current") => view === "archived" ? [] : getMockPagesForSpace(spaceKey),
-    getReaderPage: (pageId, view = "current") => view === "archived" ? null : getMockReaderPage(pageId),
+    getReaderPage: (pageId, view = "current") => pageId === emptyPageId || view === "archived" ? null : getMockReaderPage(pageId),
     listStagedDraftChanges: () => [],
     listStagedChanges: () => [],
     listSpaces: () => mockSpaces,
@@ -311,6 +313,8 @@ export function createMockTuiDataSource(): TuiDataSource {
     unstagePageDraft: () => "missing",
   }
 }
+
+export const createDevTuiSource = createMockTuiDataSource
 
 function readMockEditableDraftInput(pageId: string): EditableDraftInput {
   const page = mockPages.find((candidate) => candidate.pageId === pageId)

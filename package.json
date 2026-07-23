@@ -36,6 +36,8 @@
   },
   "scripts": {
     "start": "bun run src/main.tsx",
+    "start:dev": "bun run src/main.tsx dev",
+    "start:prod": "bun run src/main.tsx prod",
     "build": "bun build src/main.tsx --target=bun --packages=external --outdir=dist",
     "typecheck": "tsc --noEmit",
     "test": "bun test",

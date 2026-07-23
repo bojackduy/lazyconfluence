@@ -18,7 +18,10 @@ import type { FocusPane, IndexedPage, PageViewMode, ReaderPage, SearchResult, Sp
 import { loadCredentialStatus, type CredentialStatus } from "../config"
 import type { PageDraftStatus } from "../index/repository"
 import type { ApplyPageDraftResult } from "../apply"
-import { createMockTuiDataSource, createRepositoryTuiDataSource, emptyPageId, emptyReaderPage, emptySpaceSummary, type TuiDataSource, type TuiStagedChange } from "./data"
+import { defaultRuntimeEnv, runtimeEnvFromLegacyDemo, type RuntimeEnv } from "../runtime/env"
+import { emptyPageId, emptyReaderPage, emptySpaceSummary } from "./data"
+import { createTuiRuntime, type TuiRuntime } from "./runtime"
+import type { TuiSource, TuiStagedChange } from "./source"
 import { markdownStyle, theme } from "./theme"
 
 type TreeRow = {
@@ -50,35 +53,14 @@ type CredentialWarning = Exclude<CredentialStatus, { kind: "ready" }>
 export type PageSearchKeyAction = "append" | "delete" | "submit" | "close" | "next" | "previous" | "ignore"
 
 export interface RenderTuiOptions {
+  env?: RuntimeEnv
   demo?: boolean
 }
 
-const demoCredentialStatus: CredentialStatus = {
-  kind: "ready",
-  auth: {
-    config: {
-      version: 1,
-      atlassian: {
-        siteUrl: "https://example.atlassian.net",
-        email: "demo@example.com",
-        spaceKeys: ["ENG", "OPS", "ARCH", "PLAT", "TEAM"],
-        defaultSpaceKey: "ENG",
-        apiTokenEnv: "ATLASSIAN_API_TOKEN",
-      },
-    },
-    apiToken: null,
-    paths: {
-      configDir: "demo://lazyconfluence",
-      configFile: "demo://lazyconfluence/config.json",
-      credentialFile: "demo://lazyconfluence/atlassian.env",
-    },
-  },
-}
-
 export async function renderTui(options: RenderTuiOptions = {}) {
-  const dataSource = options.demo ? createMockTuiDataSource() : undefined
+  const runtime = createTuiRuntime({ env: options.env ?? (options.demo === undefined ? defaultRuntimeEnv() : runtimeEnvFromLegacyDemo(options.demo)) })
 
-  render(() => <App credentialStatus={options.demo ? demoCredentialStatus : undefined} dataSource={dataSource} />, {
+  render(() => <App runtime={runtime} />, {
     targetFps: 30,
     exitOnCtrlC: true,
     backgroundColor: theme.bg,
@@ -86,13 +68,16 @@ export async function renderTui(options: RenderTuiOptions = {}) {
   })
 }
 
-export function App(props: { credentialStatus?: CredentialStatus; dataSource?: TuiDataSource; disableTreeSitter?: boolean; initialPageViewMode?: PageViewMode } = {}) {
+export function App(props: { credentialStatus?: CredentialStatus; dataSource?: TuiSource; disableTreeSitter?: boolean; initialPageViewMode?: PageViewMode; runtime?: TuiRuntime; runtimeLabel?: string } = {}) {
   const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
-  const dataSource = props.dataSource ?? createRepositoryTuiDataSource()
+  const ownedRuntime = props.runtime ?? (props.dataSource ? null : createTuiRuntime({ env: "prod" }))
+  const dataSource = props.dataSource ?? ownedRuntime?.source
+  if (!dataSource) throw new Error("App requires a TUI data source.")
+  const runtimeLabel = props.runtimeLabel ?? ownedRuntime?.label ?? "custom source"
   const initialSpaceKey = dataSource.getDefaultSpaceKey() ?? "LOCAL"
   const initialPageId = dataSource.getDefaultPageId(initialSpaceKey) ?? emptyPageId
-  const [credentialStatus, setCredentialStatus] = createSignal<CredentialStatus | null>(props.credentialStatus ?? null)
+  const [credentialStatus, setCredentialStatus] = createSignal<CredentialStatus | null>(props.credentialStatus ?? ownedRuntime?.credentialStatus ?? null)
   const [activeSpaceKey, setActiveSpaceKey] = createSignal(initialSpaceKey)
   const initialPageViewMode = props.initialPageViewMode ?? "current"
   const initialViewPageId = dataSource.getDefaultPageId(initialSpaceKey, initialPageViewMode) ?? emptyPageId
@@ -144,6 +129,8 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   })
   const readerPage = createMemo(() => {
     draftRevision()
+    if (selectedPageId() === emptyPageId) return emptyReaderPage(space())
+
     return dataSource.getReaderPage(selectedPageId(), pageViewMode()) ?? emptyReaderPage(space())
   })
   const draftStatus = createMemo(() => {
@@ -174,7 +161,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   })
 
   onMount(() => {
-    if (props.credentialStatus) return
+    if (credentialStatus()) return
 
     let cancelled = false
     void loadCredentialStatus().then((status) => {
@@ -769,7 +756,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
 
   return (
     <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.bg}>
-      <Header page={readerPage()} spaceName={space().name} syncState={space().syncState} draftStatus={draftStatus()} stagedCount={stagedChanges().length} onOpenOverview={() => openChanges()} />
+      <Header page={readerPage()} spaceName={space().name} syncState={space().syncState} draftStatus={draftStatus()} stagedCount={stagedChanges().length} runtimeLabel={runtimeLabel} onOpenOverview={() => openChanges()} />
       <Show when={credentialWarning()} fallback={<box height={0} />}>{(status) => <CredentialNotice status={status()} />}</Show>
       <box flexGrow={1} minHeight={0} flexDirection={isNarrow() ? "column" : "row"} paddingX={1}>
         <Navigator rows={treeRows()} selectedPageId={selectedPageId()} focused={focusPane() === "navigator"} viewMode={pageViewMode()} onSetViewMode={switchPageView} />
@@ -851,10 +838,10 @@ function CredentialNotice(props: { status: CredentialWarning }) {
   )
 }
 
-function Header(props: { page: ReaderPage; spaceName: string; syncState: string; draftStatus: PageDraftStatus | null; stagedCount: number; onOpenOverview: () => void }) {
+function Header(props: { page: ReaderPage; spaceName: string; syncState: string; draftStatus: PageDraftStatus | null; stagedCount: number; runtimeLabel: string; onOpenOverview: () => void }) {
   const syncColor = () => (props.syncState === "fresh" ? theme.good : props.syncState === "stale" ? theme.warn : theme.danger)
   const statusColor = () => (props.draftStatus === "staged" ? theme.good : props.draftStatus === "draft" ? theme.warn : syncColor())
-  const statusText = () => props.draftStatus ? `${props.draftStatus} · ${props.syncState}` : props.syncState
+  const statusText = () => `${props.runtimeLabel} · ${props.draftStatus ? `${props.draftStatus} · ` : ""}${props.syncState}`
 
   return (
     <box height={6} border borderStyle="single" borderColor={theme.border} paddingX={1} flexDirection="column">

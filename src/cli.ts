@@ -5,6 +5,7 @@ import { ATLASSIAN_API_TOKEN_URL, createLocalConfig, loadAtlassianAuth, parseSpa
 import { editPageDraftInExternalEditor, formatMarkdownDiff, readEditableDraftInput, savePageDraft } from "./editing"
 import { openIndexRepository, type IndexRepository, type PageDraftStatus } from "./index/repository"
 import { formatRepairReport, repairBodyArtifacts, RepairServiceError } from "./repair"
+import { defaultRuntimeEnv, parseRuntimeEnv, type RuntimeEnv } from "./runtime/env"
 import { formatSyncReport, syncConfluence, SyncServiceError, type SyncProgressEvent, type SyncReport } from "./sync"
 import { renderTui } from "./tui/app"
 
@@ -13,14 +14,18 @@ export async function runCli(args: string[]) {
 
   switch (command) {
     case undefined:
-      await renderTui({ demo: isDemoEnv() })
+      await renderTui({ env: defaultRuntimeEnv() })
       return
     case "tui":
       await runTuiCommand(args.slice(1))
       return
+    case "dev":
     case "--demo":
     case "demo":
-      await renderTui({ demo: true })
+      await renderTui({ env: "dev" })
+      return
+    case "prod":
+      await renderTui({ env: "prod" })
       return
     case "init":
       await runInit()
@@ -63,31 +68,27 @@ export async function runCli(args: string[]) {
       return
     default:
       console.error(`Unknown command: ${command}`)
-      console.error("Usage: lazyconfluence [tui|demo|init|doctor|sync|repair|search|edit|draft|drafts|stage|unstage|discard|diff|preview]")
+      console.error("Usage: lazyconfluence [tui|dev|prod|demo|init|doctor|sync|repair|search|edit|draft|drafts|stage|unstage|discard|diff|preview]")
       process.exitCode = 1
   }
 }
 
 async function runTuiCommand(args: string[]) {
-  let demo = isDemoEnv()
+  let env: RuntimeEnv = defaultRuntimeEnv()
 
   for (const arg of args) {
-    if (arg === "--demo") {
-      demo = true
+    if (["dev", "prod", "demo", "--dev", "--prod", "--demo"].includes(arg)) {
+      env = parseRuntimeEnv(arg)
       continue
     }
 
     console.error(`Unknown tui option: ${arg}`)
-    console.error("Usage: lazyconfluence tui [--demo]")
+    console.error("Usage: lazyconfluence tui [dev|prod|--demo]")
     process.exitCode = 1
     return
   }
 
-  await renderTui({ demo })
-}
-
-function isDemoEnv() {
-  return process.env.LAZYCONFLUENCE_DEMO === "1"
+  await renderTui({ env })
 }
 
 async function runSyncCommand(args: string[]) {

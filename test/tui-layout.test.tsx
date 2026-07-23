@@ -8,7 +8,8 @@ import { createLocalConfig } from "../src/config"
 import type { CredentialStatus } from "../src/config"
 import { openIndexRepository } from "../src/index/repository"
 import type { PageBodyArtifact, PageDraft } from "../src/index/repository"
-import { createMockTuiDataSource, createRepositoryTuiDataSource } from "../src/tui/data"
+import { createDevTuiRuntime } from "../src/tui/runtime"
+import { createRepositoryTuiDataSource } from "../src/tui/data"
 import type { IndexedPage, SpaceSummary } from "../src/model"
 
 describe("main TUI layout", () => {
@@ -53,8 +54,8 @@ describe("main TUI layout", () => {
     }
   })
 
-  test("renders synthetic demo pages without the local index", async () => {
-    const rendered = await testRender(() => <App credentialStatus={readyStatus} dataSource={createMockTuiDataSource()} disableTreeSitter />, { width: 120, height: 36 })
+  test("renders synthetic dev pages without the local index", async () => {
+    const rendered = await testRender(() => <App runtime={createDevTuiRuntime()} disableTreeSitter />, { width: 120, height: 36 })
 
     await rendered.renderOnce()
 
@@ -64,7 +65,23 @@ describe("main TUI layout", () => {
     expect(frame).toContain("Engineering Home")
     expect(frame).toContain("Project Architecture")
     expect(frame).toContain("Start here for engineering norms")
+    expect(frame).toContain("DEV mock")
     expect(frame).not.toContain("Local synced content from SQLite")
+  })
+
+  test("renders synthetic dev archived empty state without a mock page crash", async () => {
+    const rendered = await testRender(() => <App runtime={createDevTuiRuntime()} disableTreeSitter initialPageViewMode="archived" />, { width: 120, height: 36 })
+
+    try {
+      await rendered.renderOnce()
+      const frame = rendered.captureCharFrame()
+
+      expect(frame).toContain("[Archived]")
+      expect(frame).toContain("No local pages indexed")
+      expect(frame).toContain("DEV mock")
+    } finally {
+      rendered.renderer.destroy()
+    }
   })
 
   test("renders pages with missing updated timestamps without crashing", async () => {
@@ -153,6 +170,30 @@ describe("main TUI layout", () => {
       expect(output).toContain("Archived Architecture")
       expect(output).toContain("Archived in Confluence")
       expect(output).toContain("read-only")
+    } finally {
+      await setup.cleanup()
+    }
+  })
+
+  test("renders prod archived empty state when no archived rows exist", async () => {
+    const setup = await createTuiTestSetup()
+
+    try {
+      const output = await withProcessEnv(setup.env, async () => {
+        const rendered = await testRender(() => <App credentialStatus={readyStatus} disableTreeSitter initialPageViewMode="archived" />, { width: 120, height: 36 })
+
+        try {
+          await rendered.renderOnce()
+          return rendered.captureCharFrame()
+        } finally {
+          rendered.renderer.destroy()
+        }
+      })
+
+      expect(output).toContain("[Archived]")
+      expect(output).toContain("No local pages indexed")
+      expect(output).toContain("PROD local")
+      expect(output).not.toContain("Real Synced Architecture")
     } finally {
       await setup.cleanup()
     }

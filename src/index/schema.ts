@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite"
 
-export const INDEX_SCHEMA_VERSION = 8
+export const INDEX_SCHEMA_VERSION = 9
 
 export function applyIndexSchema(database: Database) {
   database.run("PRAGMA foreign_keys = ON")
@@ -29,6 +29,7 @@ export function applyIndexSchema(database: Database) {
   }
 
   database.run("CREATE INDEX IF NOT EXISTS pages_space_status_parent_idx ON pages(space_key, remote_status, parent_id, title COLLATE NOCASE)")
+  database.run("CREATE INDEX IF NOT EXISTS media_assets_page_idx ON media_assets(page_id, node_id)")
 
   if (currentVersion < INDEX_SCHEMA_VERSION) {
     database.run(`PRAGMA user_version = ${INDEX_SCHEMA_VERSION}`)
@@ -118,6 +119,19 @@ CREATE TABLE IF NOT EXISTS page_bodies (
 );
 
 CREATE INDEX IF NOT EXISTS page_bodies_updated_at_idx ON page_bodies(updated_at);
+
+CREATE TABLE IF NOT EXISTS media_assets (
+  page_id TEXT NOT NULL REFERENCES pages(page_id) ON DELETE CASCADE,
+  node_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  source_url TEXT,
+  cache_path TEXT,
+  content_type TEXT,
+  width INTEGER,
+  height INTEGER,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(page_id, node_id)
+);
 
 CREATE TABLE IF NOT EXISTS page_drafts (
   page_id TEXT PRIMARY KEY REFERENCES pages(page_id) ON DELETE CASCADE,

@@ -1,6 +1,6 @@
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
 import { App, NewPageOverlay, StagedChangesOverlay, documentHorizontalScrollDeltaForKey, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, type SearchKeyLike } from "../src/tui/app"
@@ -198,6 +198,48 @@ describe("main TUI layout", () => {
       await setup.cleanup()
     }
   })
+
+  test("renders cached image previews from image placeholders", async () => {
+    const setup = await createTuiTestSetup({ home: { ...home, contentMarkdown: imageMarkdown, snippet: "Diagram below." } })
+    const imagePath = join(dirname(setup.dbPath), "system-overview.png")
+    let repository: ReturnType<typeof openIndexRepository> | null = openIndexRepository({ path: setup.dbPath })
+
+    try {
+      await writeFile(imagePath, Buffer.from(tinyPngBase64, "base64"))
+      repository.upsertMediaAsset({
+        pageId: "local-home",
+        nodeId: "image-node",
+        title: "System overview",
+        sourceUrl: null,
+        cachePath: imagePath,
+        contentType: "image/png",
+        width: 1,
+        height: 1,
+        updatedAt: "2026-07-23T12:00:00Z",
+      })
+      repository.close()
+      repository = null
+
+      const output = await withProcessEnv(setup.env, async () => {
+        const rendered = await testRender(() => <App credentialStatus={readyStatus} disableTreeSitter />, { width: 120, height: 36 })
+
+        try {
+          await rendered.renderOnce()
+          return rendered.captureCharFrame()
+        } finally {
+          rendered.renderer.destroy()
+        }
+      })
+
+      expect(output).toContain("IMAGE PREVIEW")
+      expect(output).toContain("System overview")
+      expect(output).toContain("cached PNG 1x1")
+    } finally {
+      repository?.close()
+      await setup.cleanup()
+    }
+  })
+
 
   test("keeps navigator siblings in synced tree order", async () => {
     const setup = await createTuiTestSetup({ architecture: { ...architecture, treeOrder: 1 }, extraPages: [zebraFirstChild] })
@@ -708,6 +750,18 @@ const homeBody: PageBodyArtifact = {
   renderedMarkdown: "# Local Engineering Home\n\nLocal synced content from SQLite.",
   updatedAt: "2026-07-21T10:00:00Z",
 }
+
+const imageMarkdown = [
+  "# Local Engineering Home",
+  "",
+  "Diagram below.",
+  "",
+  "> [image: System overview]",
+  "> Attachment on this Confluence page.",
+  '<!-- confluence-opaque node="image-node" type="ac:image" -->',
+].join("\n")
+
+const tinyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
 
 const otherPage: IndexedPage = {
   pageId: "ops-home",

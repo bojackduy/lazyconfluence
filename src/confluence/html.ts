@@ -123,10 +123,11 @@ function addMatchedBlock(input: ParseConfluenceStorageInput, blocks: DocumentBlo
 function parseImageBlock(inner: string, attrs: Record<string, string>, nodeId: string, sourcePath: string, sourceType: string): DocumentBlock {
   const attachmentAttrs = firstNestedAttributes(inner, "ri:attachment")
   const urlAttrs = firstNestedAttributes(inner, "ri:url")
-  const title = compactInlineText(attrs["ac:title"] || attrs["ac:alt"] || attachmentAttrs["ri:filename"] || urlAttrs["ri:value"] || "image")
+  const filename = attachmentAttrs["ri:filename"] || null
+  const title = compactInlineText(attrs["ac:title"] || attrs["ac:alt"] || filename || urlAttrs["ri:value"] || "image")
   const url = urlAttrs["ri:value"] || null
 
-  return { type: "image", nodeId, source: { path: sourcePath, type: sourceType }, sourceType, title, url }
+  return { type: "image", nodeId, source: { path: sourcePath, type: sourceType }, sourceType, title, filename, url }
 }
 
 function mergeAdjacentCodeParagraph(blocks: DocumentBlock[], block: DocumentBlock) {

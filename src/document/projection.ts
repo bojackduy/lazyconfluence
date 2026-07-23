@@ -1,4 +1,4 @@
-import type { CanonicalDocument, DocumentBlock, InlineNode, LinkInline } from "./model"
+import type { CanonicalDocument, DocumentBlock, ImageBlock, InlineNode, LinkInline } from "./model"
 
 export function renderDocumentMarkdown(document: CanonicalDocument) {
   return document.blocks.map(renderBlockMarkdown).filter(Boolean).join("\n\n")
@@ -35,6 +35,10 @@ export function documentLinks(document: CanonicalDocument) {
   }
 
   return links
+}
+
+export function documentImages(document: CanonicalDocument): ImageBlock[] {
+  return document.blocks.filter((block): block is ImageBlock => block.type === "image")
 }
 
 export function inlineText(inlines: InlineNode[]) {

@@ -65,6 +65,7 @@ export interface TableCell {
 export interface ImageBlock extends BaseDocumentNode {
   type: "image"
   title: string
+  filename: string | null
   url: string | null
   sourceType: string
 }

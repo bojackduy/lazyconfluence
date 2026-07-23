@@ -20,6 +20,8 @@ export interface JsonResponseLike {
   status: number
   statusText: string
   json: () => Promise<unknown>
+  arrayBuffer?: () => Promise<ArrayBuffer>
+  headers?: { get: (name: string) => string | null } | Record<string, string | undefined>
 }
 
 export interface ConfluenceSpace {
@@ -76,6 +78,12 @@ export interface CreateConfluencePageInput {
   parentId?: string | null
   title: string
   storageValue: string
+}
+
+export interface ConfluenceBinaryAsset {
+  url: string
+  bytes: Uint8Array
+  contentType: string | null
 }
 
 export class ConfluenceClientError extends Error {
@@ -148,6 +156,18 @@ export class ConfluenceClient {
     return this.paginatedResults<ConfluencePage>(`/api/v2/${resource}/${encodeURIComponent(contentId)}/direct-children`, { limit })
   }
 
+  attachmentImageUrl(pageId: string, filename: string) {
+    return confluenceApiUrl(this.baseUrl, `/download/attachments/${encodeURIComponent(pageId)}/${encodeURIComponent(filename)}`)
+  }
+
+  async fetchAttachmentImage(pageId: string, filename: string): Promise<ConfluenceBinaryAsset> {
+    const url = this.attachmentImageUrl(pageId, filename)
+    const response = await this.request(url, { headers: { Accept: "image/*" } })
+    if (!response.arrayBuffer) throw new ConfluenceClientError(`Confluence attachment response did not include binary data for ${url}`)
+
+    return { url, bytes: new Uint8Array(await response.arrayBuffer()), contentType: readHeader(response, "content-type") }
+  }
+
   async updatePage(input: UpdateConfluencePageInput) {
     const payload = {
       id: input.id,
@@ -212,6 +232,14 @@ export class ConfluenceClient {
 
   private async requestJson(pathOrUrl: string, params: QueryParams = {}, init: Omit<FetchInitLike, "signal"> = {}) {
     const url = confluenceApiUrl(this.baseUrl, pathOrUrl, params)
+    const response = await this.request(url, init)
+
+    if (response.status === 204) return {}
+
+    return response.json()
+  }
+
+  private async request(url: string, init: Omit<FetchInitLike, "signal"> = {}) {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs)
 
@@ -229,9 +257,7 @@ export class ConfluenceClient {
 
     if (!response.ok) throw new ConfluenceClientError(`Confluence returned HTTP ${response.status} ${response.statusText} for ${url}`, response.status)
 
-    if (response.status === 204) return {}
-
-    return response.json()
+    return response
   }
 }
 
@@ -305,6 +331,16 @@ function readNextPath(payload: unknown) {
   const next = links.next
 
   return typeof next === "string" && next ? next : null
+}
+
+function readHeader(response: JsonResponseLike, name: string) {
+  const headers = response.headers
+  if (!headers) return null
+  if (typeof headers.get === "function") return headers.get(name)
+
+  const headerRecord = headers as Record<string, string | undefined>
+
+  return headerRecord[name] ?? headerRecord[name.toLowerCase()] ?? null
 }
 
 function spaceFromPayload(value: unknown): ConfluenceSpace {

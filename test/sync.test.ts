@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
@@ -168,6 +168,47 @@ describe("sync service", () => {
       try {
         expect(repository.getSpace("ENG")).toBeNull()
         expect(repository.getSpace("OPS")?.pageCount).toBe(1)
+      } finally {
+        repository.close()
+      }
+    } finally {
+      await setup.cleanup()
+    }
+  })
+
+  test("caches Confluence attachment images during explicit sync", async () => {
+    const setup = await createSyncTestSetup()
+    const calls: string[] = []
+
+    try {
+      const report = await syncConfluence({
+        env: setup.env,
+        now: fixedClock(),
+        fetch: jsonFetch(calls, {
+          "/wiki/api/v2/spaces?keys=ENG&limit=250": {
+            results: [{ id: "10", key: "ENG", name: "Engineering", homepageId: "100" }],
+          },
+          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage&status=current": {
+            results: [pagePayload("100", "Engineering Home", null, '<p>Diagram below.</p><ac:image ac:alt="System overview"><ri:attachment ri:filename="diagram.png" /></ac:image>')],
+            _links: {},
+          },
+          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage&status=archived": { results: [], _links: {} },
+          "/wiki/api/v2/pages/100/direct-children?limit=250": { results: [], _links: {} },
+          "/wiki/download/attachments/100/diagram.png": binaryResponse(Buffer.from(tinyPngBase64, "base64"), "image/png"),
+        }),
+      })
+
+      expect(report.complete).toBe(true)
+      expect(calls).toContain("https://example.atlassian.net/wiki/download/attachments/100/diagram.png")
+
+      const repository = openIndexRepository({ path: setup.dbPath })
+      try {
+        const assets = repository.listMediaAssets("100")
+        expect(assets).toHaveLength(1)
+        expect(assets[0]).toMatchObject({ pageId: "100", title: "System overview", contentType: "image/png" })
+        expect(assets[0]?.cachePath).toContain("media/100/")
+        expect(await stat(assets[0]?.cachePath ?? "")).toMatchObject({ size: Buffer.from(tinyPngBase64, "base64").length })
+        expect(repository.getPageBody("100")?.renderedMarkdown).toContain("> [image: System overview]")
       } finally {
         repository.close()
       }
@@ -559,6 +600,19 @@ function response(body: unknown, ok = true, status = 200, statusText = "OK") {
   }
 }
 
+function binaryResponse(bytes: Uint8Array, contentType: string) {
+  return {
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    json: async () => ({}),
+    arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    headers: { get: (name: string) => name.toLowerCase() === "content-type" ? contentType : null },
+  }
+}
+
 function isResponseLike(value: unknown): value is ReturnType<typeof response> {
   return typeof value === "object" && value !== null && "ok" in value && "json" in value
 }
+
+const tinyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"

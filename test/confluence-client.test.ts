@@ -223,6 +223,34 @@ describe("Confluence client", () => {
     expect(calls).toEqual([{ url: "https://example.atlassian.net/wiki/api/v2/pages/101", method: "DELETE" }])
   })
 
+  test("downloads attachment image bytes", async () => {
+    const calls: Array<{ url: string; accept?: string }> = []
+    const bytes = new Uint8Array([1, 2, 3, 4])
+    const client = new ConfluenceClient({
+      siteUrl: "https://example.atlassian.net/wiki",
+      email: "reader@example.com",
+      apiToken: "token",
+      fetch: async (url, init) => {
+        calls.push({ url, accept: init?.headers?.Accept })
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({}),
+          arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+          headers: { get: (name: string) => name.toLowerCase() === "content-type" ? "image/png" : null },
+        }
+      },
+    })
+
+    const image = await client.fetchAttachmentImage("100", "diagram v1.png")
+
+    expect(calls).toEqual([{ url: "https://example.atlassian.net/wiki/download/attachments/100/diagram%20v1.png", accept: "image/*" }])
+    expect(image.url).toBe(calls[0]?.url)
+    expect([...image.bytes]).toEqual([1, 2, 3, 4])
+    expect(image.contentType).toBe("image/png")
+  })
+
   test("times out requests that do not finish", async () => {
     const calls: string[] = []
     const client = new ConfluenceClient({

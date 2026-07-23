@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite"
 import type { CanonicalDocument, MappingSidecar, SourceRepresentation } from "../document/model"
-import type { IndexedPage, PageLink, PageLinkKind, PageStatusFilter, SearchResult, SpaceSummary, SyncState } from "../model"
+import type { IndexedPage, MediaAsset, PageLink, PageLinkKind, PageStatusFilter, SearchResult, SpaceSummary, SyncState } from "../model"
 import { openIndexDatabase, type IndexDatabase, type OpenIndexDatabaseOptions } from "./db"
 import { compareSearchResults, ftsPrefixQuery, normalizeSearchText, pageUrlKey, scorePageSearchResult } from "./search"
 
@@ -74,6 +74,18 @@ interface PageCreateRow {
 interface PageDeleteRow {
   page_id: string
   created_at: string
+  updated_at: string
+}
+
+interface MediaAssetRow {
+  page_id: string
+  node_id: string
+  title: string
+  source_url: string | null
+  cache_path: string | null
+  content_type: string | null
+  width: number | null
+  height: number | null
   updated_at: string
 }
 
@@ -313,6 +325,35 @@ export class IndexRepository {
     return bodies.length
   }
 
+  upsertMediaAsset(asset: MediaAsset) {
+    return this.upsertMediaAssets([asset])
+  }
+
+  upsertMediaAssets(assets: MediaAsset[]) {
+    if (!assets.length) return 0
+
+    const statement = this.database.query(`
+      INSERT INTO media_assets (
+        page_id, node_id, title, source_url, cache_path, content_type, width, height, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(page_id, node_id) DO UPDATE SET
+        title = excluded.title,
+        source_url = excluded.source_url,
+        cache_path = excluded.cache_path,
+        content_type = excluded.content_type,
+        width = excluded.width,
+        height = excluded.height,
+        updated_at = excluded.updated_at
+    `)
+
+    for (const asset of assets) {
+      statement.run(asset.pageId, asset.nodeId, asset.title, asset.sourceUrl, asset.cachePath, asset.contentType, asset.width, asset.height, asset.updatedAt)
+    }
+
+    return assets.length
+  }
+
   getSpace(key: string): SpaceSummary | null {
     const row = this.database.query(`
       SELECT spaces.key,
@@ -394,6 +435,16 @@ export class IndexRepository {
     const rows = this.database.query("SELECT * FROM page_bodies ORDER BY page_id COLLATE NOCASE").all() as PageBodyRow[]
 
     return rows.map(pageBodyFromRow)
+  }
+
+  listMediaAssets(pageId: string): MediaAsset[] {
+    const rows = this.database.query("SELECT * FROM media_assets WHERE page_id = ? ORDER BY node_id COLLATE NOCASE").all(pageId) as MediaAssetRow[]
+
+    return rows.map(mediaAssetFromRow)
+  }
+
+  deleteMediaAssetsFromPage(pageId: string) {
+    return this.database.query("DELETE FROM media_assets WHERE page_id = ?").run(pageId).changes
   }
 
   deleteLinksFromPage(pageId: string) {
@@ -845,6 +896,20 @@ function pageDeleteFromRow(row: PageDeleteRow): PageDelete {
   return {
     pageId: String(row.page_id),
     createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  }
+}
+
+function mediaAssetFromRow(row: MediaAssetRow): MediaAsset {
+  return {
+    pageId: String(row.page_id),
+    nodeId: String(row.node_id),
+    title: String(row.title),
+    sourceUrl: row.source_url === null ? null : String(row.source_url),
+    cachePath: row.cache_path === null ? null : String(row.cache_path),
+    contentType: row.content_type === null ? null : String(row.content_type),
+    width: row.width === null ? null : Number(row.width),
+    height: row.height === null ? null : Number(row.height),
     updatedAt: String(row.updated_at),
   }
 }

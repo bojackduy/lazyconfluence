@@ -168,6 +168,7 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
         backlinks: repository.getIncomingLinks(page.pageId),
         outline: extractOutline(contentMarkdown),
         snippet: draft ? extractSnippet(contentMarkdown, page.snippet) : page.snippet,
+        mediaAssets: repository.listMediaAssets(page.pageId),
       }
     },
     listStagedDraftChanges: (spaceKey) => repository.listPageDrafts("staged")

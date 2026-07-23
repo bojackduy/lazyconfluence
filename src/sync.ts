@@ -1,9 +1,13 @@
+import { mkdir, writeFile } from "node:fs/promises"
+import { dirname, extname, join } from "node:path"
 import type { FetchLike, ConfluencePage, ConfluenceSpace } from "./confluence/client"
 import { ConfluenceClient, ConfluenceClientError } from "./confluence/client"
 import { mapConfluenceFolder, mapConfluencePage, mapConfluenceSpace } from "./confluence/mapper"
+import { documentImages } from "./document/projection"
+import type { ImageBlock } from "./document/model"
 import { loadAtlassianAuth } from "./config"
 import { openIndexRepository, type IndexRepository, type PageBodyArtifact } from "./index/repository"
-import type { IndexedPage, PageLink } from "./model"
+import type { IndexedPage, MediaAsset, PageLink } from "./model"
 
 export interface SyncConfluenceOptions {
   env?: NodeJS.ProcessEnv
@@ -172,6 +176,7 @@ async function syncSpace(input: {
   const pages: IndexedPage[] = []
   const links: PageLink[] = []
   const bodyArtifacts: PageBodyArtifact[] = []
+  const mediaAssets: MediaAsset[] = []
 
   for (const page of nodeById.values()) {
     const ancestors = ancestorsFor(page, nodeById)
@@ -195,6 +200,7 @@ async function syncSpace(input: {
 
       pages.push(mapped.indexedPage)
       links.push(...mapped.links)
+      mediaAssets.push(...await cacheMediaAssetsForPage({ client: input.client, repository: input.repository, pageId: mapped.indexedPage.pageId, images: documentImages(mapped.document), syncedAt: input.syncedAt }))
       bodyArtifacts.push({
         pageId: mapped.indexedPage.pageId,
         remoteVersion: mapped.remoteVersion,
@@ -219,11 +225,68 @@ async function syncSpace(input: {
   emitProgress(input.onProgress, { type: "writing-space", message: `Writing ${pages.length} pages, ${links.length} links, and ${bodyArtifacts.length} body artifacts for ${input.space.key}.`, spaceKey: input.space.key, spaceName: input.space.name, count: pages.length })
   input.repository.upsertSpace(mapConfluenceSpace(input.space, { lastSyncedAt: input.syncedAt, pageCount: pages.length }))
   input.repository.upsertPages(pages)
+  for (const body of bodyArtifacts) input.repository.deleteMediaAssetsFromPage(body.pageId)
+  input.repository.upsertMediaAssets(mediaAssets)
   input.repository.upsertPageBodies(bodyArtifacts)
   input.repository.upsertLinks(links)
   if (canPruneSyncedSpace(pageFailures)) input.repository.prunePagesInSpace(input.space.key, new Set(pages.map((page) => page.pageId)))
 
   return { pagesIndexed: pages.length, linksIndexed: links.length, bodyArtifactsPersisted: bodyArtifacts.length, failures: pageFailures }
+}
+
+async function cacheMediaAssetsForPage(input: { client: ConfluenceClient; repository: IndexRepository; pageId: string; images: ImageBlock[]; syncedAt: string }): Promise<MediaAsset[]> {
+  const assets: MediaAsset[] = []
+
+  for (const image of input.images) {
+    const sourceUrl = image.url ?? (image.filename ? input.client.attachmentImageUrl(input.pageId, image.filename) : null)
+    let cachePath: string | null = null
+    let contentType: string | null = null
+
+    if (image.filename && input.repository.path && input.repository.path !== ":memory:") {
+      try {
+        const downloaded = await input.client.fetchAttachmentImage(input.pageId, image.filename)
+        const targetPath = mediaCachePath(input.repository.path, input.pageId, image.nodeId, image.filename, downloaded.contentType)
+        await mkdir(dirname(targetPath), { recursive: true, mode: 0o700 })
+        await writeFile(targetPath, downloaded.bytes)
+        cachePath = targetPath
+        contentType = downloaded.contentType
+      } catch {
+        // Keep sync local tree/body successful; the TUI will show the image placeholder.
+      }
+    }
+
+    assets.push({
+      pageId: input.pageId,
+      nodeId: image.nodeId,
+      title: image.title,
+      sourceUrl,
+      cachePath,
+      contentType,
+      width: null,
+      height: null,
+      updatedAt: input.syncedAt,
+    })
+  }
+
+  return assets
+}
+
+function mediaCachePath(databasePath: string, pageId: string, nodeId: string, filename: string, contentType: string | null) {
+  const extension = mediaExtension(filename, contentType)
+  return join(dirname(databasePath), "media", sanitizePathSegment(pageId), `${sanitizePathSegment(nodeId)}${extension}`)
+}
+
+function mediaExtension(filename: string, contentType: string | null) {
+  const existing = extname(filename)
+  if (existing) return existing.toLowerCase()
+  if (contentType === "image/png") return ".png"
+  if (contentType === "image/jpeg") return ".jpg"
+  if (contentType === "image/gif") return ".gif"
+  return ".img"
+}
+
+function sanitizePathSegment(value: string) {
+  return value.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120) || "asset"
 }
 
 async function discoverPageChildren(input: {

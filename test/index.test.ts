@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { Database } from "bun:sqlite"
 import { describe, expect, test } from "bun:test"
 import type { PageBodyArtifact } from "../src/index/repository"
-import type { IndexedPage, PageLink, SpaceSummary } from "../src/model"
+import type { IndexedPage, MediaAsset, PageLink, SpaceSummary } from "../src/model"
 import { resolveIndexDatabasePath } from "../src/index/db"
 import { openIndexRepository } from "../src/index/repository"
 
@@ -116,6 +116,28 @@ describe("local index repository", () => {
       expect(repository.getPage("architecture")?.contentMarkdown).toBe(architecture.contentMarkdown)
     })
   })
+
+  test("persists cached media asset metadata", async () => {
+    await withSeededRepository((repository) => {
+      const asset: MediaAsset = {
+        pageId: "architecture",
+        nodeId: "lc_architecture_0002",
+        title: "Architecture diagram",
+        sourceUrl: "https://example.atlassian.net/wiki/download/attachments/101/architecture.png",
+        cachePath: "/tmp/lazyconfluence-media/architecture.png",
+        contentType: "image/png",
+        width: 640,
+        height: 320,
+        updatedAt: "2026-07-23T12:00:00Z",
+      }
+
+      expect(repository.upsertMediaAsset(asset)).toBe(1)
+      expect(repository.listMediaAssets("architecture")).toEqual([asset])
+      expect(repository.deleteMediaAssetsFromPage("architecture")).toBe(1)
+      expect(repository.listMediaAssets("architecture")).toEqual([])
+    })
+  })
+
 
   test("persists local page drafts and staged lifecycle", async () => {
     await withSeededRepository((repository) => {
@@ -278,7 +300,7 @@ describe("local index repository", () => {
 
       const repository = openIndexRepository({ path: dbPath })
       try {
-        expect(repository.getStats().schemaVersion).toBe(8)
+        expect(repository.getStats().schemaVersion).toBe(9)
         expect(repository.getPageCreate("create-root")).toMatchObject({ parentPageId: null, parentCreateId: null, title: "Root Plan" })
         repository.upsertPageCreate({
           localId: "create-child",

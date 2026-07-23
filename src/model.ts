@@ -26,6 +26,18 @@ export interface IndexedPage {
   remoteStatus?: string
 }
 
+export interface MediaAsset {
+  pageId: string
+  nodeId: string
+  title: string
+  sourceUrl: string | null
+  cachePath: string | null
+  contentType: string | null
+  width: number | null
+  height: number | null
+  updatedAt: string
+}
+
 export type PageLinkKind = "internal" | "external"
 
 export interface PageLink {
@@ -41,6 +53,7 @@ export interface ReaderPage extends IndexedPage {
   outgoingLinks: PageLink[]
   backlinks: PageLink[]
   outline: string[]
+  mediaAssets?: MediaAsset[]
 }
 
 export interface SearchResult {

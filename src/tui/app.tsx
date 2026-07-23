@@ -2,6 +2,8 @@ import { render, useKeyboard, useRenderer, useTerminalDimensions } from "@opentu
 import {
   BoxRenderable,
   CodeRenderable,
+  type OptimizedBuffer,
+  RGBA,
   TextAttributes,
   TextRenderable,
   type TextareaRenderable,
@@ -14,12 +16,14 @@ import {
   type TreeSitterClient,
 } from "@opentui/core"
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js"
-import type { FocusPane, IndexedPage, PageViewMode, ReaderPage, SearchResult, SpaceSearchResult } from "../model"
+import { decodeImageFile, type DecodedImage } from "../media/image"
+import type { FocusPane, IndexedPage, MediaAsset, PageViewMode, ReaderPage, SearchResult, SpaceSearchResult } from "../model"
 import { loadCredentialStatus, type CredentialStatus } from "../config"
 import type { PageDraftStatus } from "../index/repository"
 import type { ApplyPageDraftResult } from "../apply"
 import { defaultRuntimeEnv, runtimeEnvFromLegacyDemo, type RuntimeEnv } from "../runtime/env"
 import { emptyPageId, emptyReaderPage, emptySpaceSummary } from "./data"
+import { splitReaderImagePlaceholders, type ReaderContentPart } from "./media"
 import { createTuiRuntime, type TuiRuntime } from "./runtime"
 import type { TuiSource, TuiStagedChange } from "./source"
 import { markdownStyle, theme } from "./theme"
@@ -954,6 +958,7 @@ function navigatorDocumentKind(row: TreeRow): NavigatorDocumentKind {
 function Reader(props: { page: ReaderPage; focused: boolean; narrow: boolean; treeSitterClient?: TreeSitterClient; setDocumentScrollbox: (scrollbox: ScrollBoxRenderable) => void }) {
   const renderer = useRenderer()
   const renderCodeBlock = createReadableCodeBlockRenderer(renderer)
+  const contentParts = createMemo(() => splitReaderImagePlaceholders(props.page.contentMarkdown, props.page.mediaAssets ?? []))
 
   return (
     <box
@@ -978,24 +983,106 @@ function Reader(props: { page: ReaderPage; focused: boolean; narrow: boolean; tr
           </Show>
           <box height={1} />
           <scrollbox id="document-scrollbox" ref={props.setDocumentScrollbox} flexGrow={1} minHeight={0} scrollX scrollbarOptions={{ showArrows: false }} horizontalScrollbarOptions={{ showArrows: false }}>
-            <markdown
-              content={props.page.contentMarkdown}
-              syntaxStyle={markdownStyle}
-              fg={theme.text}
-              bg={theme.panelAlt}
-              width="100%"
-              conceal
-              concealCode={false}
-              treeSitterClient={props.treeSitterClient}
-              renderNode={renderCodeBlock}
-              tableOptions={{ style: "grid", widthMode: "full", columnFitter: "balanced", wrapMode: "word", cellPaddingX: 1, borderStyle: "rounded", borderColor: theme.codeBorder, selectable: true }}
-            />
+            <box flexDirection="column" width="100%">
+              <For each={contentParts()}>{(part) => part.kind === "markdown" ? (
+                <markdown
+                  content={part.content}
+                  syntaxStyle={markdownStyle}
+                  fg={theme.text}
+                  bg={theme.panelAlt}
+                  width="100%"
+                  conceal
+                  concealCode={false}
+                  treeSitterClient={props.treeSitterClient}
+                  renderNode={renderCodeBlock}
+                  tableOptions={{ style: "grid", widthMode: "full", columnFitter: "balanced", wrapMode: "word", cellPaddingX: 1, borderStyle: "rounded", borderColor: theme.codeBorder, selectable: true }}
+                />
+              ) : <ImagePreviewCard part={part} narrow={props.narrow} />}</For>
+            </box>
           </scrollbox>
         </box>
         <SideRail page={props.page} narrow={props.narrow} />
       </box>
     </box>
   )
+}
+
+function ImagePreviewCard(props: { part: Extract<ReaderContentPart, { kind: "image" }>; narrow: boolean }) {
+  const loaded = createMemo(() => loadImagePreview(props.part.asset))
+  const image = createMemo(() => imageFromLoadResult(loaded()))
+  const fallbackMessage = createMemo(() => messageFromLoadResult(loaded()))
+  const size = createMemo(() => image() ? imagePreviewSize(image()!, props.narrow) : { width: props.narrow ? 34 : 52, height: 4 })
+
+  return (
+    <box width="100%" height={image() ? size().height + 4 : 6} border borderStyle="rounded" borderColor={image() ? theme.good : theme.border} backgroundColor={theme.panel} paddingX={1} marginBottom={1} flexDirection="column">
+      <text height={1} fg={image() ? theme.good : theme.warn} attributes={1}>{image() ? "IMAGE PREVIEW" : "IMAGE PLACEHOLDER"}</text>
+      <text height={1} fg={theme.text}>{props.part.label}</text>
+      <Show when={image()} fallback={<ImagePreviewFallback part={props.part} message={fallbackMessage()} />}>
+        {(decoded) => (
+          <box flexDirection="column" width="100%">
+            <text height={1} fg={theme.subtle}>cached PNG {decoded().width}x{decoded().height}</text>
+            <box width={size().width} height={size().height} backgroundColor={theme.bg} buffered renderAfter={(buffer: OptimizedBuffer) => drawImagePreview(buffer, decoded())} />
+          </box>
+        )}
+      </Show>
+    </box>
+  )
+}
+
+function ImagePreviewFallback(props: { part: Extract<ReaderContentPart, { kind: "image" }>; message: string }) {
+  return (
+    <box flexDirection="column" width="100%">
+      <text height={1} fg={theme.subtle}>{props.part.details}</text>
+      <text height={1} fg={theme.subtle}>{props.message}</text>
+    </box>
+  )
+}
+
+type ImageLoadResult = { status: "ready"; image: DecodedImage } | { status: "error"; message: string }
+
+const imagePreviewCache = new Map<string, ImageLoadResult>()
+
+function loadImagePreview(asset: MediaAsset | null): ImageLoadResult {
+  if (!asset?.cachePath) return { status: "error", message: "No cached image file is available yet." }
+
+  const cached = imagePreviewCache.get(asset.cachePath)
+  if (cached) return cached
+
+  try {
+    const result: ImageLoadResult = { status: "ready", image: decodeImageFile(asset.cachePath) }
+    imagePreviewCache.set(asset.cachePath, result)
+    return result
+  } catch (error) {
+    const result: ImageLoadResult = { status: "error", message: errorMessage(error) }
+    imagePreviewCache.set(asset.cachePath, result)
+    return result
+  }
+}
+
+function imageFromLoadResult(result: ImageLoadResult) {
+  return result.status === "ready" ? result.image : null
+}
+
+function messageFromLoadResult(result: ImageLoadResult) {
+  return result.status === "error" ? result.message : "No cached image file is available yet."
+}
+
+function imagePreviewSize(image: DecodedImage, narrow: boolean) {
+  const maxWidth = narrow ? 34 : 58
+  const maxHeight = narrow ? 10 : 16
+  let width = maxWidth
+  let height = Math.max(3, Math.round((width * image.height / image.width) * 0.5))
+
+  if (height > maxHeight) {
+    height = maxHeight
+    width = Math.max(8, Math.round((height * image.width / image.height) * 2))
+  }
+
+  return { width, height }
+}
+
+function drawImagePreview(buffer: OptimizedBuffer, image: DecodedImage) {
+  buffer.drawGrayscaleBufferSupersampled(0, 0, image.grayscale, image.width, image.height, RGBA.fromHex(theme.text), RGBA.fromHex(theme.bg))
 }
 
 function createReadableCodeBlockRenderer(renderer: RenderContext): NonNullable<MarkdownOptions["renderNode"]> {

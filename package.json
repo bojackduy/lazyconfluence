@@ -1,6 +1,6 @@
 {
   "name": "@bojackduy/lazyconfluence",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Terminal-first Confluence document browser.",
   "homepage": "https://bojackduy.github.io/lazyconfluence/",
   "private": false,

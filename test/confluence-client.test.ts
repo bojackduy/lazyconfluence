@@ -232,21 +232,29 @@ describe("Confluence client", () => {
       apiToken: "token",
       fetch: async (url, init) => {
         calls.push({ url, accept: init?.headers?.Accept })
-        return {
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: async () => ({}),
-          arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
-          headers: { get: (name: string) => name.toLowerCase() === "content-type" ? "image/png" : null },
+        if (url.endsWith("/api/v2/pages/100/attachments?limit=250")) {
+          return response({
+            results: [
+              { id: "att1", title: "other.png", mediaType: "image/png", _links: { download: "/rest/api/content/100/child/attachment/att1/download" } },
+              { id: "att2", title: "diagram v1.png", mediaType: "image/png", _links: { download: "/rest/api/content/100/child/attachment/att2/download" } },
+            ],
+            _links: {},
+          })
         }
+
+        if (url.endsWith("/rest/api/content/100/child/attachment/att2/download")) return binaryResponse(bytes, "image/png")
+
+        return response({ message: `unexpected URL ${url}` }, false, 404, "Not Found")
       },
     })
 
     const image = await client.fetchAttachmentImage("100", "diagram v1.png")
 
-    expect(calls).toEqual([{ url: "https://example.atlassian.net/wiki/download/attachments/100/diagram%20v1.png", accept: "image/*" }])
-    expect(image.url).toBe(calls[0]?.url)
+    expect(calls).toEqual([
+      { url: "https://example.atlassian.net/wiki/api/v2/pages/100/attachments?limit=250", accept: "application/json" },
+      { url: "https://example.atlassian.net/wiki/rest/api/content/100/child/attachment/att2/download", accept: "application/json" },
+    ])
+    expect(image.url).toBe(calls[1]?.url)
     expect([...image.bytes]).toEqual([1, 2, 3, 4])
     expect(image.contentType).toBe("image/png")
   })
@@ -302,6 +310,17 @@ function response(body: unknown, ok = true, status = 200, statusText = "OK") {
     status,
     statusText,
     json: async () => body,
+  }
+}
+
+function binaryResponse(bytes: Uint8Array, contentType: string) {
+  return {
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    json: async () => ({}),
+    arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    headers: { get: (name: string) => name.toLowerCase() === "content-type" ? contentType : null },
   }
 }
 

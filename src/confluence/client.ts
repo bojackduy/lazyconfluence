@@ -86,6 +86,16 @@ export interface ConfluenceBinaryAsset {
   contentType: string | null
 }
 
+export interface ConfluenceAttachment {
+  id: string
+  title: string
+  mediaType: string | null
+  _links?: {
+    download?: string
+    webui?: string
+  }
+}
+
 export class ConfluenceClientError extends Error {
   constructor(message: string, readonly status?: number) {
     super(message)
@@ -127,7 +137,7 @@ export class ConfluenceClient {
     if (options.bodyFormat) params["body-format"] = options.bodyFormat
     if (options.status) params.status = options.status
 
-    return this.paginatedResults<ConfluencePage>("/api/v2/pages", params)
+    return this.paginatedResults("/api/v2/pages", params, pageFromPayload)
   }
 
   async fetchPageBody(pageId: string, bodyFormat: "storage" | "atlas_doc_format" = "storage") {
@@ -153,7 +163,7 @@ export class ConfluenceClient {
 
   async fetchDirectChildren(contentId: string, limit = 250, contentType: "page" | "folder" = "page") {
     const resource = contentType === "folder" ? "folders" : "pages"
-    return this.paginatedResults<ConfluencePage>(`/api/v2/${resource}/${encodeURIComponent(contentId)}/direct-children`, { limit })
+    return this.paginatedResults(`/api/v2/${resource}/${encodeURIComponent(contentId)}/direct-children`, { limit }, pageFromPayload)
   }
 
   attachmentImageUrl(pageId: string, filename: string) {
@@ -161,11 +171,15 @@ export class ConfluenceClient {
   }
 
   async fetchAttachmentImage(pageId: string, filename: string): Promise<ConfluenceBinaryAsset> {
-    const url = this.attachmentImageUrl(pageId, filename)
-    const response = await this.request(url, { headers: { Accept: "image/*" } })
+    const attachment = await this.fetchAttachmentByFilename(pageId, filename)
+    const downloadPath = attachment?._links?.download
+    if (!downloadPath) throw new ConfluenceClientError(`Confluence attachment not found for page ${pageId}: ${filename}`)
+
+    const url = confluenceApiUrl(this.baseUrl, downloadPath)
+    const response = await this.request(url)
     if (!response.arrayBuffer) throw new ConfluenceClientError(`Confluence attachment response did not include binary data for ${url}`)
 
-    return { url, bytes: new Uint8Array(await response.arrayBuffer()), contentType: readHeader(response, "content-type") }
+    return { url, bytes: new Uint8Array(await response.arrayBuffer()), contentType: readHeader(response, "content-type") ?? attachment.mediaType }
   }
 
   async updatePage(input: UpdateConfluencePageInput) {
@@ -215,14 +229,21 @@ export class ConfluenceClient {
     await this.requestJson(`/api/v2/pages/${encodeURIComponent(pageId)}`, {}, { method: "DELETE" })
   }
 
-  private async paginatedResults<T>(path: string, params: QueryParams): Promise<T[]> {
+  private async fetchAttachmentByFilename(pageId: string, filename: string) {
+    const attachments = await this.paginatedResults(`/api/v2/pages/${encodeURIComponent(pageId)}/attachments`, { limit: 250 }, attachmentFromPayload)
+    const normalizedFilename = normalizeAttachmentTitle(filename)
+
+    return attachments.find((attachment) => normalizeAttachmentTitle(attachment.title) === normalizedFilename) ?? null
+  }
+
+  private async paginatedResults<T>(path: string, params: QueryParams, mapResult: (value: unknown) => T): Promise<T[]> {
     const results: T[] = []
     let nextPath: string | null = path
     let nextParams: QueryParams = params
 
     while (nextPath) {
       const payload = await this.requestJson(nextPath, nextParams)
-      results.push(...readResults(payload).map(pageFromPayload as (value: unknown) => T))
+      results.push(...readResults(payload).map(mapResult))
       nextPath = readNextPath(payload)
       nextParams = {}
     }
@@ -358,6 +379,25 @@ function pageFromPayload(value: unknown): ConfluencePage {
   const payload = asRecord(value)
 
   return payload as unknown as ConfluencePage
+}
+
+function attachmentFromPayload(value: unknown): ConfluenceAttachment {
+  const payload = asRecord(value)
+  const links = asRecord(payload._links)
+
+  return {
+    id: String(payload.id ?? ""),
+    title: String(payload.title ?? ""),
+    mediaType: typeof payload.mediaType === "string" ? payload.mediaType : null,
+    _links: {
+      download: typeof links.download === "string" ? links.download : undefined,
+      webui: typeof links.webui === "string" ? links.webui : undefined,
+    },
+  }
+}
+
+function normalizeAttachmentTitle(value: string) {
+  return value.trim().normalize("NFC")
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

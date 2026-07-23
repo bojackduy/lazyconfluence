@@ -277,11 +277,14 @@ function mediaCachePath(databasePath: string, pageId: string, nodeId: string, fi
 }
 
 function mediaExtension(filename: string, contentType: string | null) {
-  const existing = extname(filename)
-  if (existing) return existing.toLowerCase()
   if (contentType === "image/png") return ".png"
   if (contentType === "image/jpeg") return ".jpg"
   if (contentType === "image/gif") return ".gif"
+  if (contentType === "image/svg+xml") return ".svg"
+
+  const existing = extname(filename.split(/[?#]/, 1)[0] ?? filename)
+  if (existing) return existing.toLowerCase()
+
   return ".img"
 }
 

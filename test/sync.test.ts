@@ -194,12 +194,17 @@ describe("sync service", () => {
           },
           "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage&status=archived": { results: [], _links: {} },
           "/wiki/api/v2/pages/100/direct-children?limit=250": { results: [], _links: {} },
-          "/wiki/download/attachments/100/diagram.png": binaryResponse(Buffer.from(tinyPngBase64, "base64"), "image/png"),
+          "/wiki/api/v2/pages/100/attachments?limit=250": {
+            results: [{ id: "att100", title: "diagram.png", mediaType: "image/png", _links: { download: "/rest/api/content/100/child/attachment/att100/download" } }],
+            _links: {},
+          },
+          "/wiki/rest/api/content/100/child/attachment/att100/download": binaryResponse(Buffer.from(tinyPngBase64, "base64"), "image/png"),
         }),
       })
 
       expect(report.complete).toBe(true)
-      expect(calls).toContain("https://example.atlassian.net/wiki/download/attachments/100/diagram.png")
+      expect(calls).toContain("https://example.atlassian.net/wiki/api/v2/pages/100/attachments?limit=250")
+      expect(calls).toContain("https://example.atlassian.net/wiki/rest/api/content/100/child/attachment/att100/download")
 
       const repository = openIndexRepository({ path: setup.dbPath })
       try {

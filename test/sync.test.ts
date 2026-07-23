@@ -67,13 +67,14 @@ describe("sync service", () => {
           "/wiki/api/v2/spaces?keys=ENG&limit=250": {
             results: [{ id: "10", key: "ENG", name: "Engineering", homepageId: "100" }],
           },
-          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage": {
+          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage&status=current": {
             results: [
               pagePayload("100", "Engineering Home", null, "<p>Home page.</p>"),
               pagePayload("101", "Project Architecture", "100"),
             ],
             _links: {},
           },
+          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage&status=archived": { results: [], _links: {} },
           "/wiki/api/v2/pages/100/direct-children?limit=250": {
             results: [{ id: "900", title: "Design Notes", type: "folder" }, pagePayload("101", "Project Architecture", "100")],
             _links: {},
@@ -150,10 +151,11 @@ describe("sync service", () => {
           "/wiki/api/v2/spaces?keys=OPS&limit=250": {
             results: [{ id: "20", key: "OPS", name: "Operations", homepageId: "200" }],
           },
-          "/wiki/api/v2/pages?space-id=20&limit=100&body-format=storage": {
+          "/wiki/api/v2/pages?space-id=20&limit=100&body-format=storage&status=current": {
             results: [pagePayload("200", "Operations Home", null, "<p>Operations content.</p>")],
             _links: {},
           },
+          "/wiki/api/v2/pages?space-id=20&limit=100&body-format=storage&status=archived": { results: [], _links: {} },
           "/wiki/api/v2/pages/200/direct-children?limit=250": { results: [], _links: {} },
         }),
       })
@@ -186,10 +188,11 @@ describe("sync service", () => {
           "/wiki/api/v2/spaces?keys=ENG&limit=250": {
             results: [{ id: "10", key: "ENG", name: "Engineering", homepageId: "root" }],
           },
-          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage": {
+          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage&status=current": {
             results: [pagePayload("backend-docs", "Backend Scraping And Pricing Documentation", "backend-folder", "<p>Backend docs.</p>")],
             _links: {},
           },
+          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage&status=archived": { results: [], _links: {} },
           "/wiki/api/v2/pages/backend-docs/direct-children?limit=250": { results: [], _links: {} },
           "/wiki/api/v2/pages/backend-folder?body-format=storage": response({ message: "not a page" }, false, 404, "Not Found"),
           "/wiki/api/v2/folders/backend-folder": folderPayload("backend-folder", "Technical Document for Backend", "technical-doc"),
@@ -245,10 +248,11 @@ describe("sync service", () => {
           "/wiki/api/v2/spaces?keys=ENG&limit=250": {
             results: [{ id: "10", key: "ENG", name: "Engineering", homepageId: "folderish" }],
           },
-          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage": {
+          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage&status=current": {
             results: [pagePayload("folderish", "Folderish", null)],
             _links: {},
           },
+          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage&status=archived": { results: [], _links: {} },
           "/wiki/api/v2/pages/folderish/direct-children?limit=250": response({ message: "not a page" }, false, 404, "Not Found"),
           "/wiki/api/v2/folders/folderish/direct-children?limit=250": {
             results: [pagePayload("child", "Child Page", "folderish")],
@@ -288,10 +292,11 @@ describe("sync service", () => {
           "/wiki/api/v2/spaces?keys=ENG&limit=250": {
             results: [{ id: "10", key: "ENG", name: "Engineering", homepageId: "100" }],
           },
-          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage": {
+          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage&status=current": {
             results: [pagePayload("100", "Engineering Home", null, "<p>Home.</p>")],
             _links: {},
           },
+          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage&status=archived": { results: [], _links: {} },
           "/wiki/api/v2/pages/100/direct-children?limit=250": {
             results: [typedPayload("whiteboard", "Stakeholder Flow", "100", "whiteboard", "current"), typedPayload("draft", "Pitch Draft", "100", "page", "draft")],
             _links: {},
@@ -317,6 +322,64 @@ describe("sync service", () => {
     }
   })
 
+  test("syncs archived pages into the archived view and prunes missing rows", async () => {
+    const setup = await createSyncTestSetup()
+    const repository = openIndexRepository({ path: setup.dbPath })
+    const calls: string[] = []
+
+    try {
+      repository.upsertSpace({ key: "ENG", name: "Engineering", lastSyncedAt: "2026-07-22T00:00:00Z", pageCount: 0, syncState: "fresh" })
+      repository.upsertPage({
+        pageId: "stale-trash",
+        spaceKey: "ENG",
+        title: "Already Removed",
+        url: "https://example.atlassian.net/wiki/spaces/ENG/pages/stale-trash/Already+Removed",
+        parentId: null,
+        path: ["Already Removed"],
+        owner: "",
+        updatedAt: "2026-07-22T00:00:00Z",
+        contentMarkdown: "# Already Removed",
+        snippet: "Stale local row.",
+        remoteStatus: "archived",
+      })
+
+      const report = await syncConfluence({
+        env: setup.env,
+        now: fixedClock(),
+        fetch: jsonFetch(calls, {
+          "/wiki/api/v2/spaces?keys=ENG&limit=250": {
+            results: [{ id: "10", key: "ENG", name: "Engineering", homepageId: "root" }],
+          },
+          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage&status=current": {
+            results: [pagePayload("root", "Engineering Home", null, "<p>Home.</p>")],
+            _links: {},
+          },
+          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage&status=archived": {
+            results: [pagePayloadWithStatus("archived-root", "Archived Root", null, "archived", "<p>Archived root.</p>")],
+            _links: {},
+          },
+          "/wiki/api/v2/pages/root/direct-children?limit=250": {
+            results: [pagePayloadWithStatus("archived-child", "Archived Child", "root", "archived")],
+            _links: {},
+          },
+          "/wiki/api/v2/pages/archived-root/direct-children?limit=250": { results: [], _links: {} },
+          "/wiki/api/v2/pages/archived-child/direct-children?limit=250": { results: [], _links: {} },
+          "/wiki/api/v2/pages/archived-child?body-format=storage": pagePayloadWithStatus("archived-child", "Archived Child", "root", "archived", "<p>Archived child.</p>"),
+        }),
+      })
+
+      expect(report).toMatchObject({ complete: true, pagesIndexed: 3, bodyArtifactsPersisted: 3, failures: [] })
+      expect(repository.getPage("stale-trash")).toBeNull()
+      expect(repository.listPagesInSpace("ENG").map((page) => page.pageId)).toEqual(["root"])
+      expect(repository.listPagesInSpace("ENG", "archived").map((page) => page.pageId)).toEqual(["archived-root", "archived-child"])
+      expect(repository.getPage("archived-child")).toMatchObject({ remoteStatus: "archived" })
+      expect(repository.getPageBody("archived-child")?.renderedMarkdown).toContain("Archived child")
+    } finally {
+      repository.close()
+      await setup.cleanup()
+    }
+  })
+
   test("keeps detached children visible when missing parent backfill fails", async () => {
     const setup = await createSyncTestSetup()
 
@@ -328,10 +391,11 @@ describe("sync service", () => {
           "/wiki/api/v2/spaces?keys=ENG&limit=250": {
             results: [{ id: "10", key: "ENG", name: "Engineering", homepageId: "root" }],
           },
-          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage": {
+          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage&status=current": {
             results: [pagePayload("orphan", "Orphaned Child", "missing-parent", "<p>Still visible.</p>")],
             _links: {},
           },
+          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage&status=archived": { results: [], _links: {} },
           "/wiki/api/v2/pages/orphan/direct-children?limit=250": { results: [], _links: {} },
           "/wiki/api/v2/pages/missing-parent?body-format=storage": response({ message: "missing" }, false, 404, "Not Found"),
         }),
@@ -352,7 +416,7 @@ describe("sync service", () => {
     }
   })
 
-  test("records page failures while preserving existing local pages", async () => {
+  test("records body failures while pruning pages missing from a complete scan", async () => {
     const setup = await createSyncTestSetup()
     const repository = openIndexRepository({ path: setup.dbPath })
 
@@ -368,7 +432,7 @@ describe("sync service", () => {
         owner: "",
         updatedAt: "2026-07-20T00:00:00Z",
         contentMarkdown: "# Old Local Page",
-        snippet: "Existing local page that must not be pruned.",
+        snippet: "Existing local page absent from the latest remote snapshot.",
       })
     } finally {
       repository.close()
@@ -382,10 +446,11 @@ describe("sync service", () => {
           "/wiki/api/v2/spaces?keys=ENG&limit=250": {
             results: [{ id: "10", key: "ENG", name: "Engineering", homepageId: "100" }],
           },
-          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage": {
+          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage&status=current": {
             results: [pagePayload("fresh", "Fresh Page", null, "<p>Fresh content.</p>"), pagePayload("bad", "Bad Page", null)],
             _links: {},
           },
+          "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage&status=archived": { results: [], _links: {} },
           "/wiki/api/v2/pages/fresh/direct-children?limit=250": { results: [], _links: {} },
           "/wiki/api/v2/pages/bad/direct-children?limit=250": { results: [], _links: {} },
           "/wiki/api/v2/pages/bad?body-format=storage": response({ message: "boom" }, false, 500, "Server Error"),
@@ -399,7 +464,7 @@ describe("sync service", () => {
 
       const checked = openIndexRepository({ path: setup.dbPath })
       try {
-        expect(checked.getPage("old-page")?.title).toBe("Old Local Page")
+        expect(checked.getPage("old-page")).toBeNull()
         expect(checked.getPage("fresh")?.title).toBe("Fresh Page")
         expect(checked.getPage("bad")?.contentMarkdown).toContain("could not fetch its body")
         expect(checked.getPage("bad")?.snippet).toContain("kept visible")
@@ -441,6 +506,13 @@ function pagePayload(id: string, title: string, parentId: string | null, storage
     version: { number: 1, createdAt: "2026-07-21T09:00:00Z" },
     _links: { webui: `/wiki/spaces/ENG/pages/${id}/${title.replace(/\s+/g, "+")}` },
     ...(storageHtml ? { body: { storage: { value: storageHtml } } } : {}),
+  }
+}
+
+function pagePayloadWithStatus(id: string, title: string, parentId: string | null, status: string, storageHtml?: string) {
+  return {
+    ...pagePayload(id, title, parentId, storageHtml),
+    status,
   }
 }
 

@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite"
 import type { CanonicalDocument, MappingSidecar, SourceRepresentation } from "../document/model"
-import type { IndexedPage, PageLink, PageLinkKind, SearchResult, SpaceSummary, SyncState } from "../model"
+import type { IndexedPage, PageLink, PageLinkKind, PageStatusFilter, SearchResult, SpaceSummary, SyncState } from "../model"
 import { openIndexDatabase, type IndexDatabase, type OpenIndexDatabaseOptions } from "./db"
 import { compareSearchResults, ftsPrefixQuery, normalizeSearchText, pageUrlKey, scorePageSearchResult } from "./search"
 
@@ -16,6 +16,8 @@ interface PageRow {
   content_markdown: string
   snippet: string
   tree_order: number
+  content_type: string
+  remote_status: string
 }
 
 interface LinkRow {
@@ -178,9 +180,9 @@ export class IndexRepository {
       const pageStatement = this.database.query(`
         INSERT INTO pages (
           page_id, space_key, title, url, url_key, parent_id, path_json, path_text,
-          owner, updated_at, content_markdown, snippet, tree_order, indexed_at
+          owner, updated_at, content_markdown, snippet, tree_order, content_type, remote_status, indexed_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(page_id) DO UPDATE SET
           space_key = excluded.space_key,
           title = excluded.title,
@@ -194,6 +196,8 @@ export class IndexRepository {
           content_markdown = excluded.content_markdown,
           snippet = excluded.snippet,
           tree_order = excluded.tree_order,
+          content_type = excluded.content_type,
+          remote_status = excluded.remote_status,
           indexed_at = CURRENT_TIMESTAMP
       `)
       const deleteFtsStatement = this.database.query("DELETE FROM page_fts WHERE page_id = ?")
@@ -216,6 +220,8 @@ export class IndexRepository {
           page.contentMarkdown,
           page.snippet,
           page.treeOrder ?? 0,
+          page.contentType ?? "page",
+          page.remoteStatus ?? "current",
         )
         deleteFtsStatement.run(page.pageId)
         insertFtsStatement.run(page.title, pathText, page.snippet, page.contentMarkdown, page.pageId)
@@ -345,13 +351,21 @@ export class IndexRepository {
     return row ? pageFromRow(row) : null
   }
 
-  listPagesInSpace(spaceKey: string): IndexedPage[] {
+  listPagesInSpace(spaceKey: string, status: PageStatusFilter = "current"): IndexedPage[] {
+    const filters = ["space_key = ?"]
+    const params: string[] = [spaceKey]
+
+    if (status !== "all") {
+      filters.push("remote_status = ?")
+      params.push(status)
+    }
+
     const rows = this.database.query(`
       SELECT *
       FROM pages
-      WHERE space_key = ?
+      WHERE ${filters.join(" AND ")}
       ORDER BY path_text COLLATE NOCASE, tree_order, title COLLATE NOCASE
-    `).all(spaceKey) as PageRow[]
+    `).all(...params) as PageRow[]
 
     return rows.map(pageFromRow)
   }
@@ -522,13 +536,42 @@ export class IndexRepository {
     })
   }
 
-  getChildren(parentPageId: string): IndexedPage[] {
+  prunePagesInSpace(spaceKey: string, keepPageIds: Set<string>) {
+    const staleRows = this.database.query("SELECT page_id FROM pages WHERE space_key = ?").all(spaceKey) as Array<{ page_id: string }>
+    const stalePageIds = staleRows.map((row) => String(row.page_id)).filter((pageId) => !keepPageIds.has(pageId))
+    if (!stalePageIds.length) return 0
+
+    return this.transaction(() => {
+      const deleteFts = this.database.query("DELETE FROM page_fts WHERE page_id = ?")
+      const deleteLinks = this.database.query("DELETE FROM links WHERE from_page_id = ? OR target_page_id = ?")
+      const deletePage = this.database.query("DELETE FROM pages WHERE page_id = ?")
+      let deleted = 0
+
+      for (const pageId of stalePageIds) {
+        deleteFts.run(pageId)
+        deleteLinks.run(pageId, pageId)
+        deleted += deletePage.run(pageId).changes
+      }
+
+      return deleted
+    })
+  }
+
+  getChildren(parentPageId: string, status: PageStatusFilter = "current"): IndexedPage[] {
+    const filters = ["parent_id = ?"]
+    const params: string[] = [parentPageId]
+
+    if (status !== "all") {
+      filters.push("remote_status = ?")
+      params.push(status)
+    }
+
     const rows = this.database.query(`
       SELECT *
       FROM pages
-      WHERE parent_id = ?
+      WHERE ${filters.join(" AND ")}
       ORDER BY tree_order, title COLLATE NOCASE
-    `).all(parentPageId) as PageRow[]
+    `).all(...params) as PageRow[]
 
     return rows.map(pageFromRow)
   }
@@ -564,15 +607,15 @@ export class IndexRepository {
     return row ? pageFromRow(row) : null
   }
 
-  searchPagesInSpace(spaceKey: string, query: string, limit = 20): SearchResult[] {
-    return this.searchPages(query, { limit, spaceKey })
+  searchPagesInSpace(spaceKey: string, query: string, limit = 20, status: PageStatusFilter = "current"): SearchResult[] {
+    return this.searchPages(query, { limit, spaceKey, status })
   }
 
-  searchPagesAcrossSpaces(query: string, limit = 20): SearchResult[] {
-    return this.searchPages(query, { limit })
+  searchPagesAcrossSpaces(query: string, limit = 20, status: PageStatusFilter = "current"): SearchResult[] {
+    return this.searchPages(query, { limit, status })
   }
 
-  private searchPages(query: string, options: { limit: number; spaceKey?: string }): SearchResult[] {
+  private searchPages(query: string, options: { limit: number; spaceKey?: string; status: PageStatusFilter }): SearchResult[] {
     const normalizedQuery = normalizeSearchText(query)
 
     if (!normalizedQuery) {
@@ -592,6 +635,11 @@ export class IndexRepository {
       params.push(options.spaceKey)
     }
 
+    if (options.status !== "all") {
+      filters.push("pages.remote_status = ?")
+      params.push(options.status)
+    }
+
     const rows = this.database.query(`
       SELECT pages.*
       FROM page_fts
@@ -607,15 +655,30 @@ export class IndexRepository {
       .sort(compareSearchResults)
   }
 
-  private selectPagesForEmptySearch(options: { limit: number; spaceKey?: string }) {
+  private selectPagesForEmptySearch(options: { limit: number; spaceKey?: string; status: PageStatusFilter }) {
+    const filters: string[] = []
+    const params: Array<string | number> = []
+
+    if (options.spaceKey) {
+      filters.push("space_key = ?")
+      params.push(options.spaceKey)
+    }
+
+    if (options.status !== "all") {
+      filters.push("remote_status = ?")
+      params.push(options.status)
+    }
+
+    const where = filters.length ? `WHERE ${filters.join(" AND ")}` : ""
+
     if (options.spaceKey) {
       const rows = this.database.query(`
         SELECT *
         FROM pages
-        WHERE space_key = ?
+        ${where}
         ORDER BY path_text COLLATE NOCASE, title COLLATE NOCASE
         LIMIT ?
-      `).all(options.spaceKey, options.limit) as PageRow[]
+      `).all(...params, options.limit) as PageRow[]
 
       return rows.map(pageFromRow)
     }
@@ -623,9 +686,10 @@ export class IndexRepository {
     const rows = this.database.query(`
       SELECT *
       FROM pages
+      ${where}
       ORDER BY space_key COLLATE NOCASE, path_text COLLATE NOCASE, title COLLATE NOCASE
       LIMIT ?
-    `).all(options.limit) as PageRow[]
+    `).all(...params, options.limit) as PageRow[]
 
     return rows.map(pageFromRow)
   }
@@ -699,6 +763,8 @@ function pageFromRow(row: PageRow): IndexedPage {
     contentMarkdown: String(row.content_markdown),
     snippet: String(row.snippet),
     treeOrder: Number(row.tree_order ?? 0),
+    contentType: String(row.content_type ?? "page"),
+    remoteStatus: String(row.remote_status ?? "current"),
   }
 }
 

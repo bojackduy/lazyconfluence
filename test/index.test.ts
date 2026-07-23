@@ -67,6 +67,32 @@ describe("local index repository", () => {
     })
   })
 
+  test("keeps archived pages in an explicit filtered view", async () => {
+    await withSeededRepository((repository) => {
+      repository.upsertPage(archivedDecision)
+
+      expect(repository.listPagesInSpace("ENG").map((page) => page.pageId)).toEqual(["eng-home", "architecture", "release-checklist"])
+      expect(repository.listPagesInSpace("ENG", "archived").map((page) => page.pageId)).toEqual(["archived-decision"])
+      expect(repository.searchPagesInSpace("ENG", "decision").map((result) => result.page.pageId)).toEqual([])
+      expect(repository.searchPagesInSpace("ENG", "decision", 20, "archived").map((result) => result.page.pageId)).toEqual(["archived-decision"])
+      expect(repository.getChildren("eng-home").map((page) => page.pageId)).toEqual(["release-checklist", "architecture"])
+      expect(repository.getChildren("eng-home", "archived").map((page) => page.pageId)).toEqual(["archived-decision"])
+    })
+  })
+
+  test("prunes pages missing from a complete sync snapshot", async () => {
+    await withSeededRepository((repository) => {
+      repository.upsertPage(archivedDecision)
+      repository.upsertPageBody({ ...architectureBody, pageId: "archived-decision" })
+      repository.upsertPageDraft({ pageId: "archived-decision", baseRemoteVersion: 1, baseSourceHash: "archived", draftMarkdown: "# Archived Decision", status: "draft", createdAt: "2026-07-23T10:00:00Z", updatedAt: "2026-07-23T10:00:00Z", stagedAt: null })
+
+      expect(repository.prunePagesInSpace("ENG", new Set(["eng-home", "architecture", "release-checklist"]))).toBeGreaterThan(0)
+      expect(repository.getPage("archived-decision")).toBeNull()
+      expect(repository.getPageBody("archived-decision")).toBeNull()
+      expect(repository.getPageDraft("archived-decision")).toBeNull()
+    })
+  })
+
   test("matches Confluence URLs back to indexed pages", async () => {
     await withSeededRepository((repository) => {
       const matched = repository.matchPageUrl("https://example.atlassian.net/wiki/spaces/ENG/pages/101/Project+Architecture?focusedCommentId=123#decision-context")
@@ -199,7 +225,7 @@ describe("local index repository", () => {
     })
   })
 
-  test("migrates schema v6 page creates before creating v7 indexes", async () => {
+  test("migrates schema v6 page creates before creating current indexes", async () => {
     const dir = await mkdtemp(join(tmpdir(), "lazyconfluence-v6-index-"))
     const dbPath = join(dir, "index.sqlite3")
     const database = new Database(dbPath)
@@ -252,7 +278,7 @@ describe("local index repository", () => {
 
       const repository = openIndexRepository({ path: dbPath })
       try {
-        expect(repository.getStats().schemaVersion).toBe(7)
+        expect(repository.getStats().schemaVersion).toBe(8)
         expect(repository.getPageCreate("create-root")).toMatchObject({ parentPageId: null, parentCreateId: null, title: "Root Plan" })
         repository.upsertPageCreate({
           localId: "create-child",
@@ -351,6 +377,22 @@ const releaseChecklist: IndexedPage = {
   snippet: "A compact checklist for production releases and rollback readiness.",
   contentMarkdown: "# Release Checklist\n\nConfirm tests, owners, dashboards, and rollback notes.",
   treeOrder: 0,
+}
+
+const archivedDecision: IndexedPage = {
+  pageId: "archived-decision",
+  spaceKey: "ENG",
+  title: "Archived Decision",
+  url: "https://example.atlassian.net/wiki/spaces/ENG/pages/103/Archived+Decision",
+  parentId: "eng-home",
+  path: ["Engineering Home", "Archived Decision"],
+  owner: "Architecture Guild",
+  updatedAt: "2026-07-12T10:00:00Z",
+  snippet: "Old decision moved to Confluence archive.",
+  contentMarkdown: "# Archived Decision\n\nOld decision moved to archive.",
+  treeOrder: 2,
+  contentType: "page",
+  remoteStatus: "archived",
 }
 
 const opsRunbook: IndexedPage = {

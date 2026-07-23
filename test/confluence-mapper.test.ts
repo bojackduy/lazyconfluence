@@ -259,6 +259,8 @@ describe("Confluence mapper", () => {
       contentMarkdown: "",
       snippet: "",
       treeOrder: 0,
+      contentType: "folder",
+      remoteStatus: "current",
     })
   })
 })

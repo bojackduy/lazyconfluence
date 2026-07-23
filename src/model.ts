@@ -1,4 +1,6 @@
 export type SyncState = "fresh" | "stale" | "not-synced"
+export type PageViewMode = "current" | "archived"
+export type PageStatusFilter = PageViewMode | "all"
 
 export interface SpaceSummary {
   key: string
@@ -20,6 +22,8 @@ export interface IndexedPage {
   contentMarkdown: string
   snippet: string
   treeOrder?: number
+  contentType?: string
+  remoteStatus?: string
 }
 
 export type PageLinkKind = "internal" | "external"

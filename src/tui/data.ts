@@ -5,7 +5,7 @@ import { formatMarkdownDiff, readEditableDraftInput, savePageDraft, type Editabl
 import { openIndexRepository, type IndexRepository, type PageBodyArtifact, type PageCreate, type PageDelete, type PageDraft, type PageDraftStatus } from "../index/repository"
 import { compareSearchResults, scorePageSearchResult } from "../index/search"
 import { getDefaultPageId as getDefaultMockPageId, getPagesForSpace as getMockPagesForSpace, getReaderPage as getMockReaderPage, mockPages, mockSpaces, searchPagesInSpace as searchMockPagesInSpace, searchSpaces as searchMockSpaces } from "../mock-data"
-import type { IndexedPage, ReaderPage, SearchResult, SpaceSearchResult, SpaceSummary } from "../model"
+import type { IndexedPage, PageViewMode, ReaderPage, SearchResult, SpaceSearchResult, SpaceSummary } from "../model"
 
 export const emptyPageId = "__lazyconfluence_empty__"
 
@@ -19,17 +19,17 @@ export interface TuiDataSource {
   discardStagedChanges: (changeKeys: string[]) => number
   formatPageDraftDiff: (pageId: string, draftMarkdown: string) => string
   getDefaultSpaceKey: () => string | null
-  getDefaultPageId: (spaceKey?: string) => string | null
+  getDefaultPageId: (spaceKey?: string, view?: PageViewMode) => string | null
   getEditableDraftInput: (pageId: string) => EditableDraftInput
   getEditablePageInput: (pageId: string) => TuiEditablePageInput
   getPageDraftStatus: (pageId: string) => PageDraftStatus | null
-  getPagesForSpace: (spaceKey: string) => IndexedPage[]
-  getReaderPage: (pageId: string) => ReaderPage | null
+  getPagesForSpace: (spaceKey: string, view?: PageViewMode) => IndexedPage[]
+  getReaderPage: (pageId: string, view?: PageViewMode) => ReaderPage | null
   listStagedDraftChanges: (spaceKey: string) => TuiDraftChange[]
   listStagedChanges: (spaceKey: string) => TuiStagedChange[]
   listSpaces: () => SpaceSummary[]
   savePageDraft: (pageId: string, draftMarkdown: string) => SaveTuiPageDraftResult
-  searchPagesInSpace: (spaceKey: string, query: string) => SearchResult[]
+  searchPagesInSpace: (spaceKey: string, query: string, view?: PageViewMode) => SearchResult[]
   searchSpaces: (query: string) => SpaceSearchResult[]
   stagePageCreate: (input: { spaceKey: string; parentPageId: string | null; title: string }) => TuiCreateChange
   stagePageDelete: (pageId: string) => TuiDeleteChange
@@ -138,18 +138,18 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
       return formatMarkdownDiff(input.body.editableMarkdown, draftMarkdown)
     },
     getDefaultSpaceKey: () => repository.listSpaces()[0]?.key ?? null,
-    getDefaultPageId: (spaceKey) => {
+    getDefaultPageId: (spaceKey, view = "current") => {
       const key = spaceKey ?? repository.listSpaces()[0]?.key
       if (!key) return null
 
-      const pages = listPagesWithCreates(repository, key)
+      const pages = listPagesWithCreates(repository, key, view)
       return pages.find((page) => page.parentId === null)?.pageId ?? pages[0]?.pageId ?? null
     },
     getEditableDraftInput: (pageId) => readEditableDraftInput(repository, pageId),
     getEditablePageInput: (pageId) => readEditablePageInput(repository, pageId),
     getPageDraftStatus: (pageId) => createIdFromPageId(pageId) || repository.getPageDelete(pageId) ? "staged" : repository.getPageDraft(pageId)?.status ?? null,
-    getPagesForSpace: (spaceKey) => listPagesWithCreates(repository, spaceKey),
-    getReaderPage: (pageId) => {
+    getPagesForSpace: (spaceKey, view = "current") => listPagesWithCreates(repository, spaceKey, view),
+    getReaderPage: (pageId, view = "current") => {
       const createId = createIdFromPageId(pageId)
       if (createId) return createReaderPage(repository, createId)
 
@@ -163,7 +163,7 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
       return {
         ...page,
         contentMarkdown,
-        children: listChildrenWithCreates(repository, page.pageId),
+        children: listChildrenWithCreates(repository, page.pageId, view),
         outgoingLinks: repository.getOutgoingLinks(page.pageId),
         backlinks: repository.getIncomingLinks(page.pageId),
         outline: extractOutline(contentMarkdown),
@@ -186,7 +186,7 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
     ].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.title.localeCompare(right.title)),
     listSpaces: () => repository.listSpaces(),
     savePageDraft: (pageId, draftMarkdown) => saveTuiPageDraft(repository, pageId, draftMarkdown, now),
-    searchPagesInSpace: (spaceKey, query) => searchPagesWithCreates(repository, spaceKey, query, 20),
+    searchPagesInSpace: (spaceKey, query, view = "current") => searchPagesWithCreates(repository, spaceKey, query, 20, view),
     searchSpaces: (query) => searchSpaces(repository.listSpaces(), query),
     stagePageCreate: (input) => {
       const title = input.title.trim()
@@ -203,6 +203,7 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
       if (parentCreate && parentCreate.spaceKey !== input.spaceKey) throw new Error(`Parent local page ${parentCreate.title} is not in ${input.spaceKey}.`)
       if (parentPageId && !parentPage) throw new Error(`Parent page not found in local index: ${parentPageId}`)
       if (parentPage && parentPage.spaceKey !== input.spaceKey) throw new Error(`Parent page ${parentPage.title} is not in ${input.spaceKey}.`)
+      if (parentPage && !isEditableRemotePage(parentPage)) throw new Error(`${parentPage.title} is ${remoteStatusLabel(parentPage)} in Confluence and cannot receive new child pages from lazyconfluence.`)
 
       const timestamp = now().toISOString()
       const create: PageCreate = {
@@ -228,8 +229,12 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
 
       const page = repository.getPage(pageId)
       if (!page) throw new Error(`Page not found in local index: ${pageId}`)
+      if (!isEditableRemotePage(page)) throw new Error(`${page.title} is ${remoteStatusLabel(page)} in Confluence and is read-only in lazyconfluence.`)
 
-      const children = listChildrenWithCreates(repository, pageId)
+      const children = [
+        ...repository.getChildren(pageId, "all"),
+        ...repository.listPageCreates(page.spaceKey).filter((create) => create.parentPageId === pageId).map((create) => virtualPageForCreate(repository, create)).filter((child): child is IndexedPage => child !== null),
+      ].sort(compareTreePages)
       if (children.length) throw new Error(`Delete child pages first: ${children.map((child) => child.title).join(", ")}.`)
 
       const timestamp = now().toISOString()
@@ -276,20 +281,20 @@ export function createMockTuiDataSource(): TuiDataSource {
       return formatMarkdownDiff(input.body.editableMarkdown, draftMarkdown)
     },
     getDefaultSpaceKey: () => mockSpaces[0]?.key ?? null,
-    getDefaultPageId: (spaceKey) => getDefaultMockPageId(spaceKey ?? mockSpaces[0]?.key),
+    getDefaultPageId: (spaceKey, view = "current") => view === "archived" ? null : getDefaultMockPageId(spaceKey ?? mockSpaces[0]?.key),
     getEditableDraftInput: (pageId) => readMockEditableDraftInput(pageId),
     getEditablePageInput: (pageId) => {
       const input = readMockEditableDraftInput(pageId)
       return { kind: "update", page: input.page, markdown: input.body.editableMarkdown, draftStatus: null }
     },
     getPageDraftStatus: () => null,
-    getPagesForSpace: (spaceKey) => getMockPagesForSpace(spaceKey),
-    getReaderPage: (pageId) => getMockReaderPage(pageId),
+    getPagesForSpace: (spaceKey, view = "current") => view === "archived" ? [] : getMockPagesForSpace(spaceKey),
+    getReaderPage: (pageId, view = "current") => view === "archived" ? null : getMockReaderPage(pageId),
     listStagedDraftChanges: () => [],
     listStagedChanges: () => [],
     listSpaces: () => mockSpaces,
     savePageDraft: (pageId) => ({ status: "unchanged", pageTitle: mockPageTitle(pageId) }),
-    searchPagesInSpace: (spaceKey, query) => searchMockPagesInSpace(spaceKey, query),
+    searchPagesInSpace: (spaceKey, query, view = "current") => view === "archived" ? [] : searchMockPagesInSpace(spaceKey, query),
     searchSpaces: (query) => searchMockSpaces(query),
     stagePageCreate: () => {
       throw demoReadOnlyError()
@@ -395,24 +400,25 @@ function readEditablePageInput(repository: IndexRepository, pageId: string): Tui
   }
 
   const input = readEditableDraftInput(repository, pageId)
+  if (!isEditableRemotePage(input.page)) throw new Error(`${input.page.title} is ${remoteStatusLabel(input.page)} in Confluence and is read-only in lazyconfluence.`)
   return { kind: "update", page: input.page, markdown: input.draft?.draftMarkdown ?? input.body.editableMarkdown, draftStatus: input.draft?.status ?? null }
 }
 
-function listPagesWithCreates(repository: IndexRepository, spaceKey: string) {
-  const pages = repository.listPagesInSpace(spaceKey)
-  const virtualCreates = repository.listPageCreates(spaceKey)
+function listPagesWithCreates(repository: IndexRepository, spaceKey: string, view: PageViewMode = "current") {
+  const pages = repository.listPagesInSpace(spaceKey, view)
+  const virtualCreates = view === "current" ? repository.listPageCreates(spaceKey)
     .map((create) => virtualPageForCreate(repository, create))
-    .filter((page): page is IndexedPage => page !== null)
+    .filter((page): page is IndexedPage => page !== null) : []
 
   return [...pages, ...virtualCreates]
 }
 
-function listChildrenWithCreates(repository: IndexRepository, parentPageId: string) {
-  const children = repository.getChildren(parentPageId)
-  const virtualCreates = repository.listPageCreates()
+function listChildrenWithCreates(repository: IndexRepository, parentPageId: string, view: PageViewMode = "current") {
+  const children = repository.getChildren(parentPageId, view)
+  const virtualCreates = view === "current" ? repository.listPageCreates()
     .filter((create) => create.parentPageId === parentPageId)
     .map((create) => virtualPageForCreate(repository, create))
-    .filter((page): page is IndexedPage => page !== null)
+    .filter((page): page is IndexedPage => page !== null) : []
 
   return [...children, ...virtualCreates].sort(compareTreePages)
 }
@@ -425,12 +431,14 @@ function listCreateChildren(repository: IndexRepository, parentCreateId: string)
     .sort(compareTreePages)
 }
 
-function searchPagesWithCreates(repository: IndexRepository, spaceKey: string, query: string, limit: number): SearchResult[] {
+function searchPagesWithCreates(repository: IndexRepository, spaceKey: string, query: string, limit: number, view: PageViewMode = "current"): SearchResult[] {
   const byPageId = new Map<string, SearchResult>()
 
-  for (const result of repository.searchPagesInSpace(spaceKey, query, limit)) {
+  for (const result of repository.searchPagesInSpace(spaceKey, query, limit, view)) {
     byPageId.set(result.page.pageId, result)
   }
+
+  if (view !== "current") return [...byPageId.values()].sort(compareSearchResults).slice(0, limit)
 
   for (const create of repository.listPageCreates(spaceKey)) {
     const page = virtualPageForCreate(repository, create)
@@ -486,6 +494,8 @@ function virtualPageForCreate(repository: IndexRepository, create: PageCreate, s
     contentMarkdown: create.draftMarkdown,
     snippet: extractSnippet(create.draftMarkdown, "New local page."),
     treeOrder: Number.MAX_SAFE_INTEGER,
+    contentType: "page",
+    remoteStatus: "current",
   }
 }
 
@@ -592,6 +602,14 @@ function orderChangeKeysForApply(repository: IndexRepository, changeKeys: string
 
 function compareTreePages(left: IndexedPage, right: IndexedPage) {
   return (left.treeOrder ?? 0) - (right.treeOrder ?? 0) || left.title.localeCompare(right.title)
+}
+
+function isEditableRemotePage(page: IndexedPage) {
+  return (page.remoteStatus ?? "current") === "current" && (page.contentType ?? "page") === "page"
+}
+
+function remoteStatusLabel(page: IndexedPage) {
+  return page.remoteStatus ?? "current"
 }
 
 function createIdFromPageId(pageId: string) {

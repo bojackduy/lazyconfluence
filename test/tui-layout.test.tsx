@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
-import { App, NewPageOverlay, StagedChangesOverlay, documentHorizontalScrollDeltaForKey, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, type SearchKeyLike } from "../src/tui/app"
+import { App, NewPageOverlay, StagedChangesOverlay, documentHorizontalScrollDeltaForKey, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, type SearchKeyLike } from "../src/tui/app"
 import { createLocalConfig } from "../src/config"
 import type { CredentialStatus } from "../src/config"
 import { openIndexRepository } from "../src/index/repository"
@@ -106,6 +106,53 @@ describe("main TUI layout", () => {
 
       expect(output).toContain("Orphaned Runbook")
       expect(output).toContain("• Orphaned Runbook")
+    } finally {
+      await setup.cleanup()
+    }
+  })
+
+  test("separates archived pages behind the navigator archived tab", async () => {
+    const setup = await createTuiTestSetup({ extraPages: [archivedArchitecture] })
+
+    try {
+      const output = await withProcessEnv(setup.env, async () => {
+        const rendered = await testRender(() => <App credentialStatus={readyStatus} disableTreeSitter />, { width: 120, height: 36 })
+
+        try {
+          await rendered.renderOnce()
+          return rendered.captureCharFrame()
+        } finally {
+          rendered.renderer.destroy()
+        }
+      })
+
+      expect(output).toContain("[Current]")
+      expect(output).toContain("Archived")
+      expect(output).not.toContain("Archived Architecture")
+    } finally {
+      await setup.cleanup()
+    }
+  })
+
+  test("renders archived pages in archived navigator mode", async () => {
+    const setup = await createTuiTestSetup({ extraPages: [archivedArchitecture] })
+
+    try {
+      const output = await withProcessEnv(setup.env, async () => {
+        const rendered = await testRender(() => <App credentialStatus={readyStatus} disableTreeSitter initialPageViewMode="archived" />, { width: 120, height: 36 })
+
+        try {
+          await rendered.renderOnce()
+          return rendered.captureCharFrame()
+        } finally {
+          rendered.renderer.destroy()
+        }
+      })
+
+      expect(output).toContain("[Archived]")
+      expect(output).toContain("Archived Architecture")
+      expect(output).toContain("Archived in Confluence")
+      expect(output).toContain("read-only")
     } finally {
       await setup.cleanup()
     }
@@ -229,6 +276,12 @@ describe("main TUI layout", () => {
     expect(nextFocusPaneForKey("document", key("left", "\x1B[D"))).toBe("document")
     expect(nextFocusPaneForKey("navigator", key("l", "l"))).toBe("navigator")
     expect(nextFocusPaneForKey("navigator", key("return", "\r"))).toBe("document")
+  })
+
+  test("a toggles current and archived page views", () => {
+    expect(nextPageViewModeForKey("current", key("a", "a"))).toBe("archived")
+    expect(nextPageViewModeForKey("archived", key("a", "a"))).toBe("current")
+    expect(nextPageViewModeForKey("current", key("j", "j"))).toBeNull()
   })
 
   test("document h/l keys scroll horizontally", () => {
@@ -678,6 +731,22 @@ const architecture: IndexedPage = {
   contentMarkdown: "# Real Synced Architecture\n\nRepository-backed page.",
   snippet: "Repository-backed page.",
   treeOrder: 0,
+}
+
+const archivedArchitecture: IndexedPage = {
+  pageId: "archived-architecture",
+  spaceKey: "ENG",
+  title: "Archived Architecture",
+  url: "https://example.atlassian.net/wiki/spaces/ENG/pages/104/Archived+Architecture",
+  parentId: "local-home",
+  path: ["Local Engineering Home", "Archived Architecture"],
+  owner: "Architecture Guild",
+  updatedAt: "2026-07-20T09:30:00Z",
+  contentMarkdown: "# Archived Architecture\n\nOld architecture notes.",
+  snippet: "Old architecture notes.",
+  treeOrder: 2,
+  contentType: "page",
+  remoteStatus: "archived",
 }
 
 const zebraFirstChild: IndexedPage = {

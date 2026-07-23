@@ -28,6 +28,8 @@ export interface EditPageDraftOptions {
 export function readEditableDraftInput(repository: IndexRepository, pageId: string): EditableDraftInput {
   const page = repository.getPage(pageId)
   if (!page) throw new Error(`Page not found in local index: ${pageId}`)
+  if ((page.remoteStatus ?? "current") !== "current") throw new Error(`${page.title} is ${page.remoteStatus ?? "current"} in Confluence and is read-only in lazyconfluence.`)
+  if ((page.contentType ?? "page") !== "page") throw new Error(`${page.title} is a ${page.contentType ?? "unknown"} item in Confluence and is read-only in lazyconfluence.`)
 
   const body = repository.getPageBody(pageId)
   if (!body) throw new Error(`No editable body artifact found for ${page.title} (${page.pageId}). Run \`lazyconfluence sync\` first.`)

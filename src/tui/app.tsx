@@ -14,7 +14,7 @@ import {
   type TreeSitterClient,
 } from "@opentui/core"
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js"
-import type { FocusPane, IndexedPage, ReaderPage, SearchResult, SpaceSearchResult } from "../model"
+import type { FocusPane, IndexedPage, PageViewMode, ReaderPage, SearchResult, SpaceSearchResult } from "../model"
 import { loadCredentialStatus, type CredentialStatus } from "../config"
 import type { PageDraftStatus } from "../index/repository"
 import type { ApplyPageDraftResult } from "../apply"
@@ -86,7 +86,7 @@ export async function renderTui(options: RenderTuiOptions = {}) {
   })
 }
 
-export function App(props: { credentialStatus?: CredentialStatus; dataSource?: TuiDataSource; disableTreeSitter?: boolean } = {}) {
+export function App(props: { credentialStatus?: CredentialStatus; dataSource?: TuiDataSource; disableTreeSitter?: boolean; initialPageViewMode?: PageViewMode } = {}) {
   const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
   const dataSource = props.dataSource ?? createRepositoryTuiDataSource()
@@ -94,8 +94,12 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const initialPageId = dataSource.getDefaultPageId(initialSpaceKey) ?? emptyPageId
   const [credentialStatus, setCredentialStatus] = createSignal<CredentialStatus | null>(props.credentialStatus ?? null)
   const [activeSpaceKey, setActiveSpaceKey] = createSignal(initialSpaceKey)
-  const [selectedPageId, setSelectedPageId] = createSignal(initialPageId)
-  const [expandedPageIds, setExpandedPageIds] = createSignal(new Set(initialPageId === emptyPageId ? [] : [initialPageId]))
+  const initialPageViewMode = props.initialPageViewMode ?? "current"
+  const initialViewPageId = dataSource.getDefaultPageId(initialSpaceKey, initialPageViewMode) ?? emptyPageId
+  const [pageViewMode, setPageViewMode] = createSignal<PageViewMode>(initialPageViewMode)
+  const initialSelectedPageId = initialPageViewMode === "current" ? initialPageId : initialViewPageId
+  const [selectedPageId, setSelectedPageId] = createSignal(initialSelectedPageId)
+  const [expandedPageIds, setExpandedPageIds] = createSignal(new Set(initialSelectedPageId === emptyPageId ? [] : [initialSelectedPageId]))
   const [focusPane, setFocusPane] = createSignal<"navigator" | "document">("navigator")
   const [pageSearchOpen, setPageSearchOpen] = createSignal(false)
   const [pageSearchQuery, setPageSearchQuery] = createSignal("")
@@ -128,7 +132,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const space = createMemo(() => spaces().find((candidate) => candidate.key === activeSpaceKey()) ?? emptySpaceSummary(activeSpaceKey()))
   const pages = createMemo(() => {
     draftRevision()
-    return dataSource.getPagesForSpace(activeSpaceKey())
+    return dataSource.getPagesForSpace(activeSpaceKey(), pageViewMode())
   })
   const pageById = createMemo(() => new Map(pages().map((page) => [page.pageId, page])))
   const treeRows = createMemo(() => buildTreeRows(pages(), expandedPageIds()))
@@ -140,7 +144,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   })
   const readerPage = createMemo(() => {
     draftRevision()
-    return dataSource.getReaderPage(selectedPageId()) ?? emptyReaderPage(space())
+    return dataSource.getReaderPage(selectedPageId(), pageViewMode()) ?? emptyReaderPage(space())
   })
   const draftStatus = createMemo(() => {
     draftRevision()
@@ -154,7 +158,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const editorDirty = createMemo(() => editorOpen() && editorMarkdown() !== editorOriginalMarkdown())
   const pageSearchResults = createMemo(() => {
     draftRevision()
-    return dataSource.searchPagesInSpace(activeSpaceKey(), pageSearchQuery())
+    return dataSource.searchPagesInSpace(activeSpaceKey(), pageSearchQuery(), pageViewMode())
   })
   const spaceSwitcherResults = createMemo(() => dataSource.searchSpaces(spaceSwitcherQuery()))
   const stagedChanges = createMemo(() => {
@@ -222,6 +226,16 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   }
 
   createEffect(() => {
+    const pageId = selectedPageId()
+    if (pageId === emptyPageId || pageById().has(pageId)) return
+
+    const defaultPageId = dataSource.getDefaultPageId(activeSpaceKey(), pageViewMode()) ?? emptyPageId
+    setSelectedPageId(defaultPageId)
+    setExpandedPageIds(new Set(defaultPageId === emptyPageId ? [] : [defaultPageId]))
+    documentScrollbox?.scrollTo(0)
+  })
+
+  createEffect(() => {
     const ancestors = getAncestorPageIds(selectedPageId(), pageById())
 
     if (ancestors.every((pageId) => expandedPageIds().has(pageId))) return
@@ -267,6 +281,22 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     setPageSearchOpen(true)
     setPageSearchQuery("")
     setPageSearchSelectedIndex(0)
+  }
+
+  const switchPageView = (view: PageViewMode) => {
+    if (pageViewMode() === view) return
+
+    const defaultPageId = dataSource.getDefaultPageId(activeSpaceKey(), view) ?? emptyPageId
+    setPageViewMode(view)
+    setSelectedPageId(defaultPageId)
+    setExpandedPageIds(new Set(defaultPageId === emptyPageId ? [] : [defaultPageId]))
+    documentScrollbox?.scrollTo(0)
+    setFocusPane("navigator")
+    setEditStatusMessage(view === "archived" ? "Archived view is read-only." : "Current view selected.")
+  }
+
+  const togglePageView = () => {
+    switchPageView(pageViewMode() === "current" ? "archived" : "current")
   }
 
   const closePageSearch = () => {
@@ -390,6 +420,12 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
       return
     }
 
+    const page = pageById().get(pageId)
+    if (page && !isEditableRemotePage(page)) {
+      setEditStatusMessage(`${page.title} is ${remoteStatusLabel(page)} in Confluence and is read-only in lazyconfluence.`)
+      return
+    }
+
     try {
       const change = dataSource.stagePageDelete(pageId)
       setDraftRevision((revision) => revision + 1)
@@ -400,6 +436,11 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   }
 
   const openNewPage = () => {
+    if (pageViewMode() !== "current") {
+      setEditStatusMessage("Archived view is read-only. Switch to Current to create pages.")
+      return
+    }
+
     const parentPage = selectedRow()?.page
     if (!parentPage || parentPage.pageId === emptyPageId) {
       if (pages().length > 0) {
@@ -415,6 +456,11 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   }
 
   const openRootNewPage = () => {
+    if (pageViewMode() !== "current") {
+      setEditStatusMessage("Archived view is read-only. Switch to Current to create pages.")
+      return
+    }
+
     openNewPageWithParent(null)
   }
 
@@ -499,6 +545,12 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
 
     if (pageId === emptyPageId) {
       setEditStatusMessage("No page selected to edit.")
+      return
+    }
+
+    const page = pageById().get(pageId)
+    if (page && !isEditableRemotePage(page)) {
+      setEditStatusMessage(`${page.title} is ${remoteStatusLabel(page)} in Confluence and is read-only in lazyconfluence.`)
       return
     }
 
@@ -654,6 +706,11 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
       return
     }
 
+    if (nextPageViewModeForKey(pageViewMode(), key)) {
+      togglePageView()
+      return
+    }
+
     if (isPlainKey(key, "e")) {
       openEditorForSelectedPage()
       return
@@ -715,7 +772,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
       <Header page={readerPage()} spaceName={space().name} syncState={space().syncState} draftStatus={draftStatus()} stagedCount={stagedChanges().length} onOpenOverview={() => openChanges()} />
       <Show when={credentialWarning()} fallback={<box height={0} />}>{(status) => <CredentialNotice status={status()} />}</Show>
       <box flexGrow={1} minHeight={0} flexDirection={isNarrow() ? "column" : "row"} paddingX={1}>
-        <Navigator rows={treeRows()} selectedPageId={selectedPageId()} focused={focusPane() === "navigator"} />
+        <Navigator rows={treeRows()} selectedPageId={selectedPageId()} focused={focusPane() === "navigator"} viewMode={pageViewMode()} onSetViewMode={switchPageView} />
         <Reader page={readerPage()} focused={focusPane() === "document"} narrow={isNarrow()} treeSitterClient={treeSitterClient()} setDocumentScrollbox={(scrollbox) => { documentScrollbox = scrollbox }} />
       </box>
       <StatusBar focusPane={focusPane()} editorOpen={editorOpen()} editorDirty={editorDirty()} editMessage={editStatusMessage()} />
@@ -765,6 +822,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
         results={pageSearchResults()}
         selectedIndex={pageSearchSelectedIndex()}
         activeSpaceName={space().name}
+        viewMode={pageViewMode()}
         left={dimensions().width < 72 ? 2 : 8}
         width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 4 : 16))}
         height={Math.min(18, Math.max(10, dimensions().height - 8))}
@@ -816,7 +874,7 @@ function Header(props: { page: ReaderPage; spaceName: string; syncState: string;
   )
 }
 
-function Navigator(props: { rows: TreeRow[]; selectedPageId: string; focused: boolean }) {
+function Navigator(props: { rows: TreeRow[]; selectedPageId: string; focused: boolean; viewMode: PageViewMode; onSetViewMode: (view: PageViewMode) => void }) {
   return (
     <box
       width={36}
@@ -832,13 +890,25 @@ function Navigator(props: { rows: TreeRow[]; selectedPageId: string; focused: bo
       flexDirection="column"
     >
       <text height={1} fg={props.focused ? theme.accent : theme.muted} attributes={1}>NAVIGATOR</text>
-      <text height={1} fg={theme.subtle}>j/k move  h/l fold  Tab panes</text>
+      <box height={1} flexDirection="row" gap={1}>
+        <NavigatorTab label="Current" active={props.viewMode === "current"} onPress={() => props.onSetViewMode("current")} />
+        <NavigatorTab label="Archived" active={props.viewMode === "archived"} onPress={() => props.onSetViewMode("archived")} />
+      </box>
+      <text height={1} fg={theme.subtle}>j/k move  h/l fold  a toggle  Tab panes</text>
       <box height={1} />
       <scrollbox flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
         <box flexDirection="column" width="100%">
           <For each={props.rows}>{(row) => <NavigatorRow row={row} selected={row.page.pageId === props.selectedPageId} />}</For>
         </box>
       </scrollbox>
+    </box>
+  )
+}
+
+function NavigatorTab(props: { label: string; active: boolean; onPress: () => void }) {
+  return (
+    <box height={1} width={props.label.length + 4} onMouseDown={props.onPress}>
+      <text height={1} fg={props.active ? theme.accent : theme.subtle}>{props.active ? `[${props.label}]` : ` ${props.label} `}</text>
     </box>
   )
 }
@@ -853,13 +923,14 @@ function NavigatorRow(props: { row: TreeRow; selected: boolean }) {
   const documentKind = () => navigatorDocumentKind(props.row)
   const symbol = () => navigatorDocumentKindSymbols[documentKind()]
   const symbolColor = () => props.row.detached ? theme.warn : navigatorDocumentKindColors[documentKind()]
-  const titleColor = () => props.selected ? theme.text : props.row.detached ? theme.warn : theme.muted
+  const titleColor = () => props.selected ? theme.text : isArchivedPage(props.row.page) ? theme.subtle : props.row.detached ? theme.warn : theme.muted
+  const title = () => isArchivedPage(props.row.page) ? `${props.row.page.title} [archived]` : props.row.page.title
 
   return (
     <box height={1} width="100%" backgroundColor={props.selected ? theme.accentSoft : undefined} paddingLeft={0} paddingRight={1} flexDirection="row">
       <text height={1} width={props.row.depth * 2 + 2} fg={theme.subtle}>{prefix()}</text>
       <text height={1} width={2} fg={props.selected ? theme.text : symbolColor()}>{symbol()}</text>
-      <text height={1} flexGrow={1} minWidth={0} fg={titleColor()}>{props.row.page.title}</text>
+      <text height={1} flexGrow={1} minWidth={0} fg={titleColor()}>{title()}</text>
     </box>
   )
 }
@@ -915,6 +986,9 @@ function Reader(props: { page: ReaderPage; focused: boolean; narrow: boolean; tr
         <box flexGrow={1} minWidth={0} height="100%" flexDirection="column">
           <text height={1} fg={props.focused ? theme.accent : theme.muted} attributes={1}>DOCUMENT</text>
           <text height={1} fg={theme.subtle}>{props.page.snippet}</text>
+          <Show when={isArchivedPage(props.page)} fallback={<box height={0} />}>
+            <text height={1} fg={theme.warn}>Archived in Confluence · read-only</text>
+          </Show>
           <box height={1} />
           <scrollbox id="document-scrollbox" ref={props.setDocumentScrollbox} flexGrow={1} minHeight={0} scrollX scrollbarOptions={{ showArrows: false }} horizontalScrollbarOptions={{ showArrows: false }}>
             <markdown
@@ -1000,8 +1074,8 @@ function InfoPanel(props: { title: string; items: string[]; empty: string }) {
 function StatusBar(props: { focusPane: string; editorOpen: boolean; editorDirty: boolean; editMessage: string }) {
   const hint = () => {
     if (props.editorOpen) return "Ctrl+T stage | Esc close without changing staged docs"
-    if (props.focusPane === "document") return "/ page search | s spaces | c overview | e edit | D delete | Tab/Shift+Tab panes | j/k scroll line | h/l scroll wide doc | d/u scroll doc | q quit"
-    return "/ page search | s spaces | c overview | Tab/Shift+Tab panes | n child | N root | e edit | D delete | j/k move | h/l fold | q quit"
+    if (props.focusPane === "document") return "/ search | s spaces | a archived | c overview | e edit | D delete | Tab panes | j/k scroll | h/l wide | d/u page | q quit"
+    return "/ search | s spaces | a archived | c overview | Tab panes | n child | N root | e edit | D delete | j/k move | h/l fold | q quit"
   }
   const status = () => {
     if (props.editorOpen) return props.editMessage || `editing transient buffer: ${props.editorDirty ? "modified" : "unchanged"}`
@@ -1242,7 +1316,7 @@ export function NewPageOverlay(props: { visible: boolean; title: string; parentP
   )
 }
 
-function PageSearchOverlay(props: { visible: boolean; query: string; results: SearchResult[]; selectedIndex: number; activeSpaceName: string; left: number; width: number; height: number }) {
+function PageSearchOverlay(props: { visible: boolean; query: string; results: SearchResult[]; selectedIndex: number; activeSpaceName: string; viewMode: PageViewMode; left: number; width: number; height: number }) {
   return (
     <box
       visible={props.visible}
@@ -1262,7 +1336,7 @@ function PageSearchOverlay(props: { visible: boolean; query: string; results: Se
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
         <text height={1} fg={theme.accent} attributes={1}>PAGE SEARCH</text>
-        <text height={1} fg={theme.muted}>{props.activeSpaceName}</text>
+        <text height={1} fg={theme.muted}>{props.activeSpaceName} · {props.viewMode}</text>
       </box>
       <text height={1} fg={theme.text}>/ {props.query || "type title, path, or content"}_</text>
       <text height={1} fg={theme.subtle}>{props.results.length} result{props.results.length === 1 ? "" : "s"}  type to search  up/down move  enter open  esc close</text>
@@ -1450,6 +1524,12 @@ export function nextFocusPaneForKey(current: FocusPane, key: SearchKeyLike): Foc
   return current
 }
 
+export function nextPageViewModeForKey(current: PageViewMode, key: SearchKeyLike): PageViewMode | null {
+  if (!isPlainKey(key, "a")) return null
+
+  return current === "current" ? "archived" : "current"
+}
+
 export function nextNavigatorSelectionForCollapse(row: NavigatorCollapseRow | undefined, knownPages: { has: (pageId: string) => boolean }): string | null {
   if (!row || (row.hasChildren && row.expanded)) return null
 
@@ -1512,6 +1592,18 @@ function relatedItems(page: ReaderPage) {
     ...page.outgoingLinks.map((link) => `${link.kind === "internal" ? "->" : "external"} ${link.title}`),
     ...page.backlinks.map((link) => `<- ${link.title}`),
   ]
+}
+
+function isArchivedPage(page: IndexedPage) {
+  return (page.remoteStatus ?? "current") === "archived"
+}
+
+function isEditableRemotePage(page: IndexedPage) {
+  return (page.remoteStatus ?? "current") === "current" && (page.contentType ?? "page") === "page"
+}
+
+function remoteStatusLabel(page: IndexedPage) {
+  return page.remoteStatus ?? "current"
 }
 
 const dateFormatter = new Intl.DateTimeFormat("en", { month: "short", day: "2-digit", year: "numeric" })

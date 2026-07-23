@@ -19,7 +19,7 @@ describe("local CLI integration", () => {
       expect(output.stdout).toContain("lazyconfluence local config")
       expect(output.stdout).toContain("Default space: ENG")
       expect(output.stdout).toContain(`Database: ${setup.dbPath}`)
-      expect(output.stdout).toContain("Schema version: 7")
+      expect(output.stdout).toContain("Schema version: 8")
       expect(output.stdout).toContain("Spaces indexed: 2")
       expect(output.stdout).toContain("Pages indexed: 3")
       expect(output.stdout).toContain("Local drafts: 0")
@@ -72,10 +72,11 @@ describe("local CLI integration", () => {
       "/wiki/api/v2/spaces?keys=ENG&limit=250": {
         results: [{ id: "10", key: "ENG", name: "Engineering", homepageId: "100" }],
       },
-      "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage": {
+      "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage&status=current": {
         results: [confluencePagePayload("100", "Engineering Home", null, "<p>Home page.</p>")],
         _links: {},
       },
+      "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage&status=archived": { results: [], _links: {} },
       "/wiki/api/v2/pages/100/direct-children?limit=250": { results: [], _links: {} },
     }
 
@@ -103,10 +104,11 @@ describe("local CLI integration", () => {
       "/wiki/api/v2/spaces?keys=ENG&limit=250": {
         results: [{ id: "10", key: "ENG", name: "Engineering", homepageId: "100" }],
       },
-      "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage": {
+      "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage&status=current": {
         results: [confluencePagePayload("100", "Engineering Home", null, "<p>Home page.</p>"), confluencePageMetadata("bad", "Bad Page", null)],
         _links: {},
       },
+      "/wiki/api/v2/pages?space-id=10&limit=100&body-format=storage&status=archived": { results: [], _links: {} },
       "/wiki/api/v2/pages/100/direct-children?limit=250": { results: [], _links: {} },
       "/wiki/api/v2/pages/bad/direct-children?limit=250": { results: [], _links: {} },
       "/wiki/api/v2/pages/bad?body-format=storage": fetchResponse({ message: "boom" }, false, 500, "Server Error"),

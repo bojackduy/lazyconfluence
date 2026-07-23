@@ -65,6 +65,8 @@ export function mapConfluencePage(input: ConfluencePageMappingInput): MappedConf
     contentMarkdown: mappedBody.renderedMarkdown,
     snippet: documentSnippet(mappedBody.document),
     treeOrder: pageTreeOrder(input.page, input.treeOrder),
+    contentType: confluenceContentType(input.page),
+    remoteStatus: confluenceRemoteStatus(input.page),
   }
 
   return {
@@ -118,7 +120,17 @@ export function mapConfluenceFolder(input: ConfluencePageMappingInput): IndexedP
     contentMarkdown: "",
     snippet: "",
     treeOrder: pageTreeOrder(input.page, input.treeOrder),
+    contentType: confluenceContentType(input.page),
+    remoteStatus: confluenceRemoteStatus(input.page),
   }
+}
+
+function confluenceContentType(page: ConfluencePage) {
+  return page.type || "page"
+}
+
+function confluenceRemoteStatus(page: ConfluencePage) {
+  return page.status || "current"
 }
 
 function pageTreeOrder(page: ConfluencePage, fallback = 0) {

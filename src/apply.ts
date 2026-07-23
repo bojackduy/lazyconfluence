@@ -48,6 +48,7 @@ export async function applyPageDraftToConfluence(pageId: string, options: ApplyP
   try {
     const page = repository.getPage(pageId)
     if (!page) throw new ApplyPageDraftError(`Page not found in local index: ${pageId}`)
+    if (!isEditableRemotePage(page)) return blocked(pageId, page.title, "read-only-remote", [`${page.title} is ${remoteStatusLabel(page)} in Confluence and is read-only in lazyconfluence.`])
 
     const body = repository.getPageBody(pageId)
     if (!body) return blocked(pageId, page.title, "missing-body", [`No editable body artifact found for ${page.title} (${page.pageId}). Run sync first.`])
@@ -167,6 +168,7 @@ export async function applyPageCreateToConfluence(localId: string, options: Appl
 
     const parent = create.parentPageId ? repository.getPage(create.parentPageId) : null
     if (create.parentPageId && !parent) return blocked(localId, create.title, "missing-parent", [`Parent page not found in local index: ${create.parentPageId}.`])
+    if (parent && !isEditableRemotePage(parent)) return blocked(localId, create.title, "read-only-parent", [`Parent page ${parent.title} is ${remoteStatusLabel(parent)} in Confluence and cannot receive new child pages from lazyconfluence.`])
 
     const converted = markdownToConfluenceStorage(create.draftMarkdown)
     if (converted.blockedReasons.length) return blocked(localId, create.title, "unsafe-draft", converted.blockedReasons)
@@ -236,11 +238,12 @@ export async function applyPageDeleteToConfluence(pageId: string, options: Apply
   try {
     const page = repository.getPage(pageId)
     if (!page) return blocked(pageId, "Deleted page", "missing-page", [`Page not found in local index: ${pageId}.`])
+    if (!isEditableRemotePage(page)) return blocked(pageId, page.title, "read-only-remote", [`${page.title} is ${remoteStatusLabel(page)} in Confluence and is read-only in lazyconfluence.`])
 
     const deletion = repository.getPageDelete(pageId)
     if (!deletion) return blocked(pageId, page.title, "missing-delete", [`No staged delete found for ${page.title} (${page.pageId}).`])
 
-    const children = repository.getChildren(pageId)
+    const children = repository.getChildren(pageId, "all")
     if (children.length) return blocked(pageId, page.title, "has-children", [`Delete child pages first: ${children.map((child) => child.title).join(", ")}.`])
 
     const localChildren = repository.listPageCreates(page.spaceKey).filter((create) => create.parentPageId === pageId)
@@ -295,4 +298,12 @@ function conflictReasons(input: { localBaseVersion: number; localBaseHash: strin
 
 function blocked(pageId: string, title: string, reason: string, details: string[]): ApplyPageDraftResult {
   return { status: "blocked", pageId, title, reason, details }
+}
+
+function isEditableRemotePage(page: { contentType?: string; remoteStatus?: string }) {
+  return (page.remoteStatus ?? "current") === "current" && (page.contentType ?? "page") === "page"
+}
+
+function remoteStatusLabel(page: { remoteStatus?: string }) {
+  return page.remoteStatus ?? "current"
 }

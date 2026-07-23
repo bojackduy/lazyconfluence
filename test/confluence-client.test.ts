@@ -45,7 +45,7 @@ describe("Confluence client", () => {
       email: "reader@example.com",
       apiToken: "token",
       fetch: jsonFetch(calls, {
-        "/wiki/api/v2/pages?space-id=10&limit=2&body-format=storage": {
+        "/wiki/api/v2/pages?space-id=10&limit=2&body-format=storage&status=current": {
           results: [{ id: "100", title: "Home" }],
           _links: { next: "/wiki/api/v2/pages?cursor=next" },
         },
@@ -56,10 +56,10 @@ describe("Confluence client", () => {
       }),
     })
 
-    const pages = await client.fetchPagesBySpace("10", { limit: 2, bodyFormat: "storage" })
+    const pages = await client.fetchPagesBySpace("10", { limit: 2, bodyFormat: "storage", status: "current" })
 
     expect(calls).toEqual([
-      "https://example.atlassian.net/wiki/api/v2/pages?space-id=10&limit=2&body-format=storage",
+      "https://example.atlassian.net/wiki/api/v2/pages?space-id=10&limit=2&body-format=storage&status=current",
       "https://example.atlassian.net/wiki/api/v2/pages?cursor=next",
     ])
     expect(pages.map((page) => page.title)).toEqual(["Home", "Architecture"])

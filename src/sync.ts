@@ -151,7 +151,11 @@ async function syncSpace(input: {
   onProgress?: (event: SyncProgressEvent) => void
 }) {
   emitProgress(input.onProgress, { type: "fetching-space-pages", message: `Fetching pages for ${input.space.key}.`, spaceKey: input.space.key, spaceName: input.space.name })
-  const listedPages = await input.client.fetchPagesBySpace(input.space.id, { bodyFormat: "storage", limit: input.pageLimit })
+  const [currentPages, archivedPages] = await Promise.all([
+    input.client.fetchPagesBySpace(input.space.id, { bodyFormat: "storage", limit: input.pageLimit, status: "current" }),
+    input.client.fetchPagesBySpace(input.space.id, { bodyFormat: "storage", limit: input.pageLimit, status: "archived" }),
+  ])
+  const listedPages = mergeConfluencePageList(currentPages, archivedPages)
   emitProgress(input.onProgress, { type: "fetched-space-pages", message: `Fetched ${listedPages.length} page${listedPages.length === 1 ? "" : "s"} for ${input.space.key}.`, spaceKey: input.space.key, spaceName: input.space.name, count: listedPages.length })
   const nodeById = new Map<string, ConfluencePage>()
   const treeOrderById = new Map<string, number>()
@@ -217,6 +221,7 @@ async function syncSpace(input: {
   input.repository.upsertPages(pages)
   input.repository.upsertPageBodies(bodyArtifacts)
   input.repository.upsertLinks(links)
+  if (canPruneSyncedSpace(pageFailures)) input.repository.prunePagesInSpace(input.space.key, new Set(pages.map((page) => page.pageId)))
 
   return { pagesIndexed: pages.length, linksIndexed: links.length, bodyArtifactsPersisted: bodyArtifacts.length, failures: pageFailures }
 }
@@ -350,7 +355,7 @@ function canFetchDirectChildren(page: ConfluencePage) {
 }
 
 function canSyncPageBody(page: ConfluencePage) {
-  return (!page.type || page.type === "page") && (!page.status || page.status === "current")
+  return (!page.type || page.type === "page") && (!page.status || page.status === "current" || page.status === "archived")
 }
 
 function unsupportedConfluenceContentMessage(page: ConfluencePage) {
@@ -362,6 +367,24 @@ function unsupportedConfluenceContentMessage(page: ConfluencePage) {
 
 function isConfluenceNotFound(error: unknown) {
   return error instanceof ConfluenceClientError && error.status === 404
+}
+
+function canPruneSyncedSpace(failures: SyncFailure[]) {
+  return !failures.some((failure) => failure.message.startsWith("Could not fetch children") || failure.message.startsWith("Could not fetch missing parent"))
+}
+
+function mergeConfluencePageList(...lists: ConfluencePage[][]) {
+  const byId = new Map<string, ConfluencePage>()
+
+  for (const list of lists) {
+    for (const page of list) {
+      if (!page.id) continue
+      const existing = byId.get(page.id)
+      byId.set(page.id, existing ? mergeConfluencePage(existing, page) : page)
+    }
+  }
+
+  return [...byId.values()]
 }
 
 function mergeConfluencePage(existing: ConfluencePage, incoming: ConfluencePage): ConfluencePage {

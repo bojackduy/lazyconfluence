@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite"
 
-export const INDEX_SCHEMA_VERSION = 7
+export const INDEX_SCHEMA_VERSION = 8
 
 export function applyIndexSchema(database: Database) {
   database.run("PRAGMA foreign_keys = ON")
@@ -19,6 +19,16 @@ export function applyIndexSchema(database: Database) {
   if (currentVersion < 3 && !hasColumn(database, "pages", "tree_order")) {
     database.run("ALTER TABLE pages ADD COLUMN tree_order INTEGER NOT NULL DEFAULT 0")
   }
+
+  if (currentVersion < 8 && !hasColumn(database, "pages", "content_type")) {
+    database.run("ALTER TABLE pages ADD COLUMN content_type TEXT NOT NULL DEFAULT 'page'")
+  }
+
+  if (currentVersion < 8 && !hasColumn(database, "pages", "remote_status")) {
+    database.run("ALTER TABLE pages ADD COLUMN remote_status TEXT NOT NULL DEFAULT 'current'")
+  }
+
+  database.run("CREATE INDEX IF NOT EXISTS pages_space_status_parent_idx ON pages(space_key, remote_status, parent_id, title COLLATE NOCASE)")
 
   if (currentVersion < INDEX_SCHEMA_VERSION) {
     database.run(`PRAGMA user_version = ${INDEX_SCHEMA_VERSION}`)
@@ -85,6 +95,8 @@ CREATE TABLE IF NOT EXISTS pages (
   content_markdown TEXT NOT NULL,
   snippet TEXT NOT NULL,
   tree_order INTEGER NOT NULL DEFAULT 0,
+  content_type TEXT NOT NULL DEFAULT 'page',
+  remote_status TEXT NOT NULL DEFAULT 'current',
   indexed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

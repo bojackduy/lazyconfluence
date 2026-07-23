@@ -111,12 +111,13 @@ export class ConfluenceClient {
     return spaces
   }
 
-  async fetchPagesBySpace(spaceId: string, options: { bodyFormat?: "storage" | "atlas_doc_format"; limit?: number } = {}) {
+  async fetchPagesBySpace(spaceId: string, options: { bodyFormat?: "storage" | "atlas_doc_format"; limit?: number; status?: "current" | "archived" } = {}) {
     const params: QueryParams = {
       "space-id": [spaceId],
       limit: options.limit ?? 100,
     }
     if (options.bodyFormat) params["body-format"] = options.bodyFormat
+    if (options.status) params.status = options.status
 
     return this.paginatedResults<ConfluencePage>("/api/v2/pages", params)
   }

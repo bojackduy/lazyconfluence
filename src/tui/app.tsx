@@ -3,7 +3,6 @@ import {
   BoxRenderable,
   CliRenderEvents,
   CodeRenderable,
-  type CliRenderer,
   type OptimizedBuffer,
   RGBA,
   TextAttributes,
@@ -26,7 +25,6 @@ import type { PageDraftStatus } from "../index/repository"
 import type { ApplyPageDraftResult } from "../apply"
 import { defaultRuntimeEnv, runtimeEnvFromLegacyDemo, type RuntimeEnv } from "../runtime/env"
 import { emptyPageId, emptyReaderPage, emptySpaceSummary } from "./data"
-import { kittyDeleteImageCommand, kittyGraphicsCommand, kittyImageId } from "./kitty"
 import { splitReaderImagePlaceholders, type ReaderContentPart } from "./media"
 import { createTuiRuntime, type TuiRuntime } from "./runtime"
 import type { TuiSource, TuiStagedChange } from "./source"
@@ -45,6 +43,8 @@ type NavigatorCollapseRow = {
   hasChildren: boolean
   expanded: boolean
 }
+
+type ReaderImagePart = Extract<ReaderContentPart, { kind: "image" }>
 
 const documentHorizontalScrollColumns = 8
 
@@ -121,6 +121,9 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const [changesApplying, setChangesApplying] = createSignal(false)
   const [changesMessage, setChangesMessage] = createSignal("")
   const [editStatusMessage, setEditStatusMessage] = createSignal("")
+  const [imageViewerOpen, setImageViewerOpen] = createSignal(false)
+  const [imageViewerSelectedIndex, setImageViewerSelectedIndex] = createSignal(0)
+  const [terminalCapabilities, setTerminalCapabilities] = createSignal<TerminalCapabilities | null>(renderer.capabilities)
   const [treeSitterClient, setTreeSitterClient] = createSignal<TreeSitterClient | undefined>()
   let documentScrollbox: ScrollBoxRenderable | undefined
   let editorFocusTimer: ReturnType<typeof setTimeout> | undefined
@@ -164,6 +167,8 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     draftRevision()
     return dataSource.listStagedChanges(activeSpaceKey())
   })
+  const readerImageParts = createMemo(() => readerImagePartsForPage(readerPage()))
+  const inlineImageRenderMode = createMemo(() => imageRenderModeForCapabilities(terminalCapabilities()))
   const isNarrow = createMemo(() => dimensions().width < 96)
   const halfPageScrollAmount = createMemo(() => Math.max(6, Math.floor((dimensions().height - 9) / 2)))
   const credentialWarning = createMemo<CredentialWarning | null>(() => {
@@ -183,6 +188,13 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     onCleanup(() => {
       cancelled = true
     })
+  })
+
+  onMount(() => {
+    const updateCapabilities = (capabilities: TerminalCapabilities | null) => setTerminalCapabilities(capabilities)
+    renderer.on(CliRenderEvents.CAPABILITIES, updateCapabilities)
+
+    onCleanup(() => renderer.off(CliRenderEvents.CAPABILITIES, updateCapabilities))
   })
 
   onMount(() => {
@@ -273,6 +285,19 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     })
   })
 
+  createEffect(() => {
+    const images = readerImageParts()
+    if (!imageViewerOpen()) return
+
+    if (!images.length) {
+      setImageViewerOpen(false)
+      setImageViewerSelectedIndex(0)
+      return
+    }
+
+    if (imageViewerSelectedIndex() >= images.length) setImageViewerSelectedIndex(images.length - 1)
+  })
+
   const openPageSearch = () => {
     setSpaceSwitcherOpen(false)
     setChangesOpen(false)
@@ -323,6 +348,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     setPageSearchOpen(false)
     setNewPageOpen(false)
     setSpaceSwitcherOpen(false)
+    setImageViewerOpen(false)
 
     const changes = stagedChanges()
     const focusIndex = focusChangeKey ? changes.findIndex((change) => change.changeKey === focusChangeKey) : -1
@@ -467,6 +493,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     setPageSearchOpen(false)
     setSpaceSwitcherOpen(false)
     setChangesOpen(false)
+    setImageViewerOpen(false)
     setNewPageTitle("")
     setNewPageParentPageId(parentPageId)
     setNewPageOpen(true)
@@ -536,6 +563,35 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const scrollDocumentHorizontallyBy = (columns: number) => {
     documentScrollbox?.scrollBy({ x: columns, y: 0 })
     setFocusPane("document")
+  }
+
+  const openImageViewer = () => {
+    const images = readerImageParts()
+    if (!images.length) {
+      setEditStatusMessage("No image placeholders are available on this page.")
+      return
+    }
+
+    setPageSearchOpen(false)
+    setSpaceSwitcherOpen(false)
+    setChangesOpen(false)
+    setNewPageOpen(false)
+    setImageViewerSelectedIndex(0)
+    setImageViewerOpen(true)
+    setFocusPane("document")
+    setEditStatusMessage(`Viewing image: ${images[0]?.label ?? "image"}. Esc closes the viewer.`)
+  }
+
+  const closeImageViewer = () => {
+    setImageViewerOpen(false)
+    setEditStatusMessage("Closed image viewer.")
+  }
+
+  const moveImageViewerSelection = (direction: number) => {
+    const images = readerImageParts()
+    if (!images.length) return
+
+    setImageViewerSelectedIndex((current) => (current + direction + images.length) % images.length)
   }
 
   const openEditorForSelectedPage = () => {
@@ -635,6 +691,13 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
       return
     }
 
+    if (imageViewerOpen()) {
+      if (key.name === "escape" || isPlainKey(key, "q")) closeImageViewer()
+      else if (key.name === "j" || key.name === "down" || key.name === "l" || key.name === "right") moveImageViewerSelection(1)
+      else if (key.name === "k" || key.name === "up" || key.name === "h" || key.name === "left") moveImageViewerSelection(-1)
+      return
+    }
+
     if (changesOpen()) {
       if (key.name === "escape") closeChanges()
       else if (key.name === "j" || key.name === "down") moveChangesSelection(1)
@@ -715,6 +778,11 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
       return
     }
 
+    if (isPlainKey(key, "i")) {
+      openImageViewer()
+      return
+    }
+
     if (isPlainKey(key, "D")) {
       stageDeleteSelectedPage()
       return
@@ -772,7 +840,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
       <Show when={credentialWarning()} fallback={<box height={0} />}>{(status) => <CredentialNotice status={status()} />}</Show>
       <box flexGrow={1} minHeight={0} flexDirection={isNarrow() ? "column" : "row"} paddingX={1}>
         <Navigator rows={treeRows()} selectedPageId={selectedPageId()} focused={focusPane() === "navigator"} viewMode={pageViewMode()} onSetViewMode={switchPageView} />
-        <Reader page={readerPage()} focused={focusPane() === "document"} narrow={isNarrow()} treeSitterClient={treeSitterClient()} setDocumentScrollbox={(scrollbox) => { documentScrollbox = scrollbox }} />
+        <Reader page={readerPage()} focused={focusPane() === "document"} narrow={isNarrow()} treeSitterClient={treeSitterClient()} imageRenderMode={inlineImageRenderMode()} setDocumentScrollbox={(scrollbox) => { documentScrollbox = scrollbox }} />
       </box>
       <StatusBar focusPane={focusPane()} editorOpen={editorOpen()} editorDirty={editorDirty()} editMessage={editStatusMessage()} />
       <Show when={editorOpen()} fallback={<box height={0} />}>
@@ -835,6 +903,18 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
         left={dimensions().width < 72 ? 2 : 8}
         width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 4 : 16))}
         height={Math.min(16, Math.max(10, dimensions().height - 8))}
+      />
+      <ImageViewerOverlay
+        visible={imageViewerOpen()}
+        pageTitle={readerPage().title}
+        images={readerImageParts()}
+        selectedIndex={imageViewerSelectedIndex()}
+        renderMode={inlineImageRenderMode()}
+        left={dimensions().width < 72 ? 1 : 4}
+        top={2}
+        width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 2 : 8))}
+        height={Math.max(10, dimensions().height - 4)}
+        onClose={closeImageViewer}
       />
     </box>
   )
@@ -963,20 +1043,10 @@ function navigatorDocumentKind(row: TreeRow): NavigatorDocumentKind {
   return "page"
 }
 
-function Reader(props: { page: ReaderPage; focused: boolean; narrow: boolean; treeSitterClient?: TreeSitterClient; setDocumentScrollbox: (scrollbox: ScrollBoxRenderable) => void }) {
+function Reader(props: { page: ReaderPage; focused: boolean; narrow: boolean; treeSitterClient?: TreeSitterClient; imageRenderMode: ImageRenderMode; setDocumentScrollbox: (scrollbox: ScrollBoxRenderable) => void }) {
   const renderer = useRenderer()
   const renderCodeBlock = createReadableCodeBlockRenderer(renderer)
-  const [terminalCapabilities, setTerminalCapabilities] = createSignal<TerminalCapabilities | null>(renderer.capabilities)
-  const nativeProtocols = nativeImageProtocolsEnabled()
-  const imageRenderMode = createMemo(() => imageRenderModeForCapabilities(terminalCapabilities(), { nativeProtocols }))
   const contentParts = createMemo(() => splitReaderImagePlaceholders(props.page.contentMarkdown, props.page.mediaAssets ?? []))
-
-  onMount(() => {
-    const updateCapabilities = (capabilities: TerminalCapabilities | null) => setTerminalCapabilities(capabilities)
-    renderer.on(CliRenderEvents.CAPABILITIES, updateCapabilities)
-
-    onCleanup(() => renderer.off(CliRenderEvents.CAPABILITIES, updateCapabilities))
-  })
 
   return (
     <box
@@ -1015,7 +1085,7 @@ function Reader(props: { page: ReaderPage; focused: boolean; narrow: boolean; tr
                   renderNode={renderCodeBlock}
                   tableOptions={{ style: "grid", widthMode: "full", columnFitter: "balanced", wrapMode: "word", cellPaddingX: 1, borderStyle: "rounded", borderColor: theme.codeBorder, selectable: true }}
                 />
-              ) : <ImagePreviewCard part={part} narrow={props.narrow} renderMode={imageRenderMode()} />}</For>
+              ) : <ImagePreviewCard part={part} narrow={props.narrow} renderMode={props.imageRenderMode} />}</For>
             </box>
           </scrollbox>
         </box>
@@ -1026,22 +1096,13 @@ function Reader(props: { page: ReaderPage; focused: boolean; narrow: boolean; tr
 }
 
 function ImagePreviewCard(props: { part: Extract<ReaderContentPart, { kind: "image" }>; narrow: boolean; renderMode: ImageRenderMode }) {
-  const renderer = useRenderer()
-  const kittyOverlay = kittyOverlayForRenderer(renderer)
   const loaded = createMemo(() => loadImagePreview(props.part.asset))
   const image = createMemo(() => imageFromLoadResult(loaded()))
   const fallbackMessage = createMemo(() => messageFromLoadResult(loaded()))
   const size = createMemo(() => image() ? imagePreviewSize(image()!, props.narrow) : { width: props.narrow ? 34 : 52, height: 4 })
-  const kittyId = createMemo(() => kittyImageId(`${props.part.nodeId}:${props.part.asset?.cachePath ?? props.part.label}`))
-  let imageRenderable: BoxRenderable | undefined
-
-  onCleanup(() => kittyOverlay.deleteImage(kittyId()))
 
   const renderPreview = (buffer: OptimizedBuffer, decoded: DecodedImage) => {
     drawImagePreview(buffer, decoded, props.renderMode)
-    if (props.renderMode !== "kitty" || !imageRenderable) return
-
-    kittyOverlay.queueImage({ id: kittyId(), image: decoded, renderable: imageRenderable, columns: buffer.width, rows: buffer.height })
   }
 
   return (
@@ -1052,8 +1113,62 @@ function ImagePreviewCard(props: { part: Extract<ReaderContentPart, { kind: "ima
         {(decoded) => (
           <box flexDirection="column" width="100%">
             <text height={1} fg={theme.subtle}>cached PNG {decoded().width}x{decoded().height} · {imageRenderModeLabel(props.renderMode)}</text>
-            <box ref={(renderable: BoxRenderable) => { imageRenderable = renderable }} width="100%" height={size().height} backgroundColor={theme.bg} buffered renderAfter={(buffer: OptimizedBuffer) => renderPreview(buffer, decoded())} />
+            <box width="100%" height={size().height} backgroundColor={theme.bg} buffered renderAfter={(buffer: OptimizedBuffer) => renderPreview(buffer, decoded())} />
           </box>
+        )}
+      </Show>
+    </box>
+  )
+}
+
+export function ImageViewerOverlay(props: { visible: boolean; pageTitle: string; images: ReaderImagePart[]; selectedIndex: number; renderMode: ImageRenderMode; left: number; top: number; width: number; height: number; onClose: () => void }) {
+  const selectedImage = createMemo(() => props.images[props.selectedIndex] ?? null)
+  const loaded = createMemo(() => props.visible && selectedImage() ? loadImagePreview(selectedImage()!.asset) : { status: "error", message: "No image selected." } satisfies ImageLoadResult)
+  const image = createMemo(() => imageFromLoadResult(loaded()))
+  const fallbackMessage = createMemo(() => messageFromLoadResult(loaded()))
+  const previewHeight = createMemo(() => image() ? imageViewerPreviewHeight(image()!, props.width, props.height) : Math.max(3, props.height - 8))
+
+  const renderPreview = (buffer: OptimizedBuffer, decoded: DecodedImage) => {
+    drawImagePreview(buffer, decoded, props.renderMode)
+  }
+
+  return (
+    <box
+      visible={props.visible}
+      position="absolute"
+      left={props.left}
+      top={props.top}
+      width={props.width}
+      height={props.height}
+      border
+      borderStyle="rounded"
+      borderColor={image() ? theme.good : theme.warn}
+      backgroundColor={theme.bg}
+      paddingX={2}
+      paddingY={1}
+      flexDirection="column"
+      zIndex={80}
+    >
+      <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
+        <text height={1} fg={image() ? theme.good : theme.warn} attributes={1}>IMAGE VIEWER</text>
+        <box height={1} width={8} onMouseDown={props.onClose}><text height={1} fg={theme.muted}>Close</text></box>
+      </box>
+      <text height={1} fg={theme.text}>{props.pageTitle}</text>
+      <Show when={selectedImage()} fallback={<text height={1} fg={theme.subtle}>No image placeholders are available on this page.</text>}>
+        {(part) => (
+          <>
+            <text height={1} fg={theme.text}>{part().label}</text>
+            <text height={1} fg={theme.subtle}>{props.images.length ? `${props.selectedIndex + 1} of ${props.images.length}` : "0 of 0"} · {imageRenderModeLabel(props.renderMode)} · j/k or h/l switch · esc close</text>
+            <box height={1} />
+            <Show when={image()} fallback={<ImagePreviewFallback part={part()} message={fallbackMessage()} />}>
+              {(decoded) => (
+                <box flexDirection="column" width="100%">
+                  <text height={1} fg={theme.subtle}>cached {decoded().format.toUpperCase()} {decoded().width}x{decoded().height}</text>
+                  <box width="100%" height={previewHeight()} backgroundColor={theme.bg} buffered renderAfter={(buffer: OptimizedBuffer) => renderPreview(buffer, decoded())} />
+                </box>
+              )}
+            </Show>
+          </>
         )}
       </Show>
     </box>
@@ -1112,6 +1227,14 @@ function imagePreviewSize(image: DecodedImage, narrow: boolean) {
   return { width, height }
 }
 
+function imageViewerPreviewHeight(image: DecodedImage, overlayWidth: number, overlayHeight: number) {
+  const maxWidth = Math.max(8, overlayWidth - 6)
+  const maxHeight = Math.max(3, overlayHeight - 8)
+  const aspectHeight = Math.max(3, Math.round((maxWidth * image.height / image.width) * 0.5))
+
+  return Math.min(maxHeight, aspectHeight)
+}
+
 function drawImagePreview(buffer: OptimizedBuffer, image: DecodedImage, mode: ImageRenderMode) {
   if (mode === "cell-color" || mode === "kitty" || mode === "sixel") {
     drawColorCellImage(buffer, image)
@@ -1122,10 +1245,8 @@ function drawImagePreview(buffer: OptimizedBuffer, image: DecodedImage, mode: Im
 }
 
 type ScaledImage = { width: number; height: number; rgba: Uint8Array }
-type KittyQueuedImage = { id: number; image: DecodedImage; renderable: BoxRenderable; columns: number; rows: number }
 
 const scaledImageCache = new WeakMap<DecodedImage, Map<string, ScaledImage>>()
-const kittyOverlayManagers = new WeakMap<CliRenderer, KittyImageOverlay>()
 const monoRamp = " .:-=+*#%@"
 const imagePreviewBackgroundInts = RGBA.fromHex(theme.bg).toInts()
 
@@ -1158,10 +1279,6 @@ function scaledImageForCells(image: DecodedImage, cellWidth: number, cellHeight:
   return scaledImageForSize(image, Math.max(1, cellWidth), Math.max(1, cellHeight * 2))
 }
 
-function scaledImageForKitty(image: DecodedImage, columns: number, rows: number): ScaledImage {
-  return scaledImageForSize(image, Math.min(image.width, Math.max(1, columns * 4)), Math.min(image.height, Math.max(1, rows * 8)))
-}
-
 function scaledImageForSize(image: DecodedImage, width: number, height: number): ScaledImage {
   const key = `${width}x${height}`
   let imageCache = scaledImageCache.get(image)
@@ -1176,84 +1293,6 @@ function scaledImageForSize(image: DecodedImage, width: number, height: number):
   imageCache.set(key, scaled)
 
   return scaled
-}
-
-function kittyOverlayForRenderer(renderer: CliRenderer) {
-  const existing = kittyOverlayManagers.get(renderer)
-  if (existing) return existing
-
-  const created = new KittyImageOverlay(renderer)
-  kittyOverlayManagers.set(renderer, created)
-
-  return created
-}
-
-class KittyImageOverlay {
-  private queued = new Map<number, KittyQueuedImage>()
-  private displayed = new Set<number>()
-  private readonly stdout: NodeJS.WriteStream
-  private readonly onFrame = () => this.flush()
-  private readonly onDestroy = () => this.destroy()
-
-  constructor(private readonly renderer: CliRenderer) {
-    this.stdout = rendererStdout(renderer)
-    renderer.on(CliRenderEvents.FRAME, this.onFrame)
-    renderer.on(CliRenderEvents.DESTROY, this.onDestroy)
-  }
-
-  queueImage(image: KittyQueuedImage) {
-    if (!isRenderableOnScreen(this.renderer, image.renderable)) return
-
-    this.queued.set(image.id, image)
-  }
-
-  deleteImage(id: number) {
-    this.queued.delete(id)
-    if (!this.displayed.delete(id)) return
-
-    this.write(kittyDeleteImageCommand(id))
-  }
-
-  private flush() {
-    for (const id of this.displayed) {
-      if (!this.queued.has(id)) this.write(kittyDeleteImageCommand(id))
-    }
-
-    this.displayed = new Set(this.queued.keys())
-
-    for (const image of this.queued.values()) this.draw(image)
-
-    this.queued.clear()
-  }
-
-  private draw(input: KittyQueuedImage) {
-    const scaled = scaledImageForKitty(input.image, input.columns, input.rows)
-    const row = Math.max(1, Math.floor(input.renderable.screenY) + 1)
-    const column = Math.max(1, Math.floor(input.renderable.screenX) + 1)
-    const command = kittyGraphicsCommand({ id: input.id, width: scaled.width, height: scaled.height, columns: input.columns, rows: input.rows, rgba: scaled.rgba })
-
-    this.write(`\x1b7\x1b[${row};${column}H${command}\x1b8`)
-  }
-
-  private destroy() {
-    for (const id of this.displayed) this.write(kittyDeleteImageCommand(id))
-    this.displayed.clear()
-    this.queued.clear()
-    this.renderer.off(CliRenderEvents.FRAME, this.onFrame)
-    this.renderer.off(CliRenderEvents.DESTROY, this.onDestroy)
-  }
-
-  private write(value: string) {
-    this.stdout.write(value)
-  }
-}
-
-function isRenderableOnScreen(renderer: CliRenderer, renderable: BoxRenderable) {
-  return renderable.screenX < renderer.terminalWidth && renderable.screenY < renderer.terminalHeight && renderable.screenX + renderable.width > 0 && renderable.screenY + renderable.height > 0
-}
-
-function rendererStdout(renderer: CliRenderer) {
-  return (renderer as unknown as { stdout?: NodeJS.WriteStream }).stdout ?? process.stdout
 }
 
 function resizeRgbaAverage(source: Uint8Array, sourceWidth: number, sourceHeight: number, targetWidth: number, targetHeight: number) {
@@ -1320,12 +1359,6 @@ export function imageRenderModeForCapabilities(capabilities: ImageTerminalCapabi
   if (!capabilities || capabilities.rgb) return "cell-color"
 
   return "cell-mono"
-}
-
-function nativeImageProtocolsEnabled() {
-  const value = process.env.LAZYCONFLUENCE_NATIVE_IMAGES?.toLowerCase()
-
-  return value === "1" || value === "true" || value === "kitty" || value === "sixel"
 }
 
 function canUseKittyGraphics(capabilities: ImageTerminalCapabilities) {
@@ -1406,8 +1439,8 @@ function InfoPanel(props: { title: string; items: string[]; empty: string }) {
 function StatusBar(props: { focusPane: string; editorOpen: boolean; editorDirty: boolean; editMessage: string }) {
   const hint = () => {
     if (props.editorOpen) return "Ctrl+T stage | Esc close without changing staged docs"
-    if (props.focusPane === "document") return "/ search | s spaces | a archived | c overview | e edit | D delete | Tab panes | j/k scroll | h/l wide | d/u page | q quit"
-    return "/ search | s spaces | a archived | c overview | Tab panes | n child | N root | e edit | D delete | j/k move | h/l fold | q quit"
+    if (props.focusPane === "document") return "/ search s spaces c overview e edit i image D delete Tab panes j/k scroll h/l wide d/u page"
+    return "/ search s spaces c overview Tab panes n child N root e edit i image D delete j/k move h/l fold"
   }
   const status = () => {
     if (props.editorOpen) return props.editMessage || `editing transient buffer: ${props.editorDirty ? "modified" : "unchanged"}`
@@ -1924,6 +1957,14 @@ function relatedItems(page: ReaderPage) {
     ...page.outgoingLinks.map((link) => `${link.kind === "internal" ? "->" : "external"} ${link.title}`),
     ...page.backlinks.map((link) => `<- ${link.title}`),
   ]
+}
+
+function readerImagePartsForPage(page: ReaderPage): ReaderImagePart[] {
+  return splitReaderImagePlaceholders(page.contentMarkdown, page.mediaAssets ?? []).filter(isReaderImagePart)
+}
+
+function isReaderImagePart(part: ReaderContentPart): part is ReaderImagePart {
+  return part.kind === "image"
 }
 
 function isArchivedPage(page: IndexedPage) {

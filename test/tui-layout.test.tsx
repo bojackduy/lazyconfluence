@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
-import { App, NewPageOverlay, StagedChangesOverlay, documentHorizontalScrollDeltaForKey, imageRenderModeForCapabilities, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, type SearchKeyLike } from "../src/tui/app"
+import { App, ImageViewerOverlay, NewPageOverlay, StagedChangesOverlay, documentHorizontalScrollDeltaForKey, imageRenderModeForCapabilities, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, type SearchKeyLike } from "../src/tui/app"
 import { createLocalConfig } from "../src/config"
 import type { CredentialStatus } from "../src/config"
 import { openIndexRepository } from "../src/index/repository"
@@ -206,7 +206,7 @@ describe("main TUI layout", () => {
 
     try {
       await writeFile(imagePath, Buffer.from(tinyPngBase64, "base64"))
-      repository.upsertMediaAsset({
+      const imageAsset = {
         pageId: "local-home",
         nodeId: "image-node",
         title: "System overview",
@@ -216,27 +216,56 @@ describe("main TUI layout", () => {
         width: 1,
         height: 1,
         updatedAt: "2026-07-23T12:00:00Z",
-      })
+      }
+      repository.upsertMediaAsset(imageAsset)
       repository.close()
       repository = null
 
       const output = await withProcessEnv(setup.env, async () => {
         const rendered = await testRender(() => <App credentialStatus={readyStatus} disableTreeSitter />, { width: 120, height: 36 })
+        const viewerRendered = await testRender(() => (
+          <ImageViewerOverlay
+            visible
+            pageTitle="Local Engineering Home"
+            images={[{ kind: "image", nodeId: "image-node", label: "System overview", details: "Attachment on this Confluence page.", asset: imageAsset }]}
+            selectedIndex={0}
+            renderMode="cell-color"
+            left={2}
+            top={2}
+            width={80}
+            height={24}
+            onClose={() => {}}
+          />
+        ), { width: 120, height: 36 })
 
         try {
           await rendered.renderOnce()
-          return rendered.captureCharFrame()
+          await rendered.flush()
+          const inlineFrame = rendered.captureCharFrame()
+
+          await viewerRendered.renderOnce()
+          await viewerRendered.flush()
+          const viewerFrame = viewerRendered.captureCharFrame()
+
+          return { inlineFrame, viewerFrame }
         } finally {
           rendered.renderer.destroy()
+          viewerRendered.renderer.destroy()
         }
       })
 
-      expect(output).toContain("IMAGE PREVIEW")
-      expect(output).toContain("System overview")
-      expect(output).toContain("cached PNG 1x1")
-      expect(output).toContain("color cells")
-      expect(output).toContain("▀")
-      expect(output).not.toContain("╰─▀")
+      expect(output.inlineFrame).toContain("IMAGE PREVIEW")
+      expect(output.inlineFrame).toContain("System overview")
+      expect(output.inlineFrame).toContain("cached PNG 1x1")
+      expect(output.inlineFrame).toContain("color cells")
+      expect(output.inlineFrame).toContain("▀")
+      expect(output.inlineFrame).not.toContain("Kitty native")
+      expect(output.inlineFrame).not.toContain("╰─▀")
+      expect(output.viewerFrame).toContain("IMAGE VIEWER")
+      expect(output.viewerFrame).toContain("System overview")
+      expect(output.viewerFrame).toContain("1 of 1")
+      expect(output.viewerFrame).toContain("color cells")
+      expect(output.viewerFrame).toContain("cached PNG 1x1")
     } finally {
       repository?.close()
       await setup.cleanup()

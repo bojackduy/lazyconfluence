@@ -4,17 +4,26 @@
 [![GitHub Pages](https://img.shields.io/badge/site-GitHub%20Pages-9dffcb)](https://bojackduy.github.io/lazyconfluence/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
 
-`lazyconfluence` is a terminal-first Confluence document browser. It syncs the Confluence spaces you choose into a local index, then lets you browse and read pages from the terminal without making remote calls during normal navigation.
+`lazyconfluence` is a terminal-first Confluence document browser. It syncs the Confluence spaces you choose into a local index, then lets you browse and read pages from the terminal without making remote calls during normal navigation. The reader renders headings, tables, code blocks, links, and cached Confluence image previews, with progressive placeholders when a terminal or media asset cannot show an image preview.
 
 Website: <https://bojackduy.github.io/lazyconfluence/>
 
 ## Demo
 
-![lazyconfluence terminal demo](https://raw.githubusercontent.com/bojackduy/lazyconfluence/main/assets/demo2.png)
+![lazyconfluence terminal Confluence browser with image previews](https://raw.githubusercontent.com/bojackduy/lazyconfluence/main/assets/demo2.png)
 
 [Watch the animated demo](https://raw.githubusercontent.com/bojackduy/lazyconfluence/main/assets/demo2.gif)
 
 The demo above uses synthetic data from `lazyconfluence demo`, not real company Confluence content.
+
+## Features
+
+- Local-first Confluence browsing after explicit sync.
+- Fast space, page tree, link, backlink, and document search workflows.
+- Readable terminal rendering for headings, lists, tables, links, and code blocks.
+- Terminal image previews for cached Confluence PNG attachments without requiring Kitty, Sixel, or iTerm image protocols.
+- Progressive image handling keeps terminals without image preview support and unsupported media readable through labeled placeholders.
+- Local drafts and staged changes keep remote Confluence write-back explicit.
 
 ## Install
 
@@ -108,7 +117,7 @@ After syncing, open the terminal UI:
 lazyconfluence
 ```
 
-Normal browsing reads from the local index. Remote Confluence requests happen only when you explicitly run `sync`.
+Normal browsing reads from the local index. Remote Confluence requests happen only when you explicitly run `sync`. During sync, `lazyconfluence` best-effort caches Confluence attachment images so the terminal reader can show local PNG previews without fetching media while you browse.
 
 ## Common Commands
 

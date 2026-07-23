@@ -10,7 +10,9 @@ Website: <https://bojackduy.github.io/lazyconfluence/>
 
 ## Demo
 
-![lazyconfluence terminal demo](https://raw.githubusercontent.com/bojackduy/lazyconfluence/main/assets/demo2.gif)
+![lazyconfluence terminal demo](https://raw.githubusercontent.com/bojackduy/lazyconfluence/main/assets/demo2.png)
+
+[Watch the animated demo](https://raw.githubusercontent.com/bojackduy/lazyconfluence/main/assets/demo2.gif)
 
 The demo above uses synthetic data from `lazyconfluence demo`, not real company Confluence content.
 

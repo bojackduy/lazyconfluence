@@ -18,7 +18,7 @@ export interface ParsedConfluenceStorage {
 export function parseConfluenceStorage(input: ParseConfluenceStorageInput): ParsedConfluenceStorage {
   const blocks: DocumentBlock[] = []
   const nodes: Record<string, NodeMapping> = {}
-  const blockPattern = /<((?:h[1-6])|p|ul|ol|pre|blockquote|table|ac:structured-macro)\b([^>]*)>([\s\S]*?)<\/\1>|<(hr)\b[^>]*\/?>/gi
+  const blockPattern = /<((?:h[1-6])|p|ul|ol|pre|blockquote|table|ac:structured-macro|ac:image)\b([^>]*)>([\s\S]*?)<\/\1>|<(hr)\b[^>]*\/?>/gi
   let lastIndex = 0
   let match: RegExpExecArray | null
 
@@ -97,6 +97,10 @@ function addMatchedBlock(input: ParseConfluenceStorageInput, blocks: DocumentBlo
       roundTrip = "opaque"
       block = { type: "unsupported", nodeId, source: { path: sourcePath, type: sourceType }, sourceType, fallbackText: htmlToText(inner) }
     }
+  } else if (tag === "ac:image") {
+    sourceType = "ac:image"
+    roundTrip = "opaque"
+    block = parseImageBlock(inner, attrs, nodeId, sourcePath, sourceType)
   }
 
   if (!block) return
@@ -114,6 +118,15 @@ function addMatchedBlock(input: ParseConfluenceStorageInput, blocks: DocumentBlo
 
   blocks.push(block)
   nodes[nodeId] = nodeMapping(sourcePath, sourceType, raw, roundTrip)
+}
+
+function parseImageBlock(inner: string, attrs: Record<string, string>, nodeId: string, sourcePath: string, sourceType: string): DocumentBlock {
+  const attachmentAttrs = firstNestedAttributes(inner, "ri:attachment")
+  const urlAttrs = firstNestedAttributes(inner, "ri:url")
+  const title = compactInlineText(attrs["ac:title"] || attrs["ac:alt"] || attachmentAttrs["ri:filename"] || urlAttrs["ri:value"] || "image")
+  const url = urlAttrs["ri:value"] || null
+
+  return { type: "image", nodeId, source: { path: sourcePath, type: sourceType }, sourceType, title, url }
 }
 
 function mergeAdjacentCodeParagraph(blocks: DocumentBlock[], block: DocumentBlock) {
@@ -264,6 +277,17 @@ function parseAttributes(value: string) {
   }
 
   return attrs
+}
+
+function firstNestedAttributes(value: string, tagName: string) {
+  const pattern = new RegExp(`<${escapeRegExp(tagName)}\\b([^>]*)\\/?>(?:<\\/${escapeRegExp(tagName)}>)?`, "i")
+  const match = pattern.exec(value)
+
+  return parseAttributes(match?.[1] ?? "")
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
 function nodeMapping(sourcePath: string, sourceType: string, raw: string, roundTrip: RoundTripMode): NodeMapping {

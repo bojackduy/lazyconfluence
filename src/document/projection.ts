@@ -68,11 +68,20 @@ function renderBlockMarkdown(block: DocumentBlock) {
       return renderInlineMarkdown(block.inlines).split("\n").map((line) => `> ${line}`.trimEnd()).join("\n")
     case "table":
       return renderTableMarkdown(block)
+    case "image":
+      return renderImageMarkdown(block)
     case "rule":
       return "---"
     case "unsupported":
       return `<!-- confluence-opaque node="${block.nodeId}" type="${block.sourceType}" -->`
   }
+}
+
+function renderImageMarkdown(block: Extract<DocumentBlock, { type: "image" }>) {
+  const label = block.title || block.url || "image"
+  const details = block.url ? block.url : "Attachment on this Confluence page."
+
+  return [`> [image: ${label}]`, `> ${details}`, `<!-- confluence-opaque node="${block.nodeId}" type="${block.sourceType}" -->`].join("\n")
 }
 
 function renderInlineMarkdown(inlines: InlineNode[]) {
@@ -139,6 +148,8 @@ function blockText(block: DocumentBlock) {
       return block.items.map(inlineText).join("\n")
     case "table":
       return block.rows.map((row) => row.cells.map((cell) => inlineText(cell.inlines)).join("\t")).join("\n")
+    case "image":
+      return `Image: ${block.title || block.url || "image"}${block.url ? ` ${block.url}` : ""}`
     case "code":
       return block.text
     case "rule":

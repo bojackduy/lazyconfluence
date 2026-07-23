@@ -132,6 +132,57 @@ describe("Confluence mapper", () => {
     expect(documentPlainText(mapped.document)).toContain("Status Ready")
   })
 
+  test("renders Confluence attachment images as visible placeholders", () => {
+    const mapped = mapConfluencePage({
+      page: {
+        id: "229",
+        title: "Image Page",
+        version: { number: 1, createdAt: "2026-07-21T09:00:00Z" },
+        body: {
+          storage: {
+            value: [
+              "<p>Diagram below.</p>",
+              '<ac:image ac:alt="System overview"><ri:attachment ri:filename="architecture.png" /></ac:image>',
+            ].join(""),
+          },
+        },
+      },
+      space,
+      baseUrl: "https://example.atlassian.net/wiki",
+    })
+    const imageNode = Object.values(mapped.sidecar.nodes).find((node) => node.sourceType === "ac:image")
+
+    expect(mapped.document.blocks.map((block) => block.type)).toEqual(["paragraph", "image"])
+    expect(mapped.renderedMarkdown).toContain("> [image: System overview]")
+    expect(mapped.renderedMarkdown).toContain("> Attachment on this Confluence page.")
+    expect(mapped.renderedMarkdown).toContain('<!-- confluence-opaque node="')
+    expect(mapped.indexedPage.contentMarkdown).not.toBe("Diagram below.")
+    expect(documentPlainText(mapped.document)).toContain("Image: System overview")
+    expect(imageNode?.roundTrip).toBe("opaque")
+    expect(String(imageNode?.raw)).toContain("ri:filename=\"architecture.png\"")
+  })
+
+  test("renders Confluence URL images with their source URL", () => {
+    const mapped = mapConfluencePage({
+      page: {
+        id: "230",
+        title: "Remote Image Page",
+        version: { number: 1, createdAt: "2026-07-21T09:00:00Z" },
+        body: {
+          storage: {
+            value: '<ac:image><ri:url ri:value="https://cdn.example.com/diagram.png" /></ac:image>',
+          },
+        },
+      },
+      space,
+      baseUrl: "https://example.atlassian.net/wiki",
+    })
+
+    expect(mapped.document.blocks[0]).toMatchObject({ type: "image", title: "https://cdn.example.com/diagram.png", url: "https://cdn.example.com/diagram.png" })
+    expect(mapped.renderedMarkdown).toContain("> [image: https://cdn.example.com/diagram.png]")
+    expect(mapped.renderedMarkdown).toContain("> https://cdn.example.com/diagram.png")
+  })
+
   test("preserves multiline code paragraphs as fenced code blocks", () => {
     const mapped = mapConfluencePage({
       page: {

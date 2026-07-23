@@ -1,8 +1,10 @@
+import { statSync } from "node:fs"
 import { render, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import {
   BoxRenderable,
   CliRenderEvents,
   CodeRenderable,
+  type CliRenderer,
   type OptimizedBuffer,
   RGBA,
   TextAttributes,
@@ -25,6 +27,8 @@ import type { PageDraftStatus } from "../index/repository"
 import type { ApplyPageDraftResult } from "../apply"
 import { defaultRuntimeEnv, runtimeEnvFromLegacyDemo, type RuntimeEnv } from "../runtime/env"
 import { emptyPageId, emptyReaderPage, emptySpaceSummary } from "./data"
+import { kittyDeleteImageCommand, kittyGraphicsCommand, kittyImageId } from "./kitty"
+import { imageDebugEnabled, imageDebugLogPath, logImageDebug } from "./image-debug"
 import { splitReaderImagePlaceholders, type ReaderContentPart } from "./media"
 import { createTuiRuntime, type TuiRuntime } from "./runtime"
 import type { TuiSource, TuiStagedChange } from "./source"
@@ -125,6 +129,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const [imageViewerSelectedIndex, setImageViewerSelectedIndex] = createSignal(0)
   const [terminalCapabilities, setTerminalCapabilities] = createSignal<TerminalCapabilities | null>(renderer.capabilities)
   const [treeSitterClient, setTreeSitterClient] = createSignal<TreeSitterClient | undefined>()
+  const readerImageRenderables = new Map<string, BoxRenderable>()
   let documentScrollbox: ScrollBoxRenderable | undefined
   let editorFocusTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -168,7 +173,10 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     return dataSource.listStagedChanges(activeSpaceKey())
   })
   const readerImageParts = createMemo(() => readerImagePartsForPage(readerPage()))
-  const inlineImageRenderMode = createMemo(() => imageRenderModeForCapabilities(terminalCapabilities()))
+  const inlineImageRenderDecision = createMemo(() => imageRenderModeDecisionForCapabilities(terminalCapabilities()))
+  const viewerImageRenderDecision = createMemo(() => imageRenderModeDecisionForCapabilities(terminalCapabilities(), { nativeProtocols: true }))
+  const inlineImageRenderMode = createMemo(() => inlineImageRenderDecision().mode)
+  const viewerImageRenderMode = createMemo(() => viewerImageRenderDecision().mode)
   const isNarrow = createMemo(() => dimensions().width < 96)
   const halfPageScrollAmount = createMemo(() => Math.max(6, Math.floor((dimensions().height - 9) / 2)))
   const credentialWarning = createMemo<CredentialWarning | null>(() => {
@@ -195,6 +203,50 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     renderer.on(CliRenderEvents.CAPABILITIES, updateCapabilities)
 
     onCleanup(() => renderer.off(CliRenderEvents.CAPABILITIES, updateCapabilities))
+  })
+
+  let lastImageModeDebugKey = ""
+  createEffect(() => {
+    const capabilities = terminalCapabilities()
+    const inline = inlineImageRenderDecision()
+    const viewer = viewerImageRenderDecision()
+    const key = JSON.stringify({ capabilities: summarizeImageCapabilities(capabilities), inline, viewer })
+    if (key === lastImageModeDebugKey) return
+
+    lastImageModeDebugKey = key
+    logImageDebug("image_mode_decision", {
+      context: "inline",
+      mode: inline.mode,
+      reason: inline.reason,
+      ...summarizeImageCapabilities(capabilities),
+    })
+    logImageDebug("image_mode_decision", {
+      context: "viewer",
+      mode: viewer.mode,
+      reason: viewer.reason,
+      ...summarizeImageCapabilities(capabilities),
+    })
+  })
+
+  let lastImageViewerStateDebugKey = ""
+  createEffect(() => {
+    const images = readerImageParts()
+    const selectedImage = images[imageViewerSelectedIndex()]
+    const state = {
+      open: imageViewerOpen(),
+      selectedIndex: imageViewerSelectedIndex(),
+      imageCount: images.length,
+      pageId: readerPage().pageId,
+      pageTitle: readerPage().title,
+      nodeId: selectedImage?.nodeId,
+      label: selectedImage?.label,
+      renderMode: viewerImageRenderMode(),
+    }
+    const key = JSON.stringify(state)
+    if (key === lastImageViewerStateDebugKey) return
+
+    lastImageViewerStateDebugKey = key
+    logImageDebug("viewer_state", state)
   })
 
   onMount(() => {
@@ -565,10 +617,54 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     setFocusPane("document")
   }
 
+  const setReaderImageRenderable = (nodeId: string, renderable: BoxRenderable) => {
+    readerImageRenderables.set(nodeId, renderable)
+  }
+
+  const nearestReaderImageSelection = (images: ReaderImagePart[]) => {
+    const viewport = documentScrollbox?.viewport
+    const positions = readerImagePositions(images, readerImageRenderables)
+
+    if (!viewport) return { index: 0, reason: "missing-scrollbox", positionCount: positions.length }
+    if (!positions.length) return { index: 0, reason: "missing-image-positions", viewportTop: viewport.screenY, viewportHeight: viewport.height, positionCount: 0 }
+
+    const index = nearestImageIndexForViewport(images, positions, viewport.screenY, viewport.height)
+    const selectedPosition = positions.find((position) => position.nodeId === images[index]?.nodeId)
+    const viewportCenter = viewport.screenY + viewport.height / 2
+
+    return {
+      index,
+      reason: "nearest-scroll-image",
+      viewportTop: viewport.screenY,
+      viewportHeight: viewport.height,
+      viewportCenter,
+      positionCount: positions.length,
+      selectedImageTop: selectedPosition?.top,
+      selectedImageHeight: selectedPosition?.height,
+      selectedImageDistance: selectedPosition ? distanceToViewportCenter(selectedPosition, viewportCenter) : undefined,
+    }
+  }
+
   const openImageViewer = () => {
     const images = readerImageParts()
+    const selection = nearestReaderImageSelection(images)
+    logImageDebug("viewer_open_requested", {
+      ...imageInputDebugState(),
+      renderMode: viewerImageRenderMode(),
+      selectionReason: selection.reason,
+      selectedIndex: selection.index,
+      viewportTop: selection.viewportTop,
+      viewportHeight: selection.viewportHeight,
+      viewportCenter: selection.viewportCenter,
+      imagePositionCount: selection.positionCount,
+      selectedImageTop: selection.selectedImageTop,
+      selectedImageHeight: selection.selectedImageHeight,
+      selectedImageDistance: selection.selectedImageDistance,
+    })
+
     if (!images.length) {
       setEditStatusMessage("No image placeholders are available on this page.")
+      logImageDebug("viewer_open_skipped", { reason: "no-image-placeholders", pageId: readerPage().pageId, pageTitle: readerPage().title })
       return
     }
 
@@ -576,13 +672,32 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     setSpaceSwitcherOpen(false)
     setChangesOpen(false)
     setNewPageOpen(false)
-    setImageViewerSelectedIndex(0)
+    setImageViewerSelectedIndex(selection.index)
     setImageViewerOpen(true)
     setFocusPane("document")
-    setEditStatusMessage(`Viewing image: ${images[0]?.label ?? "image"}. Esc closes the viewer.`)
+    setEditStatusMessage(`Viewing image: ${images[selection.index]?.label ?? "image"}. Esc closes the viewer.`)
+    logImageDebug("viewer_open", {
+      pageId: readerPage().pageId,
+      pageTitle: readerPage().title,
+      imageCount: images.length,
+      selectedIndex: selection.index,
+      nodeId: images[selection.index]?.nodeId,
+      label: images[selection.index]?.label,
+      renderMode: viewerImageRenderMode(),
+      selectionReason: selection.reason,
+      viewportTop: selection.viewportTop,
+      viewportHeight: selection.viewportHeight,
+      viewportCenter: selection.viewportCenter,
+      imagePositionCount: selection.positionCount,
+      selectedImageTop: selection.selectedImageTop,
+      selectedImageHeight: selection.selectedImageHeight,
+      selectedImageDistance: selection.selectedImageDistance,
+      debugLog: imageDebugEnabled() ? imageDebugLogPath() : undefined,
+    })
   }
 
   const closeImageViewer = () => {
+    logImageDebug("viewer_close", { pageId: readerPage().pageId, pageTitle: readerPage().title })
     setImageViewerOpen(false)
     setEditStatusMessage("Closed image viewer.")
   }
@@ -592,6 +707,31 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     if (!images.length) return
 
     setImageViewerSelectedIndex((current) => (current + direction + images.length) % images.length)
+  }
+
+  const imageInputDebugState = () => ({
+    focusPane: focusPane(),
+    pageId: readerPage().pageId,
+    pageTitle: readerPage().title,
+    imageCount: readerImageParts().length,
+    imageViewerOpen: imageViewerOpen(),
+    changesOpen: changesOpen(),
+    newPageOpen: newPageOpen(),
+    editorOpen: editorOpen(),
+    pageSearchOpen: pageSearchOpen(),
+    spaceSwitcherOpen: spaceSwitcherOpen(),
+  })
+
+  const keyRouteForDebug = (key: SearchKeyLike) => {
+    if (key.ctrl && key.name === "c") return "destroy"
+    if (imageViewerOpen()) return "image-viewer"
+    if (changesOpen()) return "changes-overlay"
+    if (newPageOpen()) return "new-page-overlay"
+    if (editorOpen()) return "editor"
+    if (pageSearchOpen()) return "page-search"
+    if (spaceSwitcherOpen()) return "space-switcher"
+    if (isPlainKey(key, "i")) return "open-image-viewer"
+    return "main"
   }
 
   const openEditorForSelectedPage = () => {
@@ -686,6 +826,22 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   }
 
   const handleKeyPress = (key: SearchKeyLike) => {
+    const route = keyRouteForDebug(key)
+    logImageDebug("key_press", {
+      ...keyDebugData(key),
+      ...imageInputDebugState(),
+      route,
+    })
+
+    if (isPlainKey(key, "i")) {
+      logImageDebug("image_key_route", {
+        ...keyDebugData(key),
+        ...imageInputDebugState(),
+        route,
+        renderMode: viewerImageRenderMode(),
+      })
+    }
+
     if (key.ctrl && key.name === "c") {
       renderer.destroy()
       return
@@ -840,7 +996,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
       <Show when={credentialWarning()} fallback={<box height={0} />}>{(status) => <CredentialNotice status={status()} />}</Show>
       <box flexGrow={1} minHeight={0} flexDirection={isNarrow() ? "column" : "row"} paddingX={1}>
         <Navigator rows={treeRows()} selectedPageId={selectedPageId()} focused={focusPane() === "navigator"} viewMode={pageViewMode()} onSetViewMode={switchPageView} />
-        <Reader page={readerPage()} focused={focusPane() === "document"} narrow={isNarrow()} treeSitterClient={treeSitterClient()} imageRenderMode={inlineImageRenderMode()} setDocumentScrollbox={(scrollbox) => { documentScrollbox = scrollbox }} />
+        <Reader page={readerPage()} focused={focusPane() === "document"} narrow={isNarrow()} treeSitterClient={treeSitterClient()} imageRenderMode={inlineImageRenderMode()} setDocumentScrollbox={(scrollbox) => { documentScrollbox = scrollbox }} setImageRenderable={setReaderImageRenderable} />
       </box>
       <StatusBar focusPane={focusPane()} editorOpen={editorOpen()} editorDirty={editorDirty()} editMessage={editStatusMessage()} />
       <Show when={editorOpen()} fallback={<box height={0} />}>
@@ -904,18 +1060,20 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
         width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 4 : 16))}
         height={Math.min(16, Math.max(10, dimensions().height - 8))}
       />
-      <ImageViewerOverlay
-        visible={imageViewerOpen()}
-        pageTitle={readerPage().title}
-        images={readerImageParts()}
-        selectedIndex={imageViewerSelectedIndex()}
-        renderMode={inlineImageRenderMode()}
-        left={dimensions().width < 72 ? 1 : 4}
-        top={2}
-        width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 2 : 8))}
-        height={Math.max(10, dimensions().height - 4)}
-        onClose={closeImageViewer}
-      />
+      <Show when={imageViewerOpen()} fallback={<box height={0} />}>
+        <ImageViewerOverlay
+          visible
+          pageTitle={readerPage().title}
+          images={readerImageParts()}
+          selectedIndex={imageViewerSelectedIndex()}
+          renderMode={viewerImageRenderMode()}
+          left={dimensions().width < 72 ? 1 : 4}
+          top={2}
+          width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 2 : 8))}
+          height={Math.max(10, dimensions().height - 4)}
+          onClose={closeImageViewer}
+        />
+      </Show>
     </box>
   )
 }
@@ -1043,7 +1201,7 @@ function navigatorDocumentKind(row: TreeRow): NavigatorDocumentKind {
   return "page"
 }
 
-function Reader(props: { page: ReaderPage; focused: boolean; narrow: boolean; treeSitterClient?: TreeSitterClient; imageRenderMode: ImageRenderMode; setDocumentScrollbox: (scrollbox: ScrollBoxRenderable) => void }) {
+function Reader(props: { page: ReaderPage; focused: boolean; narrow: boolean; treeSitterClient?: TreeSitterClient; imageRenderMode: ImageRenderMode; setDocumentScrollbox: (scrollbox: ScrollBoxRenderable) => void; setImageRenderable: (nodeId: string, renderable: BoxRenderable) => void }) {
   const renderer = useRenderer()
   const renderCodeBlock = createReadableCodeBlockRenderer(renderer)
   const contentParts = createMemo(() => splitReaderImagePlaceholders(props.page.contentMarkdown, props.page.mediaAssets ?? []))
@@ -1085,7 +1243,7 @@ function Reader(props: { page: ReaderPage; focused: boolean; narrow: boolean; tr
                   renderNode={renderCodeBlock}
                   tableOptions={{ style: "grid", widthMode: "full", columnFitter: "balanced", wrapMode: "word", cellPaddingX: 1, borderStyle: "rounded", borderColor: theme.codeBorder, selectable: true }}
                 />
-              ) : <ImagePreviewCard part={part} narrow={props.narrow} renderMode={props.imageRenderMode} />}</For>
+              ) : <ImagePreviewCard part={part} narrow={props.narrow} renderMode={props.imageRenderMode} setRenderable={props.setImageRenderable} />}</For>
             </box>
           </scrollbox>
         </box>
@@ -1095,7 +1253,7 @@ function Reader(props: { page: ReaderPage; focused: boolean; narrow: boolean; tr
   )
 }
 
-function ImagePreviewCard(props: { part: Extract<ReaderContentPart, { kind: "image" }>; narrow: boolean; renderMode: ImageRenderMode }) {
+function ImagePreviewCard(props: { part: Extract<ReaderContentPart, { kind: "image" }>; narrow: boolean; renderMode: ImageRenderMode; setRenderable?: (nodeId: string, renderable: BoxRenderable) => void }) {
   const loaded = createMemo(() => loadImagePreview(props.part.asset))
   const image = createMemo(() => imageFromLoadResult(loaded()))
   const fallbackMessage = createMemo(() => messageFromLoadResult(loaded()))
@@ -1106,7 +1264,7 @@ function ImagePreviewCard(props: { part: Extract<ReaderContentPart, { kind: "ima
   }
 
   return (
-    <box width="100%" height={image() ? size().height + 5 : 6} border borderStyle="rounded" borderColor={image() ? theme.good : theme.border} backgroundColor={theme.panel} paddingX={1} marginBottom={1} flexDirection="column">
+    <box ref={(renderable: BoxRenderable) => props.setRenderable?.(props.part.nodeId, renderable)} width="100%" height={image() ? size().height + 5 : 6} border borderStyle="rounded" borderColor={image() ? theme.good : theme.border} backgroundColor={theme.panel} paddingX={1} marginBottom={1} flexDirection="column">
       <text height={1} fg={image() ? theme.good : theme.warn} attributes={1}>{image() ? "IMAGE PREVIEW" : "IMAGE PLACEHOLDER"}</text>
       <text height={1} fg={theme.text}>{props.part.label}</text>
       <Show when={image()} fallback={<ImagePreviewFallback part={props.part} message={fallbackMessage()} />}>
@@ -1122,14 +1280,219 @@ function ImagePreviewCard(props: { part: Extract<ReaderContentPart, { kind: "ima
 }
 
 export function ImageViewerOverlay(props: { visible: boolean; pageTitle: string; images: ReaderImagePart[]; selectedIndex: number; renderMode: ImageRenderMode; left: number; top: number; width: number; height: number; onClose: () => void }) {
+  const renderer = useRenderer()
   const selectedImage = createMemo(() => props.images[props.selectedIndex] ?? null)
   const loaded = createMemo(() => props.visible && selectedImage() ? loadImagePreview(selectedImage()!.asset) : { status: "error", message: "No image selected." } satisfies ImageLoadResult)
   const image = createMemo(() => imageFromLoadResult(loaded()))
   const fallbackMessage = createMemo(() => messageFromLoadResult(loaded()))
   const previewHeight = createMemo(() => image() ? imageViewerPreviewHeight(image()!, props.width, props.height) : Math.max(3, props.height - 8))
+  let nativePreviewRenderable: BoxRenderable | undefined
+  let queuedKittyImage: KittyViewerImage | null = null
+  let displayedKittyId: number | null = null
+  let displayedKittyKey = ""
+  let kittyFlushTimer: ReturnType<typeof setTimeout> | undefined
+  let lastRenderAfterDebugKey = ""
+  let lastOverlayDebugKey = ""
 
   const renderPreview = (buffer: OptimizedBuffer, decoded: DecodedImage) => {
-    drawImagePreview(buffer, decoded, props.renderMode)
+    if (props.renderMode !== "kitty") drawImagePreview(buffer, decoded, props.renderMode)
+    logViewerRenderAfter(buffer, decoded)
+    queueKittyImage(decoded, buffer.width, buffer.height)
+  }
+
+  onMount(() => {
+    logImageDebug("viewer_overlay_mount", {
+      visible: props.visible,
+      imageCount: props.images.length,
+      selectedIndex: props.selectedIndex,
+      renderMode: props.renderMode,
+      left: props.left,
+      top: props.top,
+      width: props.width,
+      height: props.height,
+    })
+  })
+
+  createEffect(() => {
+    const part = selectedImage()
+    const loadResult = loaded()
+    const decoded = image()
+    const state = {
+      visible: props.visible,
+      imageCount: props.images.length,
+      selectedIndex: props.selectedIndex,
+      renderMode: props.renderMode,
+      hasSelectedImage: Boolean(part),
+      nodeId: part?.nodeId,
+      label: part?.label,
+      loadStatus: loadResult.status,
+      imageReady: Boolean(decoded),
+      imageWidth: decoded?.width,
+      imageHeight: decoded?.height,
+      previewRenderablePresent: Boolean(nativePreviewRenderable),
+      left: props.left,
+      top: props.top,
+      width: props.width,
+      height: props.height,
+      previewHeight: previewHeight(),
+    }
+    const key = JSON.stringify(state)
+    if (key === lastOverlayDebugKey) return
+
+    lastOverlayDebugKey = key
+    logImageDebug("viewer_overlay_state", state)
+  })
+
+  createEffect(() => {
+    const part = selectedImage()
+    if (!props.visible || props.renderMode !== "kitty" || !part || !image()) {
+      clearKittyImage()
+      if (!props.visible) nativePreviewRenderable = undefined
+      return
+    }
+
+    const nextId = kittyImageId(`viewer:${part.nodeId}:${part.asset?.cachePath ?? part.label}`)
+    if (displayedKittyId !== null && displayedKittyId !== nextId) clearKittyImage()
+  })
+
+  onCleanup(() => {
+    cancelKittyFlush()
+    logImageDebug("viewer_overlay_cleanup", {
+      visible: props.visible,
+      imageCount: props.images.length,
+      selectedIndex: props.selectedIndex,
+      renderMode: props.renderMode,
+    })
+    clearKittyImage()
+    nativePreviewRenderable = undefined
+    lastRenderAfterDebugKey = ""
+  })
+
+  function queueKittyImage(decoded: DecodedImage, columns: number, rows: number) {
+    const part = selectedImage()
+    if (!props.visible || props.renderMode !== "kitty" || !part || !nativePreviewRenderable) {
+      if (props.renderMode === "kitty") {
+        logImageDebug("kitty_queue_skipped", {
+          reason: !props.visible ? "viewer-hidden" : !part ? "no-selected-image" : !nativePreviewRenderable ? "preview-renderable-missing" : "not-kitty-mode",
+          renderMode: props.renderMode,
+          columns,
+          rows,
+        })
+      }
+      return
+    }
+
+    queuedKittyImage = {
+      id: kittyImageId(`viewer:${part.nodeId}:${part.asset?.cachePath ?? part.label}`),
+      image: decoded,
+      renderable: nativePreviewRenderable,
+      columns,
+      rows,
+    }
+    logImageDebug("kitty_queue", { id: queuedKittyImage.id, nodeId: part.nodeId, label: part.label, columns, rows, imageWidth: decoded.width, imageHeight: decoded.height })
+    scheduleKittyFlush()
+  }
+
+  function scheduleKittyFlush() {
+    if (kittyFlushTimer) return
+
+    kittyFlushTimer = setTimeout(() => {
+      kittyFlushTimer = undefined
+      flushKittyImage()
+    }, 0)
+  }
+
+  function cancelKittyFlush() {
+    if (!kittyFlushTimer) return
+
+    clearTimeout(kittyFlushTimer)
+    kittyFlushTimer = undefined
+  }
+
+  function flushKittyImage() {
+    const input = queuedKittyImage
+    queuedKittyImage = null
+    if (!input) return
+
+    if (!props.visible || props.renderMode !== "kitty" || !isRenderableOnScreen(renderer, input.renderable)) {
+      logImageDebug("kitty_flush_skipped", {
+        id: input.id,
+        reason: !props.visible ? "viewer-hidden" : props.renderMode !== "kitty" ? "not-kitty-mode" : "preview-offscreen",
+        renderMode: props.renderMode,
+        screenX: input.renderable.screenX,
+        screenY: input.renderable.screenY,
+        width: input.renderable.width,
+        height: input.renderable.height,
+        terminalWidth: renderer.terminalWidth,
+        terminalHeight: renderer.terminalHeight,
+      })
+      clearKittyImage()
+      return
+    }
+
+    const row = Math.max(1, Math.floor(input.renderable.screenY) + 1)
+    const column = Math.max(1, Math.floor(input.renderable.screenX) + 1)
+    const key = `${input.id}:${row}:${column}:${input.columns}:${input.rows}:${input.image.width}x${input.image.height}`
+    if (key === displayedKittyKey) return
+
+    if (displayedKittyId !== null) deleteDisplayedKittyImage()
+
+    const cachedCommand = kittyGraphicsCommandForImage(input.image, input.id, input.columns, input.rows)
+    const command = cachedCommand.command
+    const output = `\x1b7\x1b[${row};${column}H${command}\x1b8`
+    const accepted = writeRawTerminal(renderer, output)
+    logImageDebug("kitty_write", {
+      id: input.id,
+      accepted,
+      row,
+      column,
+      columns: input.columns,
+      rows: input.rows,
+      sourceWidth: input.image.width,
+      sourceHeight: input.image.height,
+      scaledWidth: cachedCommand.width,
+      scaledHeight: cachedCommand.height,
+      commandBytes: output.length,
+      chunks: cachedCommand.chunks,
+      cached: cachedCommand.cached,
+    })
+    displayedKittyId = input.id
+    displayedKittyKey = key
+  }
+
+  function clearKittyImage() {
+    cancelKittyFlush()
+    queuedKittyImage = null
+    displayedKittyKey = ""
+    deleteDisplayedKittyImage()
+  }
+
+  function deleteDisplayedKittyImage() {
+    if (displayedKittyId === null) return
+
+    const id = displayedKittyId
+    const accepted = writeRawTerminal(renderer, kittyDeleteImageCommand(id))
+    logImageDebug("kitty_delete", { id, accepted })
+    displayedKittyId = null
+  }
+
+  function logViewerRenderAfter(buffer: OptimizedBuffer, decoded: DecodedImage) {
+    const part = selectedImage()
+    const key = `${props.visible}:${props.renderMode}:${part?.nodeId ?? "none"}:${buffer.width}x${buffer.height}:${decoded.width}x${decoded.height}`
+    if (key === lastRenderAfterDebugKey) return
+
+    lastRenderAfterDebugKey = key
+    logImageDebug("viewer_render_after", {
+      visible: props.visible,
+      renderMode: props.renderMode,
+      nodeId: part?.nodeId,
+      label: part?.label,
+      bufferColumns: buffer.width,
+      bufferRows: buffer.height,
+      decodedWidth: decoded.width,
+      decodedHeight: decoded.height,
+      previewRenderablePresent: Boolean(nativePreviewRenderable),
+    })
   }
 
   return (
@@ -1164,7 +1527,7 @@ export function ImageViewerOverlay(props: { visible: boolean; pageTitle: string;
               {(decoded) => (
                 <box flexDirection="column" width="100%">
                   <text height={1} fg={theme.subtle}>cached {decoded().format.toUpperCase()} {decoded().width}x{decoded().height}</text>
-                  <box width="100%" height={previewHeight()} backgroundColor={theme.bg} buffered renderAfter={(buffer: OptimizedBuffer) => renderPreview(buffer, decoded())} />
+                  <box ref={(renderable: BoxRenderable) => { nativePreviewRenderable = renderable }} width="100%" height={previewHeight()} backgroundColor={theme.bg} buffered renderAfter={(buffer: OptimizedBuffer) => renderPreview(buffer, decoded())} />
                 </box>
               )}
             </Show>
@@ -1185,23 +1548,83 @@ function ImagePreviewFallback(props: { part: Extract<ReaderContentPart, { kind: 
 }
 
 type ImageLoadResult = { status: "ready"; image: DecodedImage } | { status: "error"; message: string }
+type KittyViewerImage = { id: number; image: DecodedImage; renderable: BoxRenderable; columns: number; rows: number }
+type KittyGraphicsCommandCacheEntry = { command: string; width: number; height: number; chunks: number }
+type KittyGraphicsCommandResult = KittyGraphicsCommandCacheEntry & { cached: boolean }
 
 const imagePreviewCache = new Map<string, ImageLoadResult>()
+const kittyGraphicsCommandCache = new WeakMap<DecodedImage, Map<string, KittyGraphicsCommandCacheEntry>>()
 
 function loadImagePreview(asset: MediaAsset | null): ImageLoadResult {
-  if (!asset?.cachePath) return { status: "error", message: "No cached image file is available yet." }
+  if (!asset?.cachePath) {
+    logImageDebug("image_asset_load", {
+      status: "missing-cache-path",
+      pageId: asset?.pageId,
+      nodeId: asset?.nodeId,
+      title: asset?.title,
+      contentType: asset?.contentType,
+    })
+    return { status: "error", message: "No cached image file is available yet." }
+  }
 
   const cached = imagePreviewCache.get(asset.cachePath)
-  if (cached) return cached
+  if (cached) {
+    logImageDebug("image_asset_load", {
+      status: "cache-hit",
+      result: cached.status,
+      pageId: asset.pageId,
+      nodeId: asset.nodeId,
+      title: asset.title,
+      cachePath: asset.cachePath,
+      contentType: asset.contentType,
+    })
+    return cached
+  }
 
   try {
+    const stat = fileStat(asset.cachePath)
     const result: ImageLoadResult = { status: "ready", image: decodeImageFile(asset.cachePath) }
     imagePreviewCache.set(asset.cachePath, result)
+    logImageDebug("image_asset_load", {
+      status: "decoded",
+      pageId: asset.pageId,
+      nodeId: asset.nodeId,
+      title: asset.title,
+      cachePath: asset.cachePath,
+      contentType: asset.contentType,
+      fileExists: stat.exists,
+      fileSize: stat.size,
+      decodedWidth: result.image.width,
+      decodedHeight: result.image.height,
+      format: result.image.format,
+    })
     return result
   } catch (error) {
     const result: ImageLoadResult = { status: "error", message: errorMessage(error) }
     imagePreviewCache.set(asset.cachePath, result)
+    const stat = fileStat(asset.cachePath)
+    logImageDebug("image_asset_load", {
+      status: "decode-error",
+      pageId: asset.pageId,
+      nodeId: asset.nodeId,
+      title: asset.title,
+      cachePath: asset.cachePath,
+      contentType: asset.contentType,
+      fileExists: stat.exists,
+      fileSize: stat.size,
+      error: result.message,
+    })
     return result
+  }
+}
+
+function fileStat(path: string) {
+  try {
+    const stat = statSync(path)
+
+    return { exists: true, size: stat.size }
+  } catch {
+    return { exists: false, size: null }
   }
 }
 
@@ -1279,6 +1702,30 @@ function scaledImageForCells(image: DecodedImage, cellWidth: number, cellHeight:
   return scaledImageForSize(image, Math.max(1, cellWidth), Math.max(1, cellHeight * 2))
 }
 
+function scaledImageForKitty(image: DecodedImage, columns: number, rows: number): ScaledImage {
+  return scaledImageForSize(image, Math.min(image.width, Math.max(1, columns * 4)), Math.min(image.height, Math.max(1, rows * 8)))
+}
+
+function kittyGraphicsCommandForImage(image: DecodedImage, id: number, columns: number, rows: number): KittyGraphicsCommandResult {
+  const scaled = scaledImageForKitty(image, columns, rows)
+  const key = `${id}:${columns}x${rows}:${scaled.width}x${scaled.height}`
+  let imageCache = kittyGraphicsCommandCache.get(image)
+
+  if (!imageCache) {
+    imageCache = new Map()
+    kittyGraphicsCommandCache.set(image, imageCache)
+  }
+
+  const cached = imageCache.get(key)
+  if (cached) return { ...cached, cached: true }
+
+  const command = kittyGraphicsCommand({ id, width: scaled.width, height: scaled.height, columns, rows, rgba: scaled.rgba })
+  const entry = { command, width: scaled.width, height: scaled.height, chunks: kittyCommandChunkCount(command) }
+  imageCache.set(key, entry)
+
+  return { ...entry, cached: false }
+}
+
 function scaledImageForSize(image: DecodedImage, width: number, height: number): ScaledImage {
   const key = `${width}x${height}`
   let imageCache = scaledImageCache.get(image)
@@ -1293,6 +1740,22 @@ function scaledImageForSize(image: DecodedImage, width: number, height: number):
   imageCache.set(key, scaled)
 
   return scaled
+}
+
+function isRenderableOnScreen(renderer: CliRenderer, renderable: BoxRenderable) {
+  return renderable.screenX < renderer.terminalWidth && renderable.screenY < renderer.terminalHeight && renderable.screenX + renderable.width > 0 && renderable.screenY + renderable.height > 0
+}
+
+function writeRawTerminal(renderer: CliRenderer, value: string) {
+  const stdout = (renderer as unknown as { stdout?: NodeJS.WriteStream }).stdout ?? process.stdout
+
+  return stdout.write(value)
+}
+
+function kittyCommandChunkCount(command: string) {
+  const matches = command.match(/\x1b_G/g)
+
+  return matches?.length ?? 0
 }
 
 function resizeRgbaAverage(source: Uint8Array, sourceWidth: number, sourceHeight: number, targetWidth: number, targetHeight: number) {
@@ -1353,19 +1816,54 @@ function pixelLuminance(image: ScaledImage, x: number, y: number) {
   return ((0.2126 * image.rgba[offset] + 0.7152 * image.rgba[offset + 1] + 0.0722 * image.rgba[offset + 2]) / 255) * alpha
 }
 
+export type ImageRenderModeDecision = { mode: ImageRenderMode; reason: string }
+
 export function imageRenderModeForCapabilities(capabilities: ImageTerminalCapabilities | null | undefined, options: { nativeProtocols?: boolean } = {}): ImageRenderMode {
-  if (options.nativeProtocols && capabilities?.kitty_graphics && canUseKittyGraphics(capabilities)) return "kitty"
-
-  if (!capabilities || capabilities.rgb) return "cell-color"
-
-  return "cell-mono"
+  return imageRenderModeDecisionForCapabilities(capabilities, options).mode
 }
 
-function canUseKittyGraphics(capabilities: ImageTerminalCapabilities) {
-  if (capabilities.multiplexer && capabilities.multiplexer !== "none") return false
-  if (process.env.TMUX || process.env.ZELLIJ || process.env.WT_SESSION) return false
+export function imageRenderModeDecisionForCapabilities(capabilities: ImageTerminalCapabilities | null | undefined, options: { nativeProtocols?: boolean } = {}): ImageRenderModeDecision {
+  if (options.nativeProtocols && capabilities?.kitty_graphics) {
+    const blockReason = kittyGraphicsBlockReason(capabilities)
+    if (!blockReason) return { mode: "kitty", reason: "kitty-supported" }
 
-  return Boolean(process.env.KITTY_WINDOW_ID || capabilities.terminal?.name?.toLowerCase().includes("kitty"))
+    return fallbackImageRenderMode(capabilities, `kitty-blocked:${blockReason}`)
+  }
+
+  if (options.nativeProtocols && capabilities?.sixel) return fallbackImageRenderMode(capabilities, "sixel-not-implemented")
+  if (options.nativeProtocols) return fallbackImageRenderMode(capabilities, "native-protocol-unavailable")
+
+  return fallbackImageRenderMode(capabilities, "native-protocols-disabled")
+}
+
+function fallbackImageRenderMode(capabilities: ImageTerminalCapabilities | null | undefined, reason: string): ImageRenderModeDecision {
+  if (!capabilities) return { mode: "cell-color", reason: `${reason}:missing-capabilities` }
+  if (capabilities.rgb) return { mode: "cell-color", reason }
+
+  return { mode: "cell-mono", reason: `${reason}:rgb-unavailable` }
+}
+
+function kittyGraphicsBlockReason(capabilities: ImageTerminalCapabilities) {
+  if (capabilities.multiplexer && capabilities.multiplexer !== "none") return `reported-multiplexer-${capabilities.multiplexer}`
+  if (process.env.TMUX) return "env-tmux"
+  if (process.env.ZELLIJ) return "env-zellij"
+  if (process.env.WT_SESSION) return "env-windows-terminal"
+
+  return process.env.KITTY_WINDOW_ID || capabilities.terminal?.name?.toLowerCase().includes("kitty") ? null : "not-direct-kitty"
+}
+
+function summarizeImageCapabilities(capabilities: ImageTerminalCapabilities | null | undefined) {
+  return {
+    kittyGraphics: capabilities?.kitty_graphics,
+    sixel: capabilities?.sixel,
+    rgb: capabilities?.rgb,
+    multiplexer: capabilities?.multiplexer ?? null,
+    terminalName: capabilities?.terminal?.name ?? null,
+    kittyWindowId: Boolean(process.env.KITTY_WINDOW_ID),
+    tmux: Boolean(process.env.TMUX),
+    zellij: Boolean(process.env.ZELLIJ),
+    windowsTerminal: Boolean(process.env.WT_SESSION),
+  }
 }
 
 function imageRenderModeLabel(mode: ImageRenderMode) {
@@ -1437,11 +1935,7 @@ function InfoPanel(props: { title: string; items: string[]; empty: string }) {
 }
 
 function StatusBar(props: { focusPane: string; editorOpen: boolean; editorDirty: boolean; editMessage: string }) {
-  const hint = () => {
-    if (props.editorOpen) return "Ctrl+T stage | Esc close without changing staged docs"
-    if (props.focusPane === "document") return "/ search s spaces c overview e edit i image D delete Tab panes j/k scroll h/l wide d/u page"
-    return "/ search s spaces c overview Tab panes n child N root e edit i image D delete j/k move h/l fold"
-  }
+  const hints = () => statusBarHints(props.focusPane, props.editorOpen)
   const status = () => {
     if (props.editorOpen) return props.editMessage || `editing transient buffer: ${props.editorDirty ? "modified" : "unchanged"}`
     return props.editMessage ? props.editMessage : `focus: ${props.focusPane}`
@@ -1450,7 +1944,50 @@ function StatusBar(props: { focusPane: string; editorOpen: boolean; editorDirty:
   return (
     <box height={1} backgroundColor={theme.accentSoft} paddingX={1} flexDirection="row" justifyContent="space-between">
       <text height={1} fg={theme.text}>{status()}</text>
-      <text height={1} fg={theme.muted}>{hint()}</text>
+      <box height={1} flexDirection="row">
+        <For each={hints()}>{(hint) => <StatusHint hint={hint} />}</For>
+      </box>
+    </box>
+  )
+}
+
+type StatusHintItem = { key: string; label: string }
+
+function statusBarHints(focusPane: string, editorOpen: boolean): StatusHintItem[] {
+  if (editorOpen) return [{ key: "Ctrl+T", label: "stage" }, { key: "Esc", label: "close" }]
+  if (focusPane === "document") return [
+    { key: "/", label: "search" },
+    { key: "s", label: "spaces" },
+    { key: "c", label: "overview" },
+    { key: "i", label: "image" },
+    { key: "e", label: "edit" },
+    { key: "D", label: "delete" },
+    { key: "Tab", label: "panes" },
+    { key: "j/k", label: "scroll" },
+    { key: "d/u", label: "page" },
+  ]
+
+  return [
+    { key: "/", label: "search" },
+    { key: "s", label: "spaces" },
+    { key: "c", label: "overview" },
+    { key: "i", label: "image" },
+    { key: "Tab", label: "panes" },
+    { key: "n", label: "child" },
+    { key: "N", label: "root" },
+    { key: "e", label: "edit" },
+    { key: "D", label: "delete" },
+    { key: "j/k", label: "move" },
+    { key: "h/l", label: "fold" },
+  ]
+}
+
+function StatusHint(props: { hint: StatusHintItem }) {
+  return (
+    <box height={1} flexDirection="row">
+      <text height={1} fg={theme.accent}>{props.hint.key}</text>
+      <text height={1} fg={theme.muted}> {props.hint.label}</text>
+      <text height={1} fg={theme.muted}> · </text>
     </box>
   )
 }
@@ -1919,6 +2456,28 @@ function isPlainKey(key: SearchKeyLike, value: string) {
   return !key.ctrl && !key.meta && (key.name === value || key.sequence === value)
 }
 
+function keyDebugData(key: SearchKeyLike) {
+  return {
+    keyName: key.name,
+    keySequence: readableKeySequence(key.sequence),
+    keySequenceHex: keySequenceHex(key.sequence),
+    keyCtrl: key.ctrl,
+    keyMeta: key.meta,
+    keyShift: Boolean(key.shift),
+  }
+}
+
+function readableKeySequence(sequence: string) {
+  if (!sequence) return ""
+  if (sequence.length > 16) return `${sequence.slice(0, 16)}...`
+
+  return sequence
+}
+
+function keySequenceHex(sequence: string) {
+  return [...sequence].map((character) => character.codePointAt(0)?.toString(16).padStart(2, "0") ?? "").join(" ")
+}
+
 function isTabKey(key: SearchKeyLike) {
   return key.name === "tab" || key.sequence === "\t"
 }
@@ -1961,6 +2520,45 @@ function relatedItems(page: ReaderPage) {
 
 function readerImagePartsForPage(page: ReaderPage): ReaderImagePart[] {
   return splitReaderImagePlaceholders(page.contentMarkdown, page.mediaAssets ?? []).filter(isReaderImagePart)
+}
+
+export type ReaderImagePosition = { nodeId: string; top: number; height: number }
+
+export function nearestImageIndexForViewport(images: { nodeId: string }[], positions: ReaderImagePosition[], viewportTop: number, viewportHeight: number) {
+  if (!images.length) return 0
+
+  const positionByNodeId = new Map(positions.map((position) => [position.nodeId, position]))
+  const viewportCenter = viewportTop + viewportHeight / 2
+  let nearestIndex = 0
+  let nearestDistance = Number.POSITIVE_INFINITY
+
+  for (let index = 0; index < images.length; index += 1) {
+    const position = positionByNodeId.get(images[index].nodeId)
+    if (!position) continue
+
+    const distance = distanceToViewportCenter(position, viewportCenter)
+    if (distance < nearestDistance) {
+      nearestDistance = distance
+      nearestIndex = index
+    }
+  }
+
+  return Number.isFinite(nearestDistance) ? nearestIndex : 0
+}
+
+function readerImagePositions(images: ReaderImagePart[], renderables: Map<string, BoxRenderable>): ReaderImagePosition[] {
+  return images.flatMap((image) => {
+    const renderable = renderables.get(image.nodeId)
+    return renderable ? [{ nodeId: image.nodeId, top: renderable.screenY, height: renderable.height }] : []
+  })
+}
+
+function distanceToViewportCenter(position: ReaderImagePosition, viewportCenter: number) {
+  const bottom = position.top + position.height
+  if (viewportCenter < position.top) return position.top - viewportCenter
+  if (viewportCenter > bottom) return viewportCenter - bottom
+
+  return 0
 }
 
 function isReaderImagePart(part: ReaderContentPart): part is ReaderImagePart {

@@ -1,16 +1,17 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
+import { Writable } from "node:stream"
 import { describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
-import { App, ImageViewerOverlay, NewPageOverlay, StagedChangesOverlay, documentHorizontalScrollDeltaForKey, imageRenderModeForCapabilities, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, type SearchKeyLike } from "../src/tui/app"
+import { App, ImageViewerOverlay, NewPageOverlay, StagedChangesOverlay, documentHorizontalScrollDeltaForKey, imageRenderModeForCapabilities, nearestImageIndexForViewport, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, type SearchKeyLike } from "../src/tui/app"
 import { createLocalConfig } from "../src/config"
 import type { CredentialStatus } from "../src/config"
 import { openIndexRepository } from "../src/index/repository"
 import type { PageBodyArtifact, PageDraft } from "../src/index/repository"
 import { createDevTuiRuntime } from "../src/tui/runtime"
 import { createRepositoryTuiDataSource } from "../src/tui/data"
-import type { IndexedPage, SpaceSummary } from "../src/model"
+import type { IndexedPage, MediaAsset, SpaceSummary } from "../src/model"
 
 describe("main TUI layout", () => {
   test("renders navigator and document labels in a headless frame", async () => {
@@ -33,12 +34,15 @@ describe("main TUI layout", () => {
       expect(output).toContain("j/k move")
       expect(output).toContain("h/l fold")
       expect(output).toContain("s spaces")
+      expect(output).toContain("·")
       expect(output).toContain("Overview 0")
       expect(output).toContain("c overview")
+      expect(output).toContain("i image")
       expect(output).toContain("e edit")
       expect(output).toContain("Tab panes")
       expect(output).toContain("N root")
       expect(output).toContain("D delete")
+      expect(output).not.toContain("i.image")
       expect(output).toContain("▾ ▣ Local Engineering Home")
       expect(output).toContain("• Real Synced Architecture")
       expect(output).toContain("Real Synced Architecture")
@@ -272,6 +276,151 @@ describe("main TUI layout", () => {
     }
   })
 
+  test("image viewer emits Kitty graphics payload in native Kitty mode", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lazyconfluence-kitty-viewer-"))
+    const imagePath = join(dir, "system-overview.png")
+    const logPath = join(dir, "image-debug.jsonl")
+    const writes: string[] = []
+    const stdout = createCaptureStdout(120, 36, writes)
+    const previousImageDebug = process.env.LAZYCONFLUENCE_IMAGE_DEBUG
+    const previousImageDebugLog = process.env.LAZYCONFLUENCE_IMAGE_DEBUG_LOG
+    const imageAsset: MediaAsset = {
+      pageId: "local-home",
+      nodeId: "image-node",
+      title: "System overview",
+      sourceUrl: null,
+      cachePath: imagePath,
+      contentType: "image/png",
+      width: 1,
+      height: 1,
+      updatedAt: "2026-07-23T12:00:00Z",
+    }
+
+    try {
+      await writeFile(imagePath, Buffer.from(tinyPngBase64, "base64"))
+      process.env.LAZYCONFLUENCE_IMAGE_DEBUG = "1"
+      process.env.LAZYCONFLUENCE_IMAGE_DEBUG_LOG = logPath
+
+      const rendered = await testRender(() => (
+        <ImageViewerOverlay
+          visible
+          pageTitle="Local Engineering Home"
+          images={[{ kind: "image", nodeId: "image-node", label: "System overview", details: "Attachment on this Confluence page.", asset: imageAsset }]}
+          selectedIndex={0}
+          renderMode="kitty"
+          left={2}
+          top={2}
+          width={80}
+          height={24}
+          onClose={() => {}}
+        />
+      ), { width: 120, height: 36, stdout })
+
+      try {
+        await rendered.renderOnce()
+        await rendered.flush()
+        await waitForTimers()
+
+        const rawOutput = writes.join("")
+        expect(rawOutput).toContain("\x1b7")
+        expect(rawOutput).toContain("\x1b_Ga=T")
+        expect(rawOutput).toContain(",f=32")
+        expect(rawOutput).toContain(",i=")
+        expect(rawOutput).toContain("\x1b\\")
+
+        const events = await readImageDebugEvents(logPath)
+        expect(events.map((event) => event.event)).toContain("image_asset_load")
+        expect(events.map((event) => event.event)).toContain("viewer_render_after")
+        expect(events.map((event) => event.event)).toContain("kitty_queue")
+        expect(events.map((event) => event.event)).toContain("kitty_write")
+        const kittyWrite = events.find((event) => event.event === "kitty_write")
+        expect(kittyWrite).toMatchObject({ accepted: true, chunks: 1, sourceWidth: 1, sourceHeight: 1 })
+        expect(Number(kittyWrite?.row)).toBeGreaterThan(0)
+        expect(Number(kittyWrite?.column)).toBeGreaterThan(0)
+      } finally {
+        rendered.renderer.destroy()
+      }
+    } finally {
+      restoreEnv("LAZYCONFLUENCE_IMAGE_DEBUG", previousImageDebug)
+      restoreEnv("LAZYCONFLUENCE_IMAGE_DEBUG_LOG", previousImageDebugLog)
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("image viewer deletes Kitty image between close and reopen", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lazyconfluence-kitty-reopen-"))
+    const imagePath = join(dir, "system-overview.png")
+    const logPath = join(dir, "image-debug.jsonl")
+    const writes: string[] = []
+    const stdout = createCaptureStdout(120, 36, writes)
+    const previousImageDebug = process.env.LAZYCONFLUENCE_IMAGE_DEBUG
+    const previousImageDebugLog = process.env.LAZYCONFLUENCE_IMAGE_DEBUG_LOG
+    const imageAsset: MediaAsset = {
+      pageId: "local-home",
+      nodeId: "image-node",
+      title: "System overview",
+      sourceUrl: null,
+      cachePath: imagePath,
+      contentType: "image/png",
+      width: 1,
+      height: 1,
+      updatedAt: "2026-07-23T12:00:00Z",
+    }
+    const renderViewer = () => testRender(() => (
+      <ImageViewerOverlay
+        visible
+        pageTitle="Local Engineering Home"
+        images={[{ kind: "image", nodeId: "image-node", label: "System overview", details: "Attachment on this Confluence page.", asset: imageAsset }]}
+        selectedIndex={0}
+        renderMode="kitty"
+        left={2}
+        top={2}
+        width={80}
+        height={24}
+        onClose={() => {}}
+      />
+    ), { width: 120, height: 36, stdout })
+
+    try {
+      await writeFile(imagePath, Buffer.from(tinyPngBase64, "base64"))
+      process.env.LAZYCONFLUENCE_IMAGE_DEBUG = "1"
+      process.env.LAZYCONFLUENCE_IMAGE_DEBUG_LOG = logPath
+
+      const firstRender = await renderViewer()
+      await firstRender.renderOnce()
+      await firstRender.flush()
+      await waitForTimers()
+      firstRender.renderer.destroy()
+
+      const outputAfterClose = writes.join("")
+      expect(outputAfterClose.match(/\x1b_Ga=d,d=i/g)?.length ?? 0).toBe(1)
+
+      const secondRender = await renderViewer()
+      try {
+        await secondRender.renderOnce()
+        await secondRender.flush()
+        await waitForTimers()
+
+        const outputAfterReopen = writes.join("")
+        expect(outputAfterReopen.match(/\x1b_Ga=T/g)?.length ?? 0).toBe(2)
+        expect(outputAfterReopen.match(/\x1b_Ga=d,d=i/g)?.length ?? 0).toBe(1)
+
+        const events = await readImageDebugEvents(logPath)
+        const kittyWrites = events.filter((event) => event.event === "kitty_write")
+        expect(kittyWrites).toHaveLength(2)
+        expect(kittyWrites[0]).toMatchObject({ cached: false })
+        expect(kittyWrites[1]).toMatchObject({ cached: true })
+        expect(events.map((event) => event.event)).toContain("kitty_delete")
+      } finally {
+        secondRender.renderer.destroy()
+      }
+    } finally {
+      restoreEnv("LAZYCONFLUENCE_IMAGE_DEBUG", previousImageDebug)
+      restoreEnv("LAZYCONFLUENCE_IMAGE_DEBUG_LOG", previousImageDebugLog)
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
 
   test("keeps navigator siblings in synced tree order", async () => {
     const setup = await createTuiTestSetup({ architecture: { ...architecture, treeOrder: 1 }, extraPages: [zebraFirstChild] })
@@ -405,6 +554,21 @@ describe("main TUI layout", () => {
     expect(documentHorizontalScrollDeltaForKey(key("l", "l"))).toBe(8)
     expect(documentHorizontalScrollDeltaForKey(key("right", "\x1B[C"))).toBe(8)
     expect(documentHorizontalScrollDeltaForKey(key("j", "j"))).toBe(0)
+  })
+
+  test("image viewer starts from nearest image to document viewport center", () => {
+    const images = [{ nodeId: "first" }, { nodeId: "second" }, { nodeId: "third" }]
+    const positions = [
+      { nodeId: "first", top: 10, height: 8 },
+      { nodeId: "second", top: 80, height: 12 },
+      { nodeId: "third", top: 160, height: 14 },
+    ]
+
+    expect(nearestImageIndexForViewport(images, positions, 0, 40)).toBe(0)
+    expect(nearestImageIndexForViewport(images, positions, 70, 30)).toBe(1)
+    expect(nearestImageIndexForViewport(images, positions, 145, 30)).toBe(2)
+    expect(nearestImageIndexForViewport(images, positions.slice(1), 0, 40)).toBe(1)
+    expect(nearestImageIndexForViewport(images, [], 145, 30)).toBe(0)
   })
 
   test("image render mode progressively falls back from native protocols to cells", () => {
@@ -723,6 +887,32 @@ async function withProcessEnv<T>(env: NodeJS.ProcessEnv, callback: () => Promise
   } finally {
     restoreEnv("LAZYCONFLUENCE_DB_PATH", originalDbPath)
   }
+}
+
+function createCaptureStdout(columns: number, rows: number, writes: string[]) {
+  const stream = new Writable({
+    write(chunk, _encoding, callback) {
+      writes.push(Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk))
+      callback()
+    },
+  })
+
+  return Object.assign(stream, {
+    isTTY: true,
+    columns,
+    rows,
+    getColorDepth: () => 24,
+  }) as NodeJS.WriteStream
+}
+
+function waitForTimers() {
+  return new Promise<void>((resolve) => setTimeout(resolve, 0))
+}
+
+async function readImageDebugEvents(path: string) {
+  const text = await readFile(path, "utf8")
+
+  return text.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>)
 }
 
 function restoreEnv(name: string, value: string | undefined) {

@@ -1,7 +1,9 @@
 import { render, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import {
   BoxRenderable,
+  CliRenderEvents,
   CodeRenderable,
+  type CliRenderer,
   type OptimizedBuffer,
   RGBA,
   TextAttributes,
@@ -24,6 +26,7 @@ import type { PageDraftStatus } from "../index/repository"
 import type { ApplyPageDraftResult } from "../apply"
 import { defaultRuntimeEnv, runtimeEnvFromLegacyDemo, type RuntimeEnv } from "../runtime/env"
 import { emptyPageId, emptyReaderPage, emptySpaceSummary } from "./data"
+import { kittyDeleteImageCommand, kittyGraphicsCommand, kittyImageId } from "./kitty"
 import { splitReaderImagePlaceholders, type ReaderContentPart } from "./media"
 import { createTuiRuntime, type TuiRuntime } from "./runtime"
 import type { TuiSource, TuiStagedChange } from "./source"
@@ -59,7 +62,7 @@ export type PageSearchKeyAction = "append" | "delete" | "submit" | "close" | "ne
 
 export type ImageRenderMode = "kitty" | "sixel" | "cell-color" | "cell-mono" | "placeholder"
 
-type ImageTerminalCapabilities = Pick<TerminalCapabilities, "kitty_graphics" | "sixel" | "rgb">
+type ImageTerminalCapabilities = Pick<TerminalCapabilities, "kitty_graphics" | "sixel" | "rgb"> & Partial<Pick<TerminalCapabilities, "multiplexer" | "terminal">>
 
 export interface RenderTuiOptions {
   env?: RuntimeEnv
@@ -963,8 +966,17 @@ function navigatorDocumentKind(row: TreeRow): NavigatorDocumentKind {
 function Reader(props: { page: ReaderPage; focused: boolean; narrow: boolean; treeSitterClient?: TreeSitterClient; setDocumentScrollbox: (scrollbox: ScrollBoxRenderable) => void }) {
   const renderer = useRenderer()
   const renderCodeBlock = createReadableCodeBlockRenderer(renderer)
-  const imageRenderMode = createMemo(() => imageRenderModeForCapabilities(renderer.capabilities))
+  const [terminalCapabilities, setTerminalCapabilities] = createSignal<TerminalCapabilities | null>(renderer.capabilities)
+  const nativeProtocols = nativeImageProtocolsEnabled()
+  const imageRenderMode = createMemo(() => imageRenderModeForCapabilities(terminalCapabilities(), { nativeProtocols }))
   const contentParts = createMemo(() => splitReaderImagePlaceholders(props.page.contentMarkdown, props.page.mediaAssets ?? []))
+
+  onMount(() => {
+    const updateCapabilities = (capabilities: TerminalCapabilities | null) => setTerminalCapabilities(capabilities)
+    renderer.on(CliRenderEvents.CAPABILITIES, updateCapabilities)
+
+    onCleanup(() => renderer.off(CliRenderEvents.CAPABILITIES, updateCapabilities))
+  })
 
   return (
     <box
@@ -1014,20 +1026,33 @@ function Reader(props: { page: ReaderPage; focused: boolean; narrow: boolean; tr
 }
 
 function ImagePreviewCard(props: { part: Extract<ReaderContentPart, { kind: "image" }>; narrow: boolean; renderMode: ImageRenderMode }) {
+  const renderer = useRenderer()
+  const kittyOverlay = kittyOverlayForRenderer(renderer)
   const loaded = createMemo(() => loadImagePreview(props.part.asset))
   const image = createMemo(() => imageFromLoadResult(loaded()))
   const fallbackMessage = createMemo(() => messageFromLoadResult(loaded()))
   const size = createMemo(() => image() ? imagePreviewSize(image()!, props.narrow) : { width: props.narrow ? 34 : 52, height: 4 })
+  const kittyId = createMemo(() => kittyImageId(`${props.part.nodeId}:${props.part.asset?.cachePath ?? props.part.label}`))
+  let imageRenderable: BoxRenderable | undefined
+
+  onCleanup(() => kittyOverlay.deleteImage(kittyId()))
+
+  const renderPreview = (buffer: OptimizedBuffer, decoded: DecodedImage) => {
+    drawImagePreview(buffer, decoded, props.renderMode)
+    if (props.renderMode !== "kitty" || !imageRenderable) return
+
+    kittyOverlay.queueImage({ id: kittyId(), image: decoded, renderable: imageRenderable, columns: buffer.width, rows: buffer.height })
+  }
 
   return (
-    <box width="100%" height={image() ? size().height + 4 : 6} border borderStyle="rounded" borderColor={image() ? theme.good : theme.border} backgroundColor={theme.panel} paddingX={1} marginBottom={1} flexDirection="column">
+    <box width="100%" height={image() ? size().height + 5 : 6} border borderStyle="rounded" borderColor={image() ? theme.good : theme.border} backgroundColor={theme.panel} paddingX={1} marginBottom={1} flexDirection="column">
       <text height={1} fg={image() ? theme.good : theme.warn} attributes={1}>{image() ? "IMAGE PREVIEW" : "IMAGE PLACEHOLDER"}</text>
       <text height={1} fg={theme.text}>{props.part.label}</text>
       <Show when={image()} fallback={<ImagePreviewFallback part={props.part} message={fallbackMessage()} />}>
         {(decoded) => (
           <box flexDirection="column" width="100%">
             <text height={1} fg={theme.subtle}>cached PNG {decoded().width}x{decoded().height} · {imageRenderModeLabel(props.renderMode)}</text>
-            <box width={size().width} height={size().height} backgroundColor={theme.bg} buffered renderAfter={(buffer: OptimizedBuffer) => drawImagePreview(buffer, decoded(), props.renderMode)} />
+            <box ref={(renderable: BoxRenderable) => { imageRenderable = renderable }} width="100%" height={size().height} backgroundColor={theme.bg} buffered renderAfter={(buffer: OptimizedBuffer) => renderPreview(buffer, decoded())} />
           </box>
         )}
       </Show>
@@ -1097,8 +1122,10 @@ function drawImagePreview(buffer: OptimizedBuffer, image: DecodedImage, mode: Im
 }
 
 type ScaledImage = { width: number; height: number; rgba: Uint8Array }
+type KittyQueuedImage = { id: number; image: DecodedImage; renderable: BoxRenderable; columns: number; rows: number }
 
 const scaledImageCache = new WeakMap<DecodedImage, Map<string, ScaledImage>>()
+const kittyOverlayManagers = new WeakMap<CliRenderer, KittyImageOverlay>()
 const monoRamp = " .:-=+*#%@"
 const imagePreviewBackgroundInts = RGBA.fromHex(theme.bg).toInts()
 
@@ -1128,8 +1155,14 @@ function drawMonoCellImage(buffer: OptimizedBuffer, image: DecodedImage) {
 }
 
 function scaledImageForCells(image: DecodedImage, cellWidth: number, cellHeight: number): ScaledImage {
-  const width = Math.max(1, cellWidth)
-  const height = Math.max(1, cellHeight * 2)
+  return scaledImageForSize(image, Math.max(1, cellWidth), Math.max(1, cellHeight * 2))
+}
+
+function scaledImageForKitty(image: DecodedImage, columns: number, rows: number): ScaledImage {
+  return scaledImageForSize(image, Math.min(image.width, Math.max(1, columns * 4)), Math.min(image.height, Math.max(1, rows * 8)))
+}
+
+function scaledImageForSize(image: DecodedImage, width: number, height: number): ScaledImage {
   const key = `${width}x${height}`
   let imageCache = scaledImageCache.get(image)
   if (!imageCache) {
@@ -1143,6 +1176,84 @@ function scaledImageForCells(image: DecodedImage, cellWidth: number, cellHeight:
   imageCache.set(key, scaled)
 
   return scaled
+}
+
+function kittyOverlayForRenderer(renderer: CliRenderer) {
+  const existing = kittyOverlayManagers.get(renderer)
+  if (existing) return existing
+
+  const created = new KittyImageOverlay(renderer)
+  kittyOverlayManagers.set(renderer, created)
+
+  return created
+}
+
+class KittyImageOverlay {
+  private queued = new Map<number, KittyQueuedImage>()
+  private displayed = new Set<number>()
+  private readonly stdout: NodeJS.WriteStream
+  private readonly onFrame = () => this.flush()
+  private readonly onDestroy = () => this.destroy()
+
+  constructor(private readonly renderer: CliRenderer) {
+    this.stdout = rendererStdout(renderer)
+    renderer.on(CliRenderEvents.FRAME, this.onFrame)
+    renderer.on(CliRenderEvents.DESTROY, this.onDestroy)
+  }
+
+  queueImage(image: KittyQueuedImage) {
+    if (!isRenderableOnScreen(this.renderer, image.renderable)) return
+
+    this.queued.set(image.id, image)
+  }
+
+  deleteImage(id: number) {
+    this.queued.delete(id)
+    if (!this.displayed.delete(id)) return
+
+    this.write(kittyDeleteImageCommand(id))
+  }
+
+  private flush() {
+    for (const id of this.displayed) {
+      if (!this.queued.has(id)) this.write(kittyDeleteImageCommand(id))
+    }
+
+    this.displayed = new Set(this.queued.keys())
+
+    for (const image of this.queued.values()) this.draw(image)
+
+    this.queued.clear()
+  }
+
+  private draw(input: KittyQueuedImage) {
+    const scaled = scaledImageForKitty(input.image, input.columns, input.rows)
+    const row = Math.max(1, Math.floor(input.renderable.screenY) + 1)
+    const column = Math.max(1, Math.floor(input.renderable.screenX) + 1)
+    const command = kittyGraphicsCommand({ id: input.id, width: scaled.width, height: scaled.height, columns: input.columns, rows: input.rows, rgba: scaled.rgba })
+
+    this.write(`\x1b7\x1b[${row};${column}H${command}\x1b8`)
+  }
+
+  private destroy() {
+    for (const id of this.displayed) this.write(kittyDeleteImageCommand(id))
+    this.displayed.clear()
+    this.queued.clear()
+    this.renderer.off(CliRenderEvents.FRAME, this.onFrame)
+    this.renderer.off(CliRenderEvents.DESTROY, this.onDestroy)
+  }
+
+  private write(value: string) {
+    this.stdout.write(value)
+  }
+}
+
+function isRenderableOnScreen(renderer: CliRenderer, renderable: BoxRenderable) {
+  return renderable.screenX < renderer.terminalWidth && renderable.screenY < renderer.terminalHeight && renderable.screenX + renderable.width > 0 && renderable.screenY + renderable.height > 0
+}
+
+function rendererStdout(renderer: CliRenderer) {
+  return (renderer as unknown as { stdout?: NodeJS.WriteStream }).stdout ?? process.stdout
 }
 
 function resizeRgbaAverage(source: Uint8Array, sourceWidth: number, sourceHeight: number, targetWidth: number, targetHeight: number) {
@@ -1204,12 +1315,24 @@ function pixelLuminance(image: ScaledImage, x: number, y: number) {
 }
 
 export function imageRenderModeForCapabilities(capabilities: ImageTerminalCapabilities | null | undefined, options: { nativeProtocols?: boolean } = {}): ImageRenderMode {
-  if (options.nativeProtocols && capabilities?.kitty_graphics) return "kitty"
-  if (options.nativeProtocols && capabilities?.sixel) return "sixel"
+  if (options.nativeProtocols && capabilities?.kitty_graphics && canUseKittyGraphics(capabilities)) return "kitty"
 
   if (!capabilities || capabilities.rgb) return "cell-color"
 
   return "cell-mono"
+}
+
+function nativeImageProtocolsEnabled() {
+  const value = process.env.LAZYCONFLUENCE_NATIVE_IMAGES?.toLowerCase()
+
+  return value === "1" || value === "true" || value === "kitty" || value === "sixel"
+}
+
+function canUseKittyGraphics(capabilities: ImageTerminalCapabilities) {
+  if (capabilities.multiplexer && capabilities.multiplexer !== "none") return false
+  if (process.env.TMUX || process.env.ZELLIJ || process.env.WT_SESSION) return false
+
+  return Boolean(process.env.KITTY_WINDOW_ID || capabilities.terminal?.name?.toLowerCase().includes("kitty"))
 }
 
 function imageRenderModeLabel(mode: ImageRenderMode) {

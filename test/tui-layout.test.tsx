@@ -236,6 +236,7 @@ describe("main TUI layout", () => {
       expect(output).toContain("cached PNG 1x1")
       expect(output).toContain("color cells")
       expect(output).toContain("▀")
+      expect(output).not.toContain("╰─▀")
     } finally {
       repository?.close()
       await setup.cleanup()
@@ -378,12 +379,32 @@ describe("main TUI layout", () => {
   })
 
   test("image render mode progressively falls back from native protocols to cells", () => {
-    expect(imageRenderModeForCapabilities(null)).toBe("cell-color")
-    expect(imageRenderModeForCapabilities({ kitty_graphics: true, sixel: true, rgb: true })).toBe("cell-color")
-    expect(imageRenderModeForCapabilities({ kitty_graphics: true, sixel: true, rgb: true }, { nativeProtocols: true })).toBe("kitty")
-    expect(imageRenderModeForCapabilities({ kitty_graphics: false, sixel: true, rgb: true }, { nativeProtocols: true })).toBe("sixel")
-    expect(imageRenderModeForCapabilities({ kitty_graphics: false, sixel: false, rgb: true })).toBe("cell-color")
-    expect(imageRenderModeForCapabilities({ kitty_graphics: false, sixel: false, rgb: false })).toBe("cell-mono")
+    const previousKittyWindowId = process.env.KITTY_WINDOW_ID
+    const previousTmux = process.env.TMUX
+    const previousZellij = process.env.ZELLIJ
+    const previousWindowsTerminal = process.env.WT_SESSION
+    try {
+      delete process.env.KITTY_WINDOW_ID
+      delete process.env.TMUX
+      delete process.env.ZELLIJ
+      delete process.env.WT_SESSION
+
+      expect(imageRenderModeForCapabilities(null)).toBe("cell-color")
+      expect(imageRenderModeForCapabilities({ kitty_graphics: true, sixel: true, rgb: true })).toBe("cell-color")
+      expect(imageRenderModeForCapabilities({ kitty_graphics: true, sixel: true, rgb: true }, { nativeProtocols: true })).toBe("cell-color")
+      process.env.KITTY_WINDOW_ID = "1"
+      expect(imageRenderModeForCapabilities({ kitty_graphics: true, sixel: true, rgb: true }, { nativeProtocols: true })).toBe("kitty")
+      process.env.TMUX = "tmux"
+      expect(imageRenderModeForCapabilities({ kitty_graphics: true, sixel: true, rgb: true, multiplexer: "tmux" }, { nativeProtocols: true })).toBe("cell-color")
+      expect(imageRenderModeForCapabilities({ kitty_graphics: false, sixel: true, rgb: true }, { nativeProtocols: true })).toBe("cell-color")
+      expect(imageRenderModeForCapabilities({ kitty_graphics: false, sixel: false, rgb: true })).toBe("cell-color")
+      expect(imageRenderModeForCapabilities({ kitty_graphics: false, sixel: false, rgb: false })).toBe("cell-mono")
+    } finally {
+      restoreEnv("KITTY_WINDOW_ID", previousKittyWindowId)
+      restoreEnv("TMUX", previousTmux)
+      restoreEnv("ZELLIJ", previousZellij)
+      restoreEnv("WT_SESSION", previousWindowsTerminal)
+    }
   })
 
   test("navigator collapse does not select missing detached parents", () => {

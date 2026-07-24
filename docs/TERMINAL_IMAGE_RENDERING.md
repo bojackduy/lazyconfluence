@@ -1,6 +1,6 @@
 # Terminal Image Rendering Notes
 
-This note records the current image-rendering state, the root cause of the failed native Kitty attempt, and constraints for future Kitty/Sixel/Windows Terminal work.
+This note records the current image-rendering state, native terminal protocol choices, and constraints for future multiplexer work.
 
 ## Current Status
 
@@ -13,7 +13,8 @@ Inline document images are safe but not native terminal images.
 - The TUI currently decodes cached PNG files only.
 - Inline TUI previews render cached PNGs as truecolor half-block cells.
 - Missing cache files, URL images, JPEG, SVG, and other unsupported formats still show placeholders.
-- Native Kitty protocol code exists, but native output is guarded and not the default.
+- The explicit `i` image viewer can use native terminal protocols when the direct terminal reports support.
+- Inline document images remain cell-based even when native protocols are available.
 
 ## Current Code Paths
 
@@ -25,8 +26,10 @@ Inline document images are safe but not native terminal images.
 - `src/index/repository.ts` persists and reads media assets.
 - `src/media/image.ts` decodes cached PNG files into RGBA/grayscale buffers.
 - `src/tui/media.ts` splits rendered Markdown into text and image parts by `confluence-opaque` node id.
-- `src/tui/app.tsx` renders image cards, chooses an `ImageRenderMode`, and draws color-cell or mono-cell previews.
-- `src/tui/kitty.ts` contains Kitty graphics protocol encoding helpers, but the TUI does not enable native output by default.
+- `src/tui/app.tsx` renders image cards, chooses an `ImageRenderMode`, draws cell previews, and manages the native image viewer lifecycle.
+- `src/tui/kitty.ts` contains Kitty graphics helpers. The viewer prefers direct cached-PNG payloads (`f=100`) and keeps raw RGBA plus file-transfer helpers for fallback/experiments.
+- `src/tui/iterm2.ts` contains OSC 1337 inline image helpers for WezTerm/iTerm2-compatible terminals.
+- `src/tui/sixel.ts` contains a small indexed-color Sixel encoder for terminals that report Sixel support.
 
 ## Root Causes From The Investigation
 
@@ -64,20 +67,22 @@ The native Kitty attempt emitted Kitty graphics escape sequences directly into t
 
 Specific problems:
 
-- The implementation uploaded full RGBA image payloads from the render/frame path.
-- Large images can produce hundreds of kilobytes of base64 payload per image.
+- The first implementation uploaded full RGBA image payloads from the render/frame path.
+- Large images produced megabyte-scale base64 payloads per image.
 - Re-emitting payloads during OpenTUI frames risks interleaving with OpenTUI's normal renderer output.
 - Native terminal images are not part of OpenTUI's cell buffer, so scroll/resize/repaint lifecycle must be handled separately.
 - Multiplexers require explicit Kitty graphics passthrough support and often need wrapping that is different from direct Kitty output.
 - Capability detection alone is not sufficient proof that the whole output path will consume the protocol safely.
+- The current viewer now prefers direct cached PNG payloads for Kitty-compatible terminals, suppresses duplicate native writes, cancels pending writes on close, and bounds decoded-image cache growth.
 
 ## Terminal Protocol Reality
 
 Different terminals expose different image mechanisms. They are not interchangeable.
 
-- Kitty uses Kitty graphics protocol.
-- Sixel is a different protocol and needs a Sixel encoder/converter.
-- Windows Terminal is not Kitty. If it exposes Sixel in a given version/configuration, a Sixel renderer may work later; otherwise it should use the cell fallback.
+- Kitty and Ghostty use Kitty graphics protocol when `kitty_graphics` is reported and no multiplexer is detected.
+- WezTerm and iTerm2 use the iTerm2 inline image protocol.
+- Sixel is a different protocol and uses the local indexed-color Sixel encoder.
+- Windows Terminal is not Kitty. It uses Sixel only if the running terminal reports Sixel support; otherwise it uses the cell fallback.
 - Multiplexers such as tmux/herdr/zellij can block, escape, wrap, or print native image protocol bytes unless passthrough is explicitly supported and configured.
 
 ## Current Safe Behavior
@@ -92,6 +97,14 @@ Recommended fallback order for inline previews:
 
 Native protocols must not be auto-enabled inside the scrolling document view until they have a safe lifecycle.
 
+Recommended viewer protocol order:
+
+1. `kitty_graphics` with no multiplexer and no `WT_SESSION`: Kitty graphics using direct cached PNG payload transfer.
+2. Known WezTerm/iTerm2 terminal name: OSC 1337 iTerm2 inline image transfer.
+3. `sixel` capability: indexed-color Sixel.
+4. RGB terminal: color half-block cells.
+5. Non-RGB terminal: mono cell approximation.
+
 ## Recommended Native Image Strategy
 
 Do not re-enable native inline images in the document scrollbox first.
@@ -105,22 +118,16 @@ Implement native images in a dedicated image viewer mode first:
 - Delete/clear native images when closing the viewer.
 - Repaint only on viewer open, resize, image change, or zoom/pan.
 
-Kitty-specific future work:
+Remaining future work:
 
-- Prefer file-based or compressed PNG transfer over expanded RGBA payloads.
-- Use strict checks for direct Kitty vs multiplexer sessions.
+- Run repeated open/close real-terminal smoke tests in Kitty, Ghostty, WezTerm, and Windows Terminal.
+- Treat Kitty file transfer (`t=f`) as a later optimization only after terminal-specific smoke tests prove the emulator can access and display local file paths reliably.
+- Tune Sixel quality/performance after testing in real Sixel-capable terminals.
 - Add explicit tmux/herdr/zellij passthrough handling only after confirming their required wrapping/config.
-- Keep native Kitty opt-in until real-terminal smoke tests prove it does not corrupt output.
-
-Sixel-specific future work:
-
-- Add a real Sixel encoder/converter.
-- Only enable it when terminal capabilities and runtime checks confirm Sixel support.
-- Treat Windows Terminal as Sixel-capable only if the running terminal reports and accepts Sixel.
+- Add JPEG/SVG decoding if cached media expands beyond PNG.
 
 ## Open Questions
 
 - What exact passthrough protocol/configuration does herdr support for Kitty graphics?
 - Should the native image viewer suspend OpenTUI while showing an image, or render as a controlled overlay after each frame?
-- Should cached JPEG/SVG decoding be implemented before native terminal image work?
-- Should native images be an explicit config option rather than environment-only opt-in?
+- Should native images become a user-visible config option if any direct terminal remains unstable?

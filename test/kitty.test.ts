@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { kittyDeleteImageCommand, kittyGraphicsCommand, kittyImageId } from "../src/tui/kitty"
+import { kittyDeleteImageCommand, kittyGraphicsCommand, kittyGraphicsFileCommand, kittyGraphicsPngCommand, kittyImageId } from "../src/tui/kitty"
 
 describe("Kitty graphics protocol", () => {
   test("builds a direct transmit-and-display command", () => {
@@ -26,6 +26,27 @@ describe("Kitty graphics protocol", () => {
     })
 
     expect(command).toContain("m=1;")
+    expect(command).toContain("\x1b_Gm=0;")
+  })
+
+  test("builds a compact PNG file transfer command", () => {
+    const command = kittyGraphicsFileCommand({ id: 42, path: "/tmp/image.png", columns: 12, rows: 8, size: 1234 })
+
+    expect(command).toBe(`\x1b_Ga=T,f=100,t=f,c=12,r=8,i=42,q=2,S=1234;${Buffer.from("/tmp/image.png").toString("base64")}\x1b\\`)
+  })
+
+  test("builds a direct PNG transmit-and-display command", () => {
+    const bytes = Buffer.from("tiny png bytes")
+    const command = kittyGraphicsPngCommand({ id: 42, bytes, columns: 12, rows: 8 })
+
+    expect(command).toBe(`\x1b_Ga=T,f=100,c=12,r=8,i=42,q=2,m=0;${bytes.toString("base64")}\x1b\\`)
+    expect(command).not.toContain("t=f")
+  })
+
+  test("chunks direct PNG payloads", () => {
+    const command = kittyGraphicsPngCommand({ id: 7, bytes: new Uint8Array(5000).fill(255), columns: 10, rows: 5 })
+
+    expect(command).toContain("a=T,f=100,c=10,r=5,i=7,q=2,m=1;")
     expect(command).toContain("\x1b_Gm=0;")
   })
 

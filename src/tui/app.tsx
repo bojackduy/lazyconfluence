@@ -1,4 +1,4 @@
-import { statSync } from "node:fs"
+import { readFileSync, statSync } from "node:fs"
 import { render, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import {
   BoxRenderable,
@@ -27,10 +27,12 @@ import type { PageDraftStatus } from "../index/repository"
 import type { ApplyPageDraftResult } from "../apply"
 import { defaultRuntimeEnv, runtimeEnvFromLegacyDemo, type RuntimeEnv } from "../runtime/env"
 import { emptyPageId, emptyReaderPage, emptySpaceSummary } from "./data"
-import { kittyDeleteImageCommand, kittyGraphicsCommand, kittyImageId } from "./kitty"
+import { iterm2ImageCommand } from "./iterm2"
+import { kittyDeleteImageCommand, kittyGraphicsCommand, kittyGraphicsPngCommand, kittyImageId } from "./kitty"
 import { imageDebugEnabled, imageDebugLogPath, logImageDebug } from "./image-debug"
 import { splitReaderImagePlaceholders, type ReaderContentPart } from "./media"
 import { createTuiRuntime, type TuiRuntime } from "./runtime"
+import { sixelImageCommand } from "./sixel"
 import type { TuiSource, TuiStagedChange } from "./source"
 import { markdownStyle, theme } from "./theme"
 
@@ -64,7 +66,7 @@ type CredentialWarning = Exclude<CredentialStatus, { kind: "ready" }>
 
 export type PageSearchKeyAction = "append" | "delete" | "submit" | "close" | "next" | "previous" | "ignore"
 
-export type ImageRenderMode = "kitty" | "sixel" | "cell-color" | "cell-mono" | "placeholder"
+export type ImageRenderMode = "kitty" | "iterm2" | "sixel" | "cell-color" | "cell-mono" | "placeholder"
 
 type ImageTerminalCapabilities = Pick<TerminalCapabilities, "kitty_graphics" | "sixel" | "rgb"> & Partial<Pick<TerminalCapabilities, "multiplexer" | "terminal">>
 
@@ -1287,17 +1289,18 @@ export function ImageViewerOverlay(props: { visible: boolean; pageTitle: string;
   const fallbackMessage = createMemo(() => messageFromLoadResult(loaded()))
   const previewHeight = createMemo(() => image() ? imageViewerPreviewHeight(image()!, props.width, props.height) : Math.max(3, props.height - 8))
   let nativePreviewRenderable: BoxRenderable | undefined
-  let queuedKittyImage: KittyViewerImage | null = null
+  let queuedNativeImage: NativeViewerImage | null = null
+  let queuedNativeKey = ""
   let displayedKittyId: number | null = null
-  let displayedKittyKey = ""
-  let kittyFlushTimer: ReturnType<typeof setTimeout> | undefined
+  let displayedNativeKey = ""
+  let nativeFlushTimer: ReturnType<typeof setTimeout> | undefined
   let lastRenderAfterDebugKey = ""
   let lastOverlayDebugKey = ""
 
   const renderPreview = (buffer: OptimizedBuffer, decoded: DecodedImage) => {
-    if (props.renderMode !== "kitty") drawImagePreview(buffer, decoded, props.renderMode)
+    if (!isNativeImageRenderMode(props.renderMode)) drawImagePreview(buffer, decoded, props.renderMode)
     logViewerRenderAfter(buffer, decoded)
-    queueKittyImage(decoded, buffer.width, buffer.height)
+    queueNativeImage(decoded, buffer.width, buffer.height)
   }
 
   onMount(() => {
@@ -1345,35 +1348,35 @@ export function ImageViewerOverlay(props: { visible: boolean; pageTitle: string;
 
   createEffect(() => {
     const part = selectedImage()
-    if (!props.visible || props.renderMode !== "kitty" || !part || !image()) {
-      clearKittyImage()
+    if (!props.visible || !isNativeImageRenderMode(props.renderMode) || !part || !image()) {
+      clearNativeImage()
       if (!props.visible) nativePreviewRenderable = undefined
       return
     }
 
     const nextId = kittyImageId(`viewer:${part.nodeId}:${part.asset?.cachePath ?? part.label}`)
-    if (displayedKittyId !== null && displayedKittyId !== nextId) clearKittyImage()
+    if (displayedKittyId !== null && (props.renderMode !== "kitty" || displayedKittyId !== nextId)) clearNativeImage()
   })
 
   onCleanup(() => {
-    cancelKittyFlush()
+    cancelNativeFlush()
     logImageDebug("viewer_overlay_cleanup", {
       visible: props.visible,
       imageCount: props.images.length,
       selectedIndex: props.selectedIndex,
       renderMode: props.renderMode,
     })
-    clearKittyImage()
+    clearNativeImage()
     nativePreviewRenderable = undefined
     lastRenderAfterDebugKey = ""
   })
 
-  function queueKittyImage(decoded: DecodedImage, columns: number, rows: number) {
+  function queueNativeImage(decoded: DecodedImage, columns: number, rows: number) {
     const part = selectedImage()
-    if (!props.visible || props.renderMode !== "kitty" || !part || !nativePreviewRenderable) {
-      if (props.renderMode === "kitty") {
-        logImageDebug("kitty_queue_skipped", {
-          reason: !props.visible ? "viewer-hidden" : !part ? "no-selected-image" : !nativePreviewRenderable ? "preview-renderable-missing" : "not-kitty-mode",
+    if (!props.visible || !isNativeImageRenderMode(props.renderMode) || !part || !nativePreviewRenderable) {
+      if (isNativeImageRenderMode(props.renderMode)) {
+        logImageDebug("native_queue_skipped", {
+          reason: !props.visible ? "viewer-hidden" : !part ? "no-selected-image" : !nativePreviewRenderable ? "preview-renderable-missing" : "not-native-mode",
           renderMode: props.renderMode,
           columns,
           rows,
@@ -1382,42 +1385,62 @@ export function ImageViewerOverlay(props: { visible: boolean; pageTitle: string;
       return
     }
 
-    queuedKittyImage = {
+    const id = kittyImageId(`viewer:${part.nodeId}:${part.asset?.cachePath ?? part.label}`)
+    const queueKey = `${props.renderMode}:${id}:${part.asset?.cachePath ?? part.label}:${columns}x${rows}:${decoded.width}x${decoded.height}`
+    const onScreenDisplayKey = nativeDisplayKey(props.renderMode, id, columns, rows, decoded, part.asset, nativePreviewRenderable, renderer)
+    if (onScreenDisplayKey && onScreenDisplayKey === displayedNativeKey) {
+      logImageDebug("native_queue_skipped", { reason: "displayed-duplicate", mode: props.renderMode, id, columns, rows })
+      return
+    }
+    if (queueKey === queuedNativeKey) {
+      logImageDebug("native_queue_skipped", { reason: "pending-duplicate", mode: props.renderMode, id, columns, rows })
+      return
+    }
+
+    queuedNativeImage = {
+      mode: props.renderMode,
+      key: queueKey,
+      asset: part.asset,
       id: kittyImageId(`viewer:${part.nodeId}:${part.asset?.cachePath ?? part.label}`),
       image: decoded,
       renderable: nativePreviewRenderable,
       columns,
       rows,
     }
-    logImageDebug("kitty_queue", { id: queuedKittyImage.id, nodeId: part.nodeId, label: part.label, columns, rows, imageWidth: decoded.width, imageHeight: decoded.height })
-    scheduleKittyFlush()
+    queuedNativeKey = queueKey
+    logImageDebug("native_queue", { mode: queuedNativeImage.mode, id: queuedNativeImage.id, nodeId: part.nodeId, label: part.label, columns, rows, imageWidth: decoded.width, imageHeight: decoded.height })
+    if (props.renderMode === "kitty") logImageDebug("kitty_queue", { id: queuedNativeImage.id, nodeId: part.nodeId, label: part.label, columns, rows, imageWidth: decoded.width, imageHeight: decoded.height })
+    scheduleNativeFlush()
   }
 
-  function scheduleKittyFlush() {
-    if (kittyFlushTimer) return
+  function scheduleNativeFlush() {
+    if (nativeFlushTimer) return
 
-    kittyFlushTimer = setTimeout(() => {
-      kittyFlushTimer = undefined
-      flushKittyImage()
+    nativeFlushTimer = setTimeout(() => {
+      nativeFlushTimer = undefined
+      flushNativeImage()
     }, 0)
   }
 
-  function cancelKittyFlush() {
-    if (!kittyFlushTimer) return
+  function cancelNativeFlush() {
+    if (!nativeFlushTimer) return
 
-    clearTimeout(kittyFlushTimer)
-    kittyFlushTimer = undefined
+    clearTimeout(nativeFlushTimer)
+    nativeFlushTimer = undefined
+    logImageDebug("native_flush_cancelled", { renderMode: props.renderMode, queued: Boolean(queuedNativeImage) })
   }
 
-  function flushKittyImage() {
-    const input = queuedKittyImage
-    queuedKittyImage = null
+  function flushNativeImage() {
+    const input = queuedNativeImage
+    queuedNativeImage = null
+    queuedNativeKey = ""
     if (!input) return
 
-    if (!props.visible || props.renderMode !== "kitty" || !isRenderableOnScreen(renderer, input.renderable)) {
-      logImageDebug("kitty_flush_skipped", {
+    if (!props.visible || props.renderMode !== input.mode || !isRenderableOnScreen(renderer, input.renderable)) {
+      logImageDebug("native_flush_skipped", {
         id: input.id,
-        reason: !props.visible ? "viewer-hidden" : props.renderMode !== "kitty" ? "not-kitty-mode" : "preview-offscreen",
+        mode: input.mode,
+        reason: !props.visible ? "viewer-hidden" : props.renderMode !== input.mode ? "mode-changed" : "preview-offscreen",
         renderMode: props.renderMode,
         screenX: input.renderable.screenX,
         screenY: input.renderable.screenY,
@@ -1426,22 +1449,25 @@ export function ImageViewerOverlay(props: { visible: boolean; pageTitle: string;
         terminalWidth: renderer.terminalWidth,
         terminalHeight: renderer.terminalHeight,
       })
-      clearKittyImage()
+      clearNativeImage()
       return
     }
 
     const row = Math.max(1, Math.floor(input.renderable.screenY) + 1)
     const column = Math.max(1, Math.floor(input.renderable.screenX) + 1)
-    const key = `${input.id}:${row}:${column}:${input.columns}:${input.rows}:${input.image.width}x${input.image.height}`
-    if (key === displayedKittyKey) return
+    const key = `${input.mode}:${input.id}:${row}:${column}:${input.columns}:${input.rows}:${input.image.width}x${input.image.height}:${input.asset?.cachePath ?? "no-cache"}`
+    if (key === displayedNativeKey) {
+      logImageDebug("native_write_skipped", { reason: "displayed-duplicate", mode: input.mode, id: input.id, row, column, columns: input.columns, rows: input.rows })
+      return
+    }
 
     if (displayedKittyId !== null) deleteDisplayedKittyImage()
 
-    const cachedCommand = kittyGraphicsCommandForImage(input.image, input.id, input.columns, input.rows)
-    const command = cachedCommand.command
-    const output = `\x1b7\x1b[${row};${column}H${command}\x1b8`
+    const command = nativeImageCommandForImage(input)
+    const output = `\x1b7\x1b[${row};${column}H${command.command}\x1b8`
     const accepted = writeRawTerminal(renderer, output)
-    logImageDebug("kitty_write", {
+    logImageDebug("native_write", {
+      mode: input.mode,
       id: input.id,
       accepted,
       row,
@@ -1450,20 +1476,44 @@ export function ImageViewerOverlay(props: { visible: boolean; pageTitle: string;
       rows: input.rows,
       sourceWidth: input.image.width,
       sourceHeight: input.image.height,
-      scaledWidth: cachedCommand.width,
-      scaledHeight: cachedCommand.height,
+      scaledWidth: command.width,
+      scaledHeight: command.height,
       commandBytes: output.length,
-      chunks: cachedCommand.chunks,
-      cached: cachedCommand.cached,
+      chunks: command.chunks,
+      transfer: command.transfer,
+      cached: command.cached,
     })
-    displayedKittyId = input.id
-    displayedKittyKey = key
+    if (input.mode === "kitty") {
+      logImageDebug("kitty_write", {
+        id: input.id,
+        accepted,
+        row,
+        column,
+        columns: input.columns,
+        rows: input.rows,
+        sourceWidth: input.image.width,
+        sourceHeight: input.image.height,
+        scaledWidth: command.width,
+        scaledHeight: command.height,
+        commandBytes: output.length,
+        chunks: command.chunks,
+        transfer: command.transfer,
+        cached: command.cached,
+      })
+      displayedKittyId = input.id
+    } else if (input.mode === "iterm2") {
+      logImageDebug("iterm2_write", { id: input.id, accepted, row, column, columns: input.columns, rows: input.rows, commandBytes: output.length, transfer: command.transfer })
+    } else if (input.mode === "sixel") {
+      logImageDebug("sixel_write", { id: input.id, accepted, row, column, columns: input.columns, rows: input.rows, commandBytes: output.length, transfer: command.transfer })
+    }
+    displayedNativeKey = key
   }
 
-  function clearKittyImage() {
-    cancelKittyFlush()
-    queuedKittyImage = null
-    displayedKittyKey = ""
+  function clearNativeImage() {
+    cancelNativeFlush()
+    queuedNativeImage = null
+    queuedNativeKey = ""
+    displayedNativeKey = ""
     deleteDisplayedKittyImage()
   }
 
@@ -1548,12 +1598,18 @@ function ImagePreviewFallback(props: { part: Extract<ReaderContentPart, { kind: 
 }
 
 type ImageLoadResult = { status: "ready"; image: DecodedImage } | { status: "error"; message: string }
-type KittyViewerImage = { id: number; image: DecodedImage; renderable: BoxRenderable; columns: number; rows: number }
+type NativeImageRenderMode = Extract<ImageRenderMode, "kitty" | "iterm2" | "sixel">
+type NativeViewerImage = { mode: NativeImageRenderMode; key: string; id: number; image: DecodedImage; asset: MediaAsset | null; renderable: BoxRenderable; columns: number; rows: number }
 type KittyGraphicsCommandCacheEntry = { command: string; width: number; height: number; chunks: number }
-type KittyGraphicsCommandResult = KittyGraphicsCommandCacheEntry & { cached: boolean }
+type NativeImageCommandResult = KittyGraphicsCommandCacheEntry & { cached: boolean; transfer: string }
 
 const imagePreviewCache = new Map<string, ImageLoadResult>()
+const imagePreviewCacheLimit = 24
 const kittyGraphicsCommandCache = new WeakMap<DecodedImage, Map<string, KittyGraphicsCommandCacheEntry>>()
+
+function isNativeImageRenderMode(mode: ImageRenderMode): mode is NativeImageRenderMode {
+  return mode === "kitty" || mode === "iterm2" || mode === "sixel"
+}
 
 function loadImagePreview(asset: MediaAsset | null): ImageLoadResult {
   if (!asset?.cachePath) {
@@ -1569,6 +1625,8 @@ function loadImagePreview(asset: MediaAsset | null): ImageLoadResult {
 
   const cached = imagePreviewCache.get(asset.cachePath)
   if (cached) {
+    imagePreviewCache.delete(asset.cachePath)
+    imagePreviewCache.set(asset.cachePath, cached)
     logImageDebug("image_asset_load", {
       status: "cache-hit",
       result: cached.status,
@@ -1584,7 +1642,7 @@ function loadImagePreview(asset: MediaAsset | null): ImageLoadResult {
   try {
     const stat = fileStat(asset.cachePath)
     const result: ImageLoadResult = { status: "ready", image: decodeImageFile(asset.cachePath) }
-    imagePreviewCache.set(asset.cachePath, result)
+    rememberImagePreview(asset.cachePath, result)
     logImageDebug("image_asset_load", {
       status: "decoded",
       pageId: asset.pageId,
@@ -1601,7 +1659,7 @@ function loadImagePreview(asset: MediaAsset | null): ImageLoadResult {
     return result
   } catch (error) {
     const result: ImageLoadResult = { status: "error", message: errorMessage(error) }
-    imagePreviewCache.set(asset.cachePath, result)
+    rememberImagePreview(asset.cachePath, result)
     const stat = fileStat(asset.cachePath)
     logImageDebug("image_asset_load", {
       status: "decode-error",
@@ -1615,6 +1673,17 @@ function loadImagePreview(asset: MediaAsset | null): ImageLoadResult {
       error: result.message,
     })
     return result
+  }
+}
+
+function rememberImagePreview(path: string, result: ImageLoadResult) {
+  imagePreviewCache.delete(path)
+  imagePreviewCache.set(path, result)
+  while (imagePreviewCache.size > imagePreviewCacheLimit) {
+    const oldest = imagePreviewCache.keys().next().value
+    if (!oldest) break
+    imagePreviewCache.delete(oldest)
+    logImageDebug("image_cache_evict", { cachePath: oldest, cacheSize: imagePreviewCache.size })
   }
 }
 
@@ -1652,14 +1721,14 @@ function imagePreviewSize(image: DecodedImage, narrow: boolean) {
 
 function imageViewerPreviewHeight(image: DecodedImage, overlayWidth: number, overlayHeight: number) {
   const maxWidth = Math.max(8, overlayWidth - 6)
-  const maxHeight = Math.max(3, overlayHeight - 8)
+  const maxHeight = Math.max(3, overlayHeight - 10)
   const aspectHeight = Math.max(3, Math.round((maxWidth * image.height / image.width) * 0.5))
 
   return Math.min(maxHeight, aspectHeight)
 }
 
 function drawImagePreview(buffer: OptimizedBuffer, image: DecodedImage, mode: ImageRenderMode) {
-  if (mode === "cell-color" || mode === "kitty" || mode === "sixel") {
+  if (mode === "cell-color" || mode === "kitty" || mode === "iterm2" || mode === "sixel") {
     drawColorCellImage(buffer, image)
     return
   }
@@ -1706,7 +1775,53 @@ function scaledImageForKitty(image: DecodedImage, columns: number, rows: number)
   return scaledImageForSize(image, Math.min(image.width, Math.max(1, columns * 4)), Math.min(image.height, Math.max(1, rows * 8)))
 }
 
-function kittyGraphicsCommandForImage(image: DecodedImage, id: number, columns: number, rows: number): KittyGraphicsCommandResult {
+function scaledImageForSixel(image: DecodedImage, columns: number, rows: number): ScaledImage {
+  return scaledImageForSize(image, Math.min(image.width, Math.max(1, columns * 2)), Math.min(image.height, Math.max(1, rows * 4)))
+}
+
+function nativeDisplayKey(mode: NativeImageRenderMode, id: number, columns: number, rows: number, image: DecodedImage, asset: MediaAsset | null, renderable: BoxRenderable, renderer: CliRenderer) {
+  if (!isRenderableOnScreen(renderer, renderable)) return null
+
+  const row = Math.max(1, Math.floor(renderable.screenY) + 1)
+  const column = Math.max(1, Math.floor(renderable.screenX) + 1)
+  return `${mode}:${id}:${row}:${column}:${columns}:${rows}:${image.width}x${image.height}:${asset?.cachePath ?? "no-cache"}`
+}
+
+function nativeImageCommandForImage(input: NativeViewerImage): NativeImageCommandResult {
+  if (input.mode === "kitty") return kittyNativeCommandForImage(input)
+  if (input.mode === "iterm2") return iterm2NativeCommandForImage(input)
+
+  return sixelNativeCommandForImage(input)
+}
+
+function kittyNativeCommandForImage(input: NativeViewerImage): NativeImageCommandResult {
+  if (input.asset?.cachePath && input.image.format === "png") {
+    const bytes = readFileSync(input.asset.cachePath)
+    const command = kittyGraphicsPngCommand({ id: input.id, bytes, columns: input.columns, rows: input.rows })
+
+    return { command, width: input.image.width, height: input.image.height, chunks: kittyCommandChunkCount(command), cached: false, transfer: "direct-png" }
+  }
+
+  return { ...kittyGraphicsCommandForImage(input.image, input.id, input.columns, input.rows), transfer: "rgba-fallback" }
+}
+
+function iterm2NativeCommandForImage(input: NativeViewerImage): NativeImageCommandResult {
+  if (!input.asset?.cachePath) return sixelNativeCommandForImage(input)
+
+  const bytes = readFileSync(input.asset.cachePath)
+  const command = iterm2ImageCommand({ bytes, name: input.asset.title || input.asset.cachePath, columns: input.columns, rows: input.rows })
+
+  return { command, width: input.image.width, height: input.image.height, chunks: 1, cached: false, transfer: "direct-png" }
+}
+
+function sixelNativeCommandForImage(input: NativeViewerImage): NativeImageCommandResult {
+  const scaled = scaledImageForSixel(input.image, input.columns, input.rows)
+  const command = sixelImageCommand(scaled)
+
+  return { command, width: scaled.width, height: scaled.height, chunks: 1, cached: false, transfer: "sixel-indexed" }
+}
+
+function kittyGraphicsCommandForImage(image: DecodedImage, id: number, columns: number, rows: number): NativeImageCommandResult {
   const scaled = scaledImageForKitty(image, columns, rows)
   const key = `${id}:${columns}x${rows}:${scaled.width}x${scaled.height}`
   let imageCache = kittyGraphicsCommandCache.get(image)
@@ -1717,13 +1832,13 @@ function kittyGraphicsCommandForImage(image: DecodedImage, id: number, columns: 
   }
 
   const cached = imageCache.get(key)
-  if (cached) return { ...cached, cached: true }
+  if (cached) return { ...cached, cached: true, transfer: "rgba-fallback" }
 
   const command = kittyGraphicsCommand({ id, width: scaled.width, height: scaled.height, columns, rows, rgba: scaled.rgba })
   const entry = { command, width: scaled.width, height: scaled.height, chunks: kittyCommandChunkCount(command) }
   imageCache.set(key, entry)
 
-  return { ...entry, cached: false }
+  return { ...entry, cached: false, transfer: "rgba-fallback" }
 }
 
 function scaledImageForSize(image: DecodedImage, width: number, height: number): ScaledImage {
@@ -1823,15 +1938,15 @@ export function imageRenderModeForCapabilities(capabilities: ImageTerminalCapabi
 }
 
 export function imageRenderModeDecisionForCapabilities(capabilities: ImageTerminalCapabilities | null | undefined, options: { nativeProtocols?: boolean } = {}): ImageRenderModeDecision {
-  if (options.nativeProtocols && capabilities?.kitty_graphics) {
-    const blockReason = kittyGraphicsBlockReason(capabilities)
-    if (!blockReason) return { mode: "kitty", reason: "kitty-supported" }
+  if (options.nativeProtocols) {
+    const blockReason = nativeImageProtocolBlockReason(capabilities)
+    if (blockReason) return fallbackImageRenderMode(capabilities, `native-blocked:${blockReason}`)
+    if (capabilities?.kitty_graphics && !process.env.WT_SESSION) return { mode: "kitty", reason: "kitty-supported" }
+    if (supportsIterm2ImageProtocol(capabilities)) return { mode: "iterm2", reason: "iterm2-supported" }
+    if (capabilities?.sixel) return { mode: "sixel", reason: "sixel-supported" }
 
-    return fallbackImageRenderMode(capabilities, `kitty-blocked:${blockReason}`)
+    return fallbackImageRenderMode(capabilities, "native-protocol-unavailable")
   }
-
-  if (options.nativeProtocols && capabilities?.sixel) return fallbackImageRenderMode(capabilities, "sixel-not-implemented")
-  if (options.nativeProtocols) return fallbackImageRenderMode(capabilities, "native-protocol-unavailable")
 
   return fallbackImageRenderMode(capabilities, "native-protocols-disabled")
 }
@@ -1843,13 +1958,18 @@ function fallbackImageRenderMode(capabilities: ImageTerminalCapabilities | null 
   return { mode: "cell-mono", reason: `${reason}:rgb-unavailable` }
 }
 
-function kittyGraphicsBlockReason(capabilities: ImageTerminalCapabilities) {
+function nativeImageProtocolBlockReason(capabilities: ImageTerminalCapabilities | null | undefined) {
+  if (!capabilities) return null
   if (capabilities.multiplexer && capabilities.multiplexer !== "none") return `reported-multiplexer-${capabilities.multiplexer}`
   if (process.env.TMUX) return "env-tmux"
   if (process.env.ZELLIJ) return "env-zellij"
-  if (process.env.WT_SESSION) return "env-windows-terminal"
 
-  return process.env.KITTY_WINDOW_ID || capabilities.terminal?.name?.toLowerCase().includes("kitty") ? null : "not-direct-kitty"
+  return null
+}
+
+function supportsIterm2ImageProtocol(capabilities: ImageTerminalCapabilities | null | undefined) {
+  const name = capabilities?.terminal?.name?.toLowerCase() ?? ""
+  return name.includes("wezterm") || name.includes("iterm")
 }
 
 function summarizeImageCapabilities(capabilities: ImageTerminalCapabilities | null | undefined) {
@@ -1868,6 +1988,7 @@ function summarizeImageCapabilities(capabilities: ImageTerminalCapabilities | nu
 
 function imageRenderModeLabel(mode: ImageRenderMode) {
   if (mode === "kitty") return "Kitty native"
+  if (mode === "iterm2") return "iTerm2 native"
   if (mode === "sixel") return "Sixel native"
   if (mode === "cell-color") return "color cells"
   if (mode === "cell-mono") return "mono cells"

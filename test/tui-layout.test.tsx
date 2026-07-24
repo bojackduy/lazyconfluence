@@ -270,6 +270,7 @@ describe("main TUI layout", () => {
       expect(output.viewerFrame).toContain("1 of 1")
       expect(output.viewerFrame).toContain("color cells")
       expect(output.viewerFrame).toContain("cached PNG 1x1")
+      expect(output.viewerFrame).not.toMatch(/╰─+▀/)
     } finally {
       repository?.close()
       await setup.cleanup()
@@ -324,9 +325,11 @@ describe("main TUI layout", () => {
         const rawOutput = writes.join("")
         expect(rawOutput).toContain("\x1b7")
         expect(rawOutput).toContain("\x1b_Ga=T")
-        expect(rawOutput).toContain(",f=32")
+        expect(rawOutput).toContain(",f=100,c=")
+        expect(rawOutput).not.toContain("t=f")
         expect(rawOutput).toContain(",i=")
         expect(rawOutput).toContain("\x1b\\")
+        expect(rawOutput.length).toBeLessThan(2000)
 
         const events = await readImageDebugEvents(logPath)
         expect(events.map((event) => event.event)).toContain("image_asset_load")
@@ -334,9 +337,135 @@ describe("main TUI layout", () => {
         expect(events.map((event) => event.event)).toContain("kitty_queue")
         expect(events.map((event) => event.event)).toContain("kitty_write")
         const kittyWrite = events.find((event) => event.event === "kitty_write")
-        expect(kittyWrite).toMatchObject({ accepted: true, chunks: 1, sourceWidth: 1, sourceHeight: 1 })
+        expect(kittyWrite).toMatchObject({ accepted: true, chunks: 1, sourceWidth: 1, sourceHeight: 1, transfer: "direct-png" })
+        expect(Number(kittyWrite?.commandBytes)).toBeLessThan(2000)
         expect(Number(kittyWrite?.row)).toBeGreaterThan(0)
         expect(Number(kittyWrite?.column)).toBeGreaterThan(0)
+      } finally {
+        rendered.renderer.destroy()
+      }
+    } finally {
+      restoreEnv("LAZYCONFLUENCE_IMAGE_DEBUG", previousImageDebug)
+      restoreEnv("LAZYCONFLUENCE_IMAGE_DEBUG_LOG", previousImageDebugLog)
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("image viewer emits iTerm2 inline image payload in iTerm2 mode", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lazyconfluence-iterm2-viewer-"))
+    const imagePath = join(dir, "system-overview.png")
+    const logPath = join(dir, "image-debug.jsonl")
+    const writes: string[] = []
+    const stdout = createCaptureStdout(120, 36, writes)
+    const previousImageDebug = process.env.LAZYCONFLUENCE_IMAGE_DEBUG
+    const previousImageDebugLog = process.env.LAZYCONFLUENCE_IMAGE_DEBUG_LOG
+    const imageAsset: MediaAsset = {
+      pageId: "local-home",
+      nodeId: "image-node",
+      title: "System overview",
+      sourceUrl: null,
+      cachePath: imagePath,
+      contentType: "image/png",
+      width: 1,
+      height: 1,
+      updatedAt: "2026-07-23T12:00:00Z",
+    }
+
+    try {
+      await writeFile(imagePath, Buffer.from(tinyPngBase64, "base64"))
+      process.env.LAZYCONFLUENCE_IMAGE_DEBUG = "1"
+      process.env.LAZYCONFLUENCE_IMAGE_DEBUG_LOG = logPath
+
+      const rendered = await testRender(() => (
+        <ImageViewerOverlay
+          visible
+          pageTitle="Local Engineering Home"
+          images={[{ kind: "image", nodeId: "image-node", label: "System overview", details: "Attachment on this Confluence page.", asset: imageAsset }]}
+          selectedIndex={0}
+          renderMode="iterm2"
+          left={2}
+          top={2}
+          width={80}
+          height={24}
+          onClose={() => {}}
+        />
+      ), { width: 120, height: 36, stdout })
+
+      try {
+        await rendered.renderOnce()
+        await rendered.flush()
+        await waitForTimers()
+
+        const rawOutput = writes.join("")
+        expect(rawOutput).toContain("\x1b]1337;File=")
+        expect(rawOutput).toContain("inline=1")
+        expect(rawOutput).toContain("doNotMoveCursor=1")
+
+        const events = await readImageDebugEvents(logPath)
+        expect(events.map((event) => event.event)).toContain("iterm2_write")
+        expect(events.find((event) => event.event === "iterm2_write")).toMatchObject({ transfer: "direct-png" })
+      } finally {
+        rendered.renderer.destroy()
+      }
+    } finally {
+      restoreEnv("LAZYCONFLUENCE_IMAGE_DEBUG", previousImageDebug)
+      restoreEnv("LAZYCONFLUENCE_IMAGE_DEBUG_LOG", previousImageDebugLog)
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("image viewer emits Sixel payload in Sixel mode", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lazyconfluence-sixel-viewer-"))
+    const imagePath = join(dir, "system-overview.png")
+    const logPath = join(dir, "image-debug.jsonl")
+    const writes: string[] = []
+    const stdout = createCaptureStdout(120, 36, writes)
+    const previousImageDebug = process.env.LAZYCONFLUENCE_IMAGE_DEBUG
+    const previousImageDebugLog = process.env.LAZYCONFLUENCE_IMAGE_DEBUG_LOG
+    const imageAsset: MediaAsset = {
+      pageId: "local-home",
+      nodeId: "image-node",
+      title: "System overview",
+      sourceUrl: null,
+      cachePath: imagePath,
+      contentType: "image/png",
+      width: 1,
+      height: 1,
+      updatedAt: "2026-07-23T12:00:00Z",
+    }
+
+    try {
+      await writeFile(imagePath, Buffer.from(tinyPngBase64, "base64"))
+      process.env.LAZYCONFLUENCE_IMAGE_DEBUG = "1"
+      process.env.LAZYCONFLUENCE_IMAGE_DEBUG_LOG = logPath
+
+      const rendered = await testRender(() => (
+        <ImageViewerOverlay
+          visible
+          pageTitle="Local Engineering Home"
+          images={[{ kind: "image", nodeId: "image-node", label: "System overview", details: "Attachment on this Confluence page.", asset: imageAsset }]}
+          selectedIndex={0}
+          renderMode="sixel"
+          left={2}
+          top={2}
+          width={80}
+          height={24}
+          onClose={() => {}}
+        />
+      ), { width: 120, height: 36, stdout })
+
+      try {
+        await rendered.renderOnce()
+        await rendered.flush()
+        await waitForTimers()
+
+        const rawOutput = writes.join("")
+        expect(rawOutput).toContain("\x1bPq")
+        expect(rawOutput).toContain("\x1b\\")
+
+        const events = await readImageDebugEvents(logPath)
+        expect(events.map((event) => event.event)).toContain("sixel_write")
+        expect(events.find((event) => event.event === "sixel_write")).toMatchObject({ transfer: "sixel-indexed" })
       } finally {
         rendered.renderer.destroy()
       }
@@ -408,8 +537,8 @@ describe("main TUI layout", () => {
         const events = await readImageDebugEvents(logPath)
         const kittyWrites = events.filter((event) => event.event === "kitty_write")
         expect(kittyWrites).toHaveLength(2)
-        expect(kittyWrites[0]).toMatchObject({ cached: false })
-        expect(kittyWrites[1]).toMatchObject({ cached: true })
+        expect(kittyWrites[0]).toMatchObject({ transfer: "direct-png" })
+        expect(kittyWrites[1]).toMatchObject({ transfer: "direct-png" })
         expect(events.map((event) => event.event)).toContain("kitty_delete")
       } finally {
         secondRender.renderer.destroy()
@@ -584,12 +713,16 @@ describe("main TUI layout", () => {
 
       expect(imageRenderModeForCapabilities(null)).toBe("cell-color")
       expect(imageRenderModeForCapabilities({ kitty_graphics: true, sixel: true, rgb: true })).toBe("cell-color")
-      expect(imageRenderModeForCapabilities({ kitty_graphics: true, sixel: true, rgb: true }, { nativeProtocols: true })).toBe("cell-color")
-      process.env.KITTY_WINDOW_ID = "1"
       expect(imageRenderModeForCapabilities({ kitty_graphics: true, sixel: true, rgb: true }, { nativeProtocols: true })).toBe("kitty")
+      expect(imageRenderModeForCapabilities({ kitty_graphics: true, sixel: false, rgb: true, terminal: { name: "libghostty" } as never }, { nativeProtocols: true })).toBe("kitty")
+      expect(imageRenderModeForCapabilities({ kitty_graphics: false, sixel: false, rgb: true, terminal: { name: "wezterm" } as never }, { nativeProtocols: true })).toBe("iterm2")
       process.env.TMUX = "tmux"
       expect(imageRenderModeForCapabilities({ kitty_graphics: true, sixel: true, rgb: true, multiplexer: "tmux" }, { nativeProtocols: true })).toBe("cell-color")
-      expect(imageRenderModeForCapabilities({ kitty_graphics: false, sixel: true, rgb: true }, { nativeProtocols: true })).toBe("cell-color")
+      delete process.env.TMUX
+      process.env.WT_SESSION = "window"
+      expect(imageRenderModeForCapabilities({ kitty_graphics: true, sixel: true, rgb: true }, { nativeProtocols: true })).toBe("sixel")
+      delete process.env.WT_SESSION
+      expect(imageRenderModeForCapabilities({ kitty_graphics: false, sixel: true, rgb: true }, { nativeProtocols: true })).toBe("sixel")
       expect(imageRenderModeForCapabilities({ kitty_graphics: false, sixel: false, rgb: true })).toBe("cell-color")
       expect(imageRenderModeForCapabilities({ kitty_graphics: false, sixel: false, rgb: false })).toBe("cell-mono")
     } finally {

@@ -351,6 +351,65 @@ describe("main TUI layout", () => {
     }
   })
 
+  test("image viewer wraps native Kitty payloads for existing tmux sessions", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lazyconfluence-kitty-tmux-viewer-"))
+    const imagePath = join(dir, "system-overview.png")
+    const writes: string[] = []
+    const stdout = createCaptureStdout(120, 36, writes)
+    const previousTmux = process.env.TMUX
+    const imageAsset: MediaAsset = {
+      pageId: "local-home",
+      nodeId: "image-node",
+      title: "System overview",
+      sourceUrl: null,
+      cachePath: imagePath,
+      contentType: "image/png",
+      width: 1,
+      height: 1,
+      updatedAt: "2026-07-23T12:00:00Z",
+    }
+
+    try {
+      await writeFile(imagePath, Buffer.from(tinyPngBase64, "base64"))
+      process.env.TMUX = "/tmp/tmux-501/default,123,0"
+
+      const rendered = await testRender(() => (
+        <ImageViewerOverlay
+          visible
+          pageTitle="Local Engineering Home"
+          images={[{ kind: "image", nodeId: "image-node", label: "System overview", details: "Attachment on this Confluence page.", asset: imageAsset }]}
+          selectedIndex={0}
+          renderMode="kitty"
+          left={2}
+          top={2}
+          width={80}
+          height={24}
+          onClose={() => {}}
+        />
+      ), { width: 120, height: 36, stdout })
+
+      try {
+        await rendered.renderOnce()
+        await rendered.flush()
+        await waitForTimers()
+
+        const rawOutput = writes.join("")
+        expect(rawOutput).toMatch(/^\x1b7\x1b\[\d+;\d+H\x1bPtmux;/)
+        expect(rawOutput).toContain("\x1bPtmux;")
+        expect(rawOutput).toContain("\x1b\x1b_Ga=T")
+        expect(rawOutput).toContain("\x1b\x1b\\")
+        expect(rawOutput).toContain("\x1b\\\x1b8")
+        expect(rawOutput).not.toContain("\x1bPtmux;\x1b\x1b7")
+        expect(rawOutput).not.toContain("\x1b\x1b[1;")
+      } finally {
+        rendered.renderer.destroy()
+      }
+    } finally {
+      restoreEnv("TMUX", previousTmux)
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   test("image viewer emits iTerm2 inline image payload in iTerm2 mode", async () => {
     const dir = await mkdtemp(join(tmpdir(), "lazyconfluence-iterm2-viewer-"))
     const imagePath = join(dir, "system-overview.png")
@@ -705,11 +764,13 @@ describe("main TUI layout", () => {
     const previousTmux = process.env.TMUX
     const previousZellij = process.env.ZELLIJ
     const previousWindowsTerminal = process.env.WT_SESSION
+    const previousImageMode = process.env.LAZYCONFLUENCE_IMAGE_MODE
     try {
       delete process.env.KITTY_WINDOW_ID
       delete process.env.TMUX
       delete process.env.ZELLIJ
       delete process.env.WT_SESSION
+      delete process.env.LAZYCONFLUENCE_IMAGE_MODE
 
       expect(imageRenderModeForCapabilities(null)).toBe("cell-color")
       expect(imageRenderModeForCapabilities({ kitty_graphics: true, sixel: true, rgb: true })).toBe("cell-color")
@@ -717,12 +778,22 @@ describe("main TUI layout", () => {
       expect(imageRenderModeForCapabilities({ kitty_graphics: true, sixel: false, rgb: true, terminal: { name: "libghostty" } as never }, { nativeProtocols: true })).toBe("kitty")
       expect(imageRenderModeForCapabilities({ kitty_graphics: false, sixel: false, rgb: true, terminal: { name: "wezterm" } as never }, { nativeProtocols: true })).toBe("iterm2")
       process.env.TMUX = "tmux"
-      expect(imageRenderModeForCapabilities({ kitty_graphics: true, sixel: true, rgb: true, multiplexer: "tmux" }, { nativeProtocols: true })).toBe("cell-color")
+      expect(imageRenderModeForCapabilities({ kitty_graphics: true, sixel: true, rgb: true, multiplexer: "tmux" }, { nativeProtocols: true })).toBe("kitty")
       delete process.env.TMUX
+      process.env.ZELLIJ = "zellij"
+      expect(imageRenderModeForCapabilities({ kitty_graphics: true, sixel: true, rgb: true, multiplexer: "zellij" }, { nativeProtocols: true })).toBe("cell-color")
+      delete process.env.ZELLIJ
       process.env.WT_SESSION = "window"
       expect(imageRenderModeForCapabilities({ kitty_graphics: true, sixel: true, rgb: true }, { nativeProtocols: true })).toBe("sixel")
       delete process.env.WT_SESSION
       expect(imageRenderModeForCapabilities({ kitty_graphics: false, sixel: true, rgb: true }, { nativeProtocols: true })).toBe("sixel")
+      process.env.LAZYCONFLUENCE_IMAGE_MODE = "sixel"
+      expect(imageRenderModeForCapabilities({ kitty_graphics: false, sixel: true, rgb: true, terminal: { name: "wezterm" } as never }, { nativeProtocols: true })).toBe("sixel")
+      process.env.LAZYCONFLUENCE_IMAGE_MODE = "cell-color"
+      expect(imageRenderModeForCapabilities({ kitty_graphics: true, sixel: true, rgb: true }, { nativeProtocols: true })).toBe("cell-color")
+      process.env.LAZYCONFLUENCE_IMAGE_MODE = "invalid"
+      expect(imageRenderModeForCapabilities({ kitty_graphics: false, sixel: true, rgb: true, terminal: { name: "wezterm" } as never }, { nativeProtocols: true })).toBe("iterm2")
+      delete process.env.LAZYCONFLUENCE_IMAGE_MODE
       expect(imageRenderModeForCapabilities({ kitty_graphics: false, sixel: false, rgb: true })).toBe("cell-color")
       expect(imageRenderModeForCapabilities({ kitty_graphics: false, sixel: false, rgb: false })).toBe("cell-mono")
     } finally {
@@ -730,6 +801,7 @@ describe("main TUI layout", () => {
       restoreEnv("TMUX", previousTmux)
       restoreEnv("ZELLIJ", previousZellij)
       restoreEnv("WT_SESSION", previousWindowsTerminal)
+      restoreEnv("LAZYCONFLUENCE_IMAGE_MODE", previousImageMode)
     }
   })
 

@@ -1464,7 +1464,7 @@ export function ImageViewerOverlay(props: { visible: boolean; pageTitle: string;
     if (displayedKittyId !== null) deleteDisplayedKittyImage()
 
     const command = nativeImageCommandForImage(input)
-    const output = `\x1b7\x1b[${row};${column}H${command.command}\x1b8`
+    const output = `\x1b7\x1b[${row};${column}H${wrapNativeProtocolCommand(command.command)}\x1b8`
     const accepted = writeRawTerminal(renderer, output)
     logImageDebug("native_write", {
       mode: input.mode,
@@ -1867,6 +1867,12 @@ function writeRawTerminal(renderer: CliRenderer, value: string) {
   return stdout.write(value)
 }
 
+function wrapNativeProtocolCommand(value: string) {
+  if (!process.env.TMUX) return value
+
+  return `\x1bPtmux;${value.replace(/\x1b/g, "\x1b\x1b")}\x1b\\`
+}
+
 function kittyCommandChunkCount(command: string) {
   const matches = command.match(/\x1b_G/g)
 
@@ -1941,6 +1947,8 @@ export function imageRenderModeDecisionForCapabilities(capabilities: ImageTermin
   if (options.nativeProtocols) {
     const blockReason = nativeImageProtocolBlockReason(capabilities)
     if (blockReason) return fallbackImageRenderMode(capabilities, `native-blocked:${blockReason}`)
+    const forcedMode = forcedImageRenderMode()
+    if (forcedMode) return { mode: forcedMode, reason: "forced-env" }
     if (capabilities?.kitty_graphics && !process.env.WT_SESSION) return { mode: "kitty", reason: "kitty-supported" }
     if (supportsIterm2ImageProtocol(capabilities)) return { mode: "iterm2", reason: "iterm2-supported" }
     if (capabilities?.sixel) return { mode: "sixel", reason: "sixel-supported" }
@@ -1949,6 +1957,13 @@ export function imageRenderModeDecisionForCapabilities(capabilities: ImageTermin
   }
 
   return fallbackImageRenderMode(capabilities, "native-protocols-disabled")
+}
+
+function forcedImageRenderMode(): ImageRenderMode | null {
+  const mode = process.env.LAZYCONFLUENCE_IMAGE_MODE
+  if (mode === "kitty" || mode === "iterm2" || mode === "sixel" || mode === "cell-color" || mode === "cell-mono" || mode === "placeholder") return mode
+
+  return null
 }
 
 function fallbackImageRenderMode(capabilities: ImageTerminalCapabilities | null | undefined, reason: string): ImageRenderModeDecision {
@@ -1960,8 +1975,7 @@ function fallbackImageRenderMode(capabilities: ImageTerminalCapabilities | null 
 
 function nativeImageProtocolBlockReason(capabilities: ImageTerminalCapabilities | null | undefined) {
   if (!capabilities) return null
-  if (capabilities.multiplexer && capabilities.multiplexer !== "none") return `reported-multiplexer-${capabilities.multiplexer}`
-  if (process.env.TMUX) return "env-tmux"
+  if (capabilities.multiplexer && capabilities.multiplexer !== "none" && capabilities.multiplexer !== "tmux") return `reported-multiplexer-${capabilities.multiplexer}`
   if (process.env.ZELLIJ) return "env-zellij"
 
   return null

@@ -84,6 +84,8 @@ Different terminals expose different image mechanisms. They are not interchangea
 - Sixel is a different protocol and uses the local indexed-color Sixel encoder.
 - Windows Terminal is not Kitty. It uses Sixel only if the running terminal reports Sixel support; otherwise it uses the cell fallback.
 - Multiplexers such as tmux/herdr/zellij can block, escape, wrap, or print native image protocol bytes unless passthrough is explicitly supported and configured.
+- Existing tmux sessions are supported by wrapping native image output in tmux passthrough sequences. The app does not run `tmux set` or modify user tmux settings.
+- In tmux, only native image protocol payloads are wrapped. Cursor movement stays unwrapped so tmux can translate pane-local coordinates and the image does not draw into neighboring panes.
 
 ## Current Safe Behavior
 
@@ -99,11 +101,13 @@ Native protocols must not be auto-enabled inside the scrolling document view unt
 
 Recommended viewer protocol order:
 
-1. `kitty_graphics` with no multiplexer and no `WT_SESSION`: Kitty graphics using direct cached PNG payload transfer.
+1. `kitty_graphics` with direct terminal or existing tmux passthrough session and no `WT_SESSION`: Kitty graphics using direct cached PNG payload transfer.
 2. Known WezTerm/iTerm2 terminal name: OSC 1337 iTerm2 inline image transfer.
 3. `sixel` capability: indexed-color Sixel.
 4. RGB terminal: color half-block cells.
 5. Non-RGB terminal: mono cell approximation.
+
+For testing protocol-specific behavior, set `LAZYCONFLUENCE_IMAGE_MODE` to one of `kitty`, `iterm2`, `sixel`, `cell-color`, `cell-mono`, or `placeholder`. For example, `LAZYCONFLUENCE_IMAGE_MODE=sixel` forces the Sixel path in WezTerm so it can be compared with the default iTerm2 path.
 
 ## Recommended Native Image Strategy
 
@@ -120,10 +124,10 @@ Implement native images in a dedicated image viewer mode first:
 
 Remaining future work:
 
-- Run repeated open/close real-terminal smoke tests in Kitty, Ghostty, WezTerm, and Windows Terminal.
+- Run repeated open/close real-terminal smoke tests in Kitty, Ghostty, WezTerm, tmux/herdr, forced WezTerm Sixel, and Windows Terminal.
 - Treat Kitty file transfer (`t=f`) as a later optimization only after terminal-specific smoke tests prove the emulator can access and display local file paths reliably.
 - Tune Sixel quality/performance after testing in real Sixel-capable terminals.
-- Add explicit tmux/herdr/zellij passthrough handling only after confirming their required wrapping/config.
+- Keep Zellij blocked until confirming its required wrapping/config.
 - Add JPEG/SVG decoding if cached media expands beyond PNG.
 
 ## Open Questions

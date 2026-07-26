@@ -40,6 +40,14 @@ export function resolveKeyCommand(key: TuiKey, context: CommandContext): Command
     if (key.name === "escape") return "close-overlay"
     return key.ctrl && key.name === "t" ? "stage-editor" : null
   }
+  if (context === "document-find") {
+    if (key.name === "escape") return "close-overlay"
+    if (key.name === "return" || key.name === "enter") return key.shift ? "search-previous" : "search-next"
+    if (key.name === "backspace") return "input-delete"
+    if (key.name === "down" || (key.ctrl && (key.name === "j" || key.name === "n"))) return "search-next"
+    if (key.name === "up" || (key.ctrl && (key.name === "k" || key.name === "p"))) return "search-previous"
+    return null
+  }
   if (context === "page-search" || context === "space-switcher" || context === "new-page") return textInputCommand(key)
 
   if (key.name === "q" || key.name === "escape") return "quit"

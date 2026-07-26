@@ -4,7 +4,7 @@ import { dirname, join } from "node:path"
 import { Writable } from "node:stream"
 import { describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
-import { App, HelpOverlay, ImageViewerOverlay, NewPageOverlay, StagedChangesOverlay, documentHorizontalScrollDeltaForKey, imageRenderModeForCapabilities, nearestImageIndexForViewport, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, parseTerminalCellPixels, type SearchKeyLike } from "../src/tui/app"
+import { App, DocumentFindOverlay, HelpOverlay, ImageViewerOverlay, NewPageOverlay, StagedChangesOverlay, documentHorizontalScrollDeltaForKey, findDocumentMatches, imageRenderModeForCapabilities, nearestImageIndexForViewport, nextDocumentFindIndex, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, parseTerminalCellPixels, type SearchKeyLike } from "../src/tui/app"
 import { commandsForContext } from "../src/tui/commands"
 import { createLocalConfig } from "../src/config"
 import type { CredentialStatus } from "../src/config"
@@ -843,8 +843,39 @@ describe("main TUI layout", () => {
 
       expect(rendered.captureCharFrame()).toContain("KEYBOARD HELP")
       expect(rendered.captureCharFrame()).toContain("Command palette")
-      expect(rendered.captureCharFrame()).toContain("Document find")
-      expect(rendered.captureCharFrame()).toContain("not implemented yet")
+      expect(rendered.captureCharFrame()).toContain("Find in document")
+      expect(rendered.captureCharFrame()).toContain("Command palette is not implemented yet")
+    } finally {
+      rendered.renderer.destroy()
+    }
+  })
+
+  test("finds case-insensitive document matches with line positions", () => {
+    expect(findDocumentMatches("# Start\n\nStart here\nrestart", "start")).toEqual([
+      { line: 0, column: 2, preview: "# Start" },
+      { line: 2, column: 0, preview: "Start here" },
+      { line: 3, column: 2, preview: "restart" },
+    ])
+    expect(findDocumentMatches("Start", "")).toEqual([])
+    expect(nextDocumentFindIndex(1, 1, 2)).toBe(0)
+    expect(nextDocumentFindIndex(0, -1, 2)).toBe(1)
+    expect(nextDocumentFindIndex(0, 1, 0)).toBe(0)
+  })
+
+  test("renders the document find overlay with selected match details", async () => {
+    const matches = findDocumentMatches("# Start\n\nStart here", "start")
+    const rendered = await testRender(() => (
+      <DocumentFindOverlay visible query="start" matches={matches} selectedIndex={1} pageTitle="Engineering Home" left={2} width={90} height={14} />
+    ), { width: 100, height: 18 })
+
+    try {
+      await rendered.renderOnce()
+      const frame = rendered.captureCharFrame()
+
+      expect(frame).toContain("FIND IN DOCUMENT")
+      expect(frame).toContain("2/2 matches")
+      expect(frame).toContain("line 3, column 1")
+      expect(frame).toContain("Start here")
     } finally {
       rendered.renderer.destroy()
     }

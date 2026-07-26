@@ -16,24 +16,24 @@ Last updated: 2026-07-26
 
 ## Next Recommended Slice
 
-### 1. Document Find (`f`)
+### 1. Document Find (`f`) - Complete
 
 Why first: it is the highest-value missing reader interaction, already has a registered unavailable command, and does not require remote access or data-model changes.
 
-- [ ] Add a document-find overlay separate from page search.
-- [ ] Match against the current rendered Markdown only.
-- [ ] Support text input, `Enter`/`n` for next match, `Shift+Enter`/`N` for previous match, and `Esc` to close.
-- [ ] Scroll the document to the selected match.
-- [ ] Show match count and current match position.
-- [ ] Keep the active-space page-search query and selection unchanged.
-- [ ] Mark `open-document-find` available in `src/tui/commands.ts`.
+- [x] Add a document-find overlay separate from page search.
+- [x] Match against the current rendered Markdown only.
+- [x] Support text input, `Enter` or Ctrl+N for next match, `Shift+Enter` or Ctrl+P for previous match, and `Esc` to close. Keep printable `n`/`N` available for search text.
+- [x] Scroll the document to the selected match.
+- [x] Show match count and current match position.
+- [x] Keep the active-space page-search query and selection unchanged.
+- [x] Mark `open-document-find` available in `src/tui/commands.ts`.
 
 Acceptance criteria:
 
-- [ ] `f` opens find from the reader or navigator.
-- [ ] Empty and no-match states are clear.
-- [ ] Find does not call Confluence or mutate local data.
-- [ ] Tests cover routing, match selection, wraparound, and overlay rendering.
+- [x] `f` opens find from the reader or navigator.
+- [x] Empty and no-match states are clear.
+- [x] Find does not call Confluence or mutate local data.
+- [x] Tests cover routing, match selection, wraparound, and overlay rendering.
 
 Verification:
 
@@ -110,4 +110,5 @@ Append one line after each completed slice:
 ```text
 YYYY-MM-DD  Slice  Result  Verification  Next
 2026-07-26  Keymap + Help  Command registry, context-aware routing, and Help scrolling implemented.  bun run typecheck; bun test (140 pass, 0 fail, 676 assertions); git diff --check.  Document find.
+2026-07-26  Document Find  Local Markdown find overlay with case-insensitive matches, wraparound selection, and document scrolling implemented.  bun run typecheck; bun test (143 pass, 0 fail, 690 assertions); git diff --check.  Command palette.
 ```

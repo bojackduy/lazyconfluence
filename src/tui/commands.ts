@@ -1,4 +1,4 @@
-export type CommandContext = "main" | "navigator" | "document" | "page-search" | "space-switcher" | "new-page" | "editor" | "changes" | "image-viewer" | "help"
+export type CommandContext = "main" | "navigator" | "document" | "page-search" | "document-find" | "space-switcher" | "new-page" | "editor" | "changes" | "image-viewer" | "help"
 
 export type CommandGroup = "Global" | "Navigation" | "Reader" | "Editing" | "Images"
 
@@ -56,7 +56,7 @@ export const tuiCommands: readonly TuiCommand[] = [
   command("show-help", "Help", "Show available keyboard commands.", "?", "Global", ["main", "help"], true),
   command("open-command-palette", "Command palette", "Search and run actions.", "p", "Global", ["main"], false, "Command palette is not implemented yet."),
   command("open-page-search", "Page search", "Search pages in the active space.", "/", "Global", ["main"], true),
-  command("open-document-find", "Find in document", "Find text in the current document.", "f", "Global", ["main"], false, "Document find is not implemented yet."),
+  command("open-document-find", "Find in document", "Find text in the current document.", "f", "Global", ["main"], true),
   command("open-space-switcher", "Switch space", "Choose another locally indexed space.", "s", "Global", ["main"], true),
   command("open-browser", "Open in browser", "Open the selected Confluence page in your browser.", "o", "Global", ["main"], false, "Browser open is not implemented yet."),
   command("refresh", "Refresh", "Sync configured spaces from Confluence.", "r", "Global", ["main"], false, "Sync runs explicitly from the CLI today."),
@@ -77,11 +77,11 @@ export const tuiCommands: readonly TuiCommand[] = [
   command("stage-delete", "Delete page", "Stage deletion of the selected leaf page.", "D", "Editing", ["main"], true),
   command("page-down", "Half page down", "Scroll by one viewport.", "d", "Reader", ["main", "document", "help"], true),
   command("page-up", "Half page up", "Scroll by one viewport.", "u", "Reader", ["main", "document", "help"], true),
-  command("close-overlay", "Close", "Close the active overlay without applying changes.", "Esc · q", "Global", ["page-search", "space-switcher", "new-page", "editor", "changes", "image-viewer", "help"], true),
-  command("search-next", "Next result", "Select the next result.", "Down · Ctrl+N", "Navigation", ["page-search", "space-switcher"], true),
-  command("search-previous", "Previous result", "Select the previous result.", "Up · Ctrl+P", "Navigation", ["page-search", "space-switcher"], true),
+  command("close-overlay", "Close", "Close the active overlay without applying changes.", "Esc · q", "Global", ["page-search", "document-find", "space-switcher", "new-page", "editor", "changes", "image-viewer", "help"], true),
+  command("search-next", "Next result", "Select the next result.", "Down · Ctrl+N", "Navigation", ["page-search", "document-find", "space-switcher"], true),
+  command("search-previous", "Previous result", "Select the previous result.", "Up · Ctrl+P", "Navigation", ["page-search", "document-find", "space-switcher"], true),
   command("search-submit", "Open result", "Open the selected search result.", "Enter", "Navigation", ["page-search", "space-switcher"], true),
-  command("input-delete", "Delete character", "Delete the previous input character.", "Backspace", "Editing", ["page-search", "space-switcher", "new-page"], true),
+  command("input-delete", "Delete character", "Delete the previous input character.", "Backspace", "Editing", ["page-search", "document-find", "space-switcher", "new-page"], true),
   command("stage-editor", "Stage editor", "Stage the current editor buffer.", "Ctrl+T", "Editing", ["editor"], true),
   command("toggle-change", "Toggle change", "Select or clear the highlighted staged change.", "Space", "Editing", ["changes"], true),
   command("apply-changes", "Apply changes", "Apply selected staged changes to Confluence.", "a", "Editing", ["changes"], true),

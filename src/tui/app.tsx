@@ -55,6 +55,8 @@ type NavigatorCollapseRow = {
 type ReaderImagePart = Extract<ReaderContentPart, { kind: "image" }>
 type CellPixelSize = { width: number; height: number }
 
+export type DocumentFindMatch = { line: number; column: number; preview: string }
+
 const documentHorizontalScrollColumns = 8
 
 export type SearchKeyLike = TuiKey
@@ -104,6 +106,9 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const [pageSearchOpen, setPageSearchOpen] = createSignal(false)
   const [pageSearchQuery, setPageSearchQuery] = createSignal("")
   const [pageSearchSelectedIndex, setPageSearchSelectedIndex] = createSignal(0)
+  const [documentFindOpen, setDocumentFindOpen] = createSignal(false)
+  const [documentFindQuery, setDocumentFindQuery] = createSignal("")
+  const [documentFindSelectedIndex, setDocumentFindSelectedIndex] = createSignal(0)
   const [newPageOpen, setNewPageOpen] = createSignal(false)
   const [newPageTitle, setNewPageTitle] = createSignal("")
   const [newPageParentPageId, setNewPageParentPageId] = createSignal<string | null>(null)
@@ -169,6 +174,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     draftRevision()
     return dataSource.searchPagesInSpace(activeSpaceKey(), pageSearchQuery(), pageViewMode())
   })
+  const documentFindMatches = createMemo(() => findDocumentMatches(readerPage().contentMarkdown, documentFindQuery()))
   const spaceSwitcherResults = createMemo(() => dataSource.searchSpaces(spaceSwitcherQuery()))
   const stagedChanges = createMemo(() => {
     draftRevision()
@@ -220,6 +226,13 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     onCleanup(() => {
       cancelled = true
     })
+  })
+
+  createEffect(() => {
+    if (!documentFindOpen()) return
+
+    const match = documentFindMatches()[documentFindSelectedIndex()]
+    if (match) documentScrollbox?.scrollTo(match.line)
   })
 
   let lastImageModeDebugKey = ""
@@ -368,12 +381,42 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   })
 
   const openPageSearch = () => {
+    setDocumentFindOpen(false)
     setSpaceSwitcherOpen(false)
     setChangesOpen(false)
     setNewPageOpen(false)
     setPageSearchOpen(true)
     setPageSearchQuery("")
     setPageSearchSelectedIndex(0)
+  }
+
+  const openDocumentFind = () => {
+    setPageSearchOpen(false)
+    setSpaceSwitcherOpen(false)
+    setChangesOpen(false)
+    setNewPageOpen(false)
+    setDocumentFindQuery("")
+    setDocumentFindSelectedIndex(0)
+    setDocumentFindOpen(true)
+    setFocusPane("document")
+  }
+
+  const closeDocumentFind = () => {
+    setDocumentFindOpen(false)
+    setDocumentFindQuery("")
+    setDocumentFindSelectedIndex(0)
+  }
+
+  const updateDocumentFindQuery = (query: string) => {
+    setDocumentFindQuery(query)
+    setDocumentFindSelectedIndex(0)
+  }
+
+  const moveDocumentFindSelection = (direction: number) => {
+    const matches = documentFindMatches()
+    if (!matches.length) return
+
+    setDocumentFindSelectedIndex((current) => nextDocumentFindIndex(current, direction, matches.length))
   }
 
   const switchPageView = (view: PageViewMode) => {
@@ -737,6 +780,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     newPageOpen: newPageOpen(),
     editorOpen: editorOpen(),
     pageSearchOpen: pageSearchOpen(),
+    documentFindOpen: documentFindOpen(),
     spaceSwitcherOpen: spaceSwitcherOpen(),
   })
 
@@ -747,6 +791,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     if (helpOpen()) return "help-overlay"
     if (newPageOpen()) return "new-page-overlay"
     if (editorOpen()) return "editor"
+    if (documentFindOpen()) return "document-find"
     if (pageSearchOpen()) return "page-search"
     if (spaceSwitcherOpen()) return "space-switcher"
     if (resolveKeyCommand(key, focusPane())) return "command"
@@ -912,6 +957,18 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
       return
     }
 
+    if (documentFindOpen()) {
+      const command = resolveKeyCommand(key, "document-find")
+      const action = pageSearchKeyAction(key)
+
+      if (command === "close-overlay") closeDocumentFind()
+      else if (command === "search-next") moveDocumentFindSelection(1)
+      else if (command === "search-previous") moveDocumentFindSelection(-1)
+      else if (command === "input-delete") updateDocumentFindQuery(documentFindQuery().slice(0, -1))
+      else if (action === "append") updateDocumentFindQuery(documentFindQuery() + key.sequence)
+      return
+    }
+
     if (pageSearchOpen()) {
       const action = pageSearchKeyAction(key)
 
@@ -956,6 +1013,11 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
 
     if (command === "open-page-search") {
       openPageSearch()
+      return
+    }
+
+    if (command === "open-document-find") {
+      openDocumentFind()
       return
     }
 
@@ -1091,6 +1153,16 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
         selectedIndex={pageSearchSelectedIndex()}
         activeSpaceName={space().name}
         viewMode={pageViewMode()}
+        left={dimensions().width < 72 ? 2 : 8}
+        width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 4 : 16))}
+        height={Math.min(18, Math.max(10, dimensions().height - 8))}
+      />
+      <DocumentFindOverlay
+        visible={documentFindOpen()}
+        query={documentFindQuery()}
+        matches={documentFindMatches()}
+        selectedIndex={documentFindSelectedIndex()}
+        pageTitle={readerPage().title}
         left={dimensions().width < 72 ? 2 : 8}
         width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 4 : 16))}
         height={Math.min(18, Math.max(10, dimensions().height - 8))}
@@ -2549,6 +2621,55 @@ function PageSearchOverlay(props: { visible: boolean; query: string; results: Se
   )
 }
 
+export function DocumentFindOverlay(props: { visible: boolean; query: string; matches: DocumentFindMatch[]; selectedIndex: number; pageTitle: string; left: number; width: number; height: number }) {
+  const selectedMatch = () => props.matches[props.selectedIndex]
+
+  return (
+    <box
+      visible={props.visible}
+      position="absolute"
+      left={props.left}
+      top={5}
+      width={props.width}
+      height={props.height}
+      border
+      borderStyle="rounded"
+      borderColor={theme.borderActive}
+      backgroundColor="#08111f"
+      paddingX={2}
+      paddingY={1}
+      flexDirection="column"
+      zIndex={25}
+    >
+      <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
+        <text height={1} fg={theme.accent} attributes={1}>FIND IN DOCUMENT</text>
+        <text height={1} fg={theme.muted}>{props.pageTitle}</text>
+      </box>
+      <text height={1} fg={theme.text}>f {props.query || "type text to find"}_</text>
+      <text height={1} fg={theme.subtle}>{props.query ? props.matches.length ? `${props.selectedIndex + 1}/${props.matches.length} matches  enter next  shift+enter previous  esc close` : "no matches  type to search  esc close" : "type to search  esc close"}</text>
+      <box height={1} />
+      <Show when={selectedMatch()} fallback={<EmptyDocumentFindState query={props.query} />}>
+        {(match) => (
+          <box flexGrow={1} justifyContent="center" flexDirection="column">
+            <text height={1} fg={theme.good}>line {match().line + 1}, column {match().column + 1}</text>
+            <text height={1} fg={theme.text}>{match().preview}</text>
+          </box>
+        )}
+      </Show>
+    </box>
+  )
+}
+
+function EmptyDocumentFindState(props: { query: string }) {
+  const message = () => props.query ? `No matches for "${props.query}" in this document.` : "Enter text to search the current document."
+
+  return (
+    <box flexGrow={1} alignItems="center" justifyContent="center">
+      <text fg={theme.muted}>{message()}</text>
+    </box>
+  )
+}
+
 function SpaceSwitcherOverlay(props: { visible: boolean; query: string; results: SpaceSearchResult[]; selectedIndex: number; activeSpaceKey: string; left: number; width: number; height: number }) {
   return (
     <box
@@ -2844,6 +2965,32 @@ function relatedItems(page: ReaderPage) {
     ...page.outgoingLinks.map((link) => `${link.kind === "internal" ? "->" : "external"} ${link.title}`),
     ...page.backlinks.map((link) => `<- ${link.title}`),
   ]
+}
+
+export function findDocumentMatches(markdown: string, query: string): DocumentFindMatch[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  if (!normalizedQuery) return []
+
+  return markdown.split("\n").flatMap((line, lineIndex) => {
+    const normalizedLine = line.toLocaleLowerCase()
+    const matches: DocumentFindMatch[] = []
+    let start = 0
+
+    while (start < normalizedLine.length) {
+      const column = normalizedLine.indexOf(normalizedQuery, start)
+      if (column < 0) break
+
+      matches.push({ line: lineIndex, column, preview: line.trim() || "(blank line)" })
+      start = column + normalizedQuery.length
+    }
+
+    return matches
+  })
+}
+
+export function nextDocumentFindIndex(current: number, direction: number, matchCount: number) {
+  if (matchCount <= 0) return 0
+  return (current + direction + matchCount) % matchCount
 }
 
 function readerImagePartsForPage(page: ReaderPage): ReaderImagePart[] {

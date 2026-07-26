@@ -29,7 +29,7 @@ describe("TUI command registry", () => {
   })
 
   test("keeps future commands visible but explicitly unavailable", () => {
-    expect(commandForId("open-document-find")).toMatchObject({ available: false, unavailableReason: expect.stringContaining("not implemented") })
+    expect(commandForId("open-document-find")).toMatchObject({ available: true })
     expect(commandForId("open-browser")).toMatchObject({ available: false, unavailableReason: expect.stringContaining("not implemented") })
   })
 })
@@ -63,6 +63,14 @@ describe("context-aware key resolution", () => {
     expect(textInputKeyAction(key("p", "p", { ctrl: true }))).toBe("previous")
     expect(resolveKeyCommand(key("j"), "page-search")).toBeNull()
     expect(resolveKeyCommand(key("escape", "\u001b"), "space-switcher")).toBe("close-overlay")
+  })
+
+  test("routes document find navigation without reserving printable text", () => {
+    expect(resolveKeyCommand(key("return", "\r"), "document-find")).toBe("search-next")
+    expect(resolveKeyCommand(key("return", "\r", { shift: true }), "document-find")).toBe("search-previous")
+    expect(resolveKeyCommand(key("n"), "document-find")).toBeNull()
+    expect(resolveKeyCommand(key("n", "n", { ctrl: true }), "document-find")).toBe("search-next")
+    expect(resolveKeyCommand(key("p", "p", { ctrl: true }), "document-find")).toBe("search-previous")
   })
 
   test("gives each overlay predictable close and movement commands", () => {

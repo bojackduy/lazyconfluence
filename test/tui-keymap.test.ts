@@ -28,10 +28,11 @@ describe("TUI command registry", () => {
     ]))
   })
 
-  test("keeps future commands visible but explicitly unavailable", () => {
+  test("marks implemented commands available and keeps future commands visible", () => {
     expect(commandForId("open-document-find")).toMatchObject({ available: true })
     expect(commandForId("open-command-palette")).toMatchObject({ available: true })
-    expect(commandForId("open-browser")).toMatchObject({ available: false, unavailableReason: expect.stringContaining("not implemented") })
+    expect(commandForId("open-browser")).toMatchObject({ available: true })
+    expect(commandForId("refresh")).toMatchObject({ available: false, unavailableReason: expect.stringContaining("CLI") })
   })
 })
 

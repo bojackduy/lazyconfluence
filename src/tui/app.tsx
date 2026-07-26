@@ -22,6 +22,7 @@ import {
 } from "@opentui/core"
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import { decodeImageFile, type DecodedImage } from "../media/image"
+import { openBrowserUrl, type BrowserOpenResult } from "../browser"
 import type { FocusPane, IndexedPage, MediaAsset, PageViewMode, ReaderPage, SearchResult, SpaceSearchResult } from "../model"
 import { loadCredentialStatus, type CredentialStatus } from "../config"
 import type { PageDraftStatus } from "../index/repository"
@@ -86,13 +87,14 @@ export async function renderTui(options: RenderTuiOptions = {}) {
   })
 }
 
-export function App(props: { credentialStatus?: CredentialStatus; dataSource?: TuiSource; disableTreeSitter?: boolean; initialPageViewMode?: PageViewMode; runtime?: TuiRuntime; runtimeLabel?: string } = {}) {
+export function App(props: { browserOpener?: (url: string) => BrowserOpenResult; credentialStatus?: CredentialStatus; dataSource?: TuiSource; disableTreeSitter?: boolean; initialPageViewMode?: PageViewMode; runtime?: TuiRuntime; runtimeLabel?: string } = {}) {
   const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
   const ownedRuntime = props.runtime ?? (props.dataSource ? null : createTuiRuntime({ env: "prod" }))
   const dataSource = props.dataSource ?? ownedRuntime?.source
   if (!dataSource) throw new Error("App requires a TUI data source.")
   const runtimeLabel = props.runtimeLabel ?? ownedRuntime?.label ?? "custom source"
+  const browserOpener = props.browserOpener ?? openBrowserUrl
   const initialSpaceKey = dataSource.getDefaultSpaceKey() ?? "LOCAL"
   const initialPageId = dataSource.getDefaultPageId(initialSpaceKey) ?? emptyPageId
   const [credentialStatus, setCredentialStatus] = createSignal<CredentialStatus | null>(props.credentialStatus ?? ownedRuntime?.credentialStatus ?? null)
@@ -408,6 +410,13 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     setFocusPane("document")
   }
 
+  const openSelectedPageInBrowser = () => {
+    const page = readerPage()
+    const result = browserOpener(page.url)
+
+    setEditStatusMessage(result.status === "opened" ? `Opened ${page.title} in your browser.` : result.reason)
+  }
+
   const closeDocumentFind = () => {
     setDocumentFindOpen(false)
     setDocumentFindQuery("")
@@ -528,6 +537,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     else if (command.id === "open-page-search") openPageSearch()
     else if (command.id === "open-document-find") openDocumentFind()
     else if (command.id === "open-space-switcher") openSpaceSwitcher()
+    else if (command.id === "open-browser") openSelectedPageInBrowser()
     else if (command.id === "open-overview") openChanges()
     else if (command.id === "toggle-page-view") togglePageView()
     else if (command.id === "edit-page") openEditorForSelectedPage()
@@ -1098,6 +1108,11 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
 
     if (command === "open-command-palette") {
       openCommandPalette()
+      return
+    }
+
+    if (command === "open-browser") {
+      openSelectedPageInBrowser()
       return
     }
 

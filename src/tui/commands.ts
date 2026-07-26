@@ -58,7 +58,7 @@ export const tuiCommands: readonly TuiCommand[] = [
   command("open-page-search", "Page search", "Search pages in the active space.", "/", "Global", ["main"], true),
   command("open-document-find", "Find in document", "Find text in the current document.", "f", "Global", ["main"], true),
   command("open-space-switcher", "Switch space", "Choose another locally indexed space.", "s", "Global", ["main"], true),
-  command("open-browser", "Open in browser", "Open the selected Confluence page in your browser.", "o", "Global", ["main"], false, "Browser open is not implemented yet."),
+  command("open-browser", "Open in browser", "Open the selected Confluence page in your browser.", "o", "Global", ["main"], true),
   command("refresh", "Refresh", "Sync configured spaces from Confluence.", "r", "Global", ["main"], false, "Sync runs explicitly from the CLI today."),
   command("go-back", "Go back", "Return to the previous page in navigation history.", "b", "Navigation", ["main"], false, "Navigation history is not implemented yet."),
   command("focus-next-pane", "Next pane", "Move focus between navigator and document.", "Tab", "Navigation", ["main", "navigator", "document"], true),

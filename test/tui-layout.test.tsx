@@ -4,7 +4,7 @@ import { dirname, join } from "node:path"
 import { Writable } from "node:stream"
 import { describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
-import { App, CommandPaletteOverlay, DocumentFindOverlay, HelpOverlay, ImageViewerOverlay, NewPageOverlay, StagedChangesOverlay, documentHorizontalScrollDeltaForKey, documentOutlineItems, findDocumentMatches, imageRenderModeForCapabilities, nearestImageIndexForViewport, nextDocumentFindIndex, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, parseTerminalCellPixels, relatedNavigationItemsForPage, searchPaletteCommands, type SearchKeyLike } from "../src/tui/app"
+import { App, CommandPaletteOverlay, DocumentFindOverlay, Header, HelpOverlay, ImageViewerOverlay, NewPageOverlay, StagedChangesOverlay, StatusBar, documentHorizontalScrollDeltaForKey, documentOutlineItems, findDocumentMatches, imageRenderModeForCapabilities, nearestImageIndexForViewport, nextDocumentFindIndex, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, parseTerminalCellPixels, relatedNavigationItemsForPage, searchPaletteCommands, type SearchKeyLike } from "../src/tui/app"
 import { commandsForContext } from "../src/tui/commands"
 import { createLocalConfig } from "../src/config"
 import type { CredentialStatus } from "../src/config"
@@ -37,12 +37,9 @@ describe("main TUI layout", () => {
       expect(output).toContain("s spaces")
       expect(output).toContain("·")
       expect(output).toContain("Overview 0")
-      expect(output).toContain("c overview")
-      expect(output).toContain("i image")
-      expect(output).toContain("e edit")
+      expect(output).toContain("r reload")
+      expect(output).toContain("b back")
       expect(output).toContain("Tab panes")
-      expect(output).toContain("N root")
-      expect(output).toContain("D delete")
       expect(output).not.toContain("i.image")
       expect(output).toContain("▾ ▣ Local Engineering Home")
       expect(output).toContain("• Real Synced Architecture")
@@ -56,6 +53,28 @@ describe("main TUI layout", () => {
       expect(output).not.toContain("Start here for engineering norms")
     } finally {
       await setup.cleanup()
+    }
+  })
+
+  test("renders an explicit current-page reload state", async () => {
+    const page: ReaderPage = { ...home, children: [], outgoingLinks: [], backlinks: [], outline: [] }
+    const rendered = await testRender(() => (
+      <box width="100%" height="100%" flexDirection="column">
+        <Header page={page} spaceName="Local Engineering" syncState="fresh" draftStatus={null} stagedCount={0} runtimeLabel="PROD local" reloading onOpenOverview={() => {}} />
+        <StatusBar focusPane="navigator" editorOpen={false} editorDirty={false} editMessage="Reloading Local Engineering Home from Confluence..." reloading />
+      </box>
+    ), { width: 120, height: 10 })
+
+    try {
+      await rendered.renderOnce()
+      const frame = rendered.captureCharFrame()
+
+      expect(frame).toContain("RELOADING")
+      expect(frame).toContain("Reloading Local Engineering Home from Confluence...")
+      expect(frame).toContain("r reload")
+      expect(frame).toContain("b back")
+    } finally {
+      rendered.renderer.destroy()
     }
   })
 
@@ -761,7 +780,7 @@ describe("main TUI layout", () => {
       })
 
       expect(output).toContain("draft")
-      expect(output).toContain("e edit")
+      expect(output).toContain("r reload")
     } finally {
       dataSource.close?.()
       await setup.cleanup()

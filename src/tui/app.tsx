@@ -135,6 +135,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
   const [commandPaletteQuery, setCommandPaletteQuery] = createSignal("")
   const [commandPaletteSelectedIndex, setCommandPaletteSelectedIndex] = createSignal(0)
   const [draftRevision, setDraftRevision] = createSignal(0)
+  const [pageReloading, setPageReloading] = createSignal(false)
   const [editorOpen, setEditorOpen] = createSignal(false)
   const [editorPageId, setEditorPageId] = createSignal<string | null>(null)
   const [editorPageTitle, setEditorPageTitle] = createSignal("")
@@ -810,6 +811,35 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     }
   }
 
+  const reloadCurrentPage = async () => {
+    if (pageReloading()) return
+
+    const pageId = selectedPageId()
+    if (pageId === emptyPageId) {
+      setEditStatusMessage("No page selected to reload.")
+      return
+    }
+
+    setPageReloading(true)
+    setEditStatusMessage(`Reloading ${readerPage().title} from Confluence...`)
+    try {
+      const result = await dataSource.reloadPage(pageId)
+      if (result.status === "blocked") {
+        setEditStatusMessage(result.reason === "local-draft"
+          ? `${result.pageTitle} has a local draft; stage, apply, or discard it before reloading.`
+          : "Demo mode cannot reload Confluence pages.")
+        return
+      }
+
+      setDraftRevision((revision) => revision + 1)
+      setEditStatusMessage(`Reloaded ${result.pageTitle} from Confluence.`)
+    } catch (error) {
+      setEditStatusMessage(`Could not reload ${readerPage().title}: ${errorMessage(error)}`)
+    } finally {
+      setPageReloading(false)
+    }
+  }
+
   const openNewPage = () => {
     if (pageViewMode() !== "current") {
       setEditStatusMessage("Archived view is read-only. Switch to Current to create pages.")
@@ -1250,6 +1280,11 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
       return
     }
 
+    if (command === "refresh") {
+      void reloadCurrentPage()
+      return
+    }
+
     if (command && !commandForId(command)?.available) {
       setEditStatusMessage(commandForId(command)?.unavailableReason ?? "This command is not available yet.")
       return
@@ -1355,13 +1390,13 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
 
   return (
     <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.bg}>
-      <Header page={readerPage()} spaceName={space().name} syncState={space().syncState} draftStatus={draftStatus()} stagedCount={stagedChanges().length} runtimeLabel={runtimeLabel} onOpenOverview={() => openChanges()} />
+      <Header page={readerPage()} spaceName={space().name} syncState={space().syncState} draftStatus={draftStatus()} stagedCount={stagedChanges().length} runtimeLabel={runtimeLabel} reloading={pageReloading()} onOpenOverview={() => openChanges()} />
       <Show when={credentialWarning()} fallback={<box height={0} />}>{(status) => <CredentialNotice status={status()} />}</Show>
       <box flexGrow={1} minHeight={0} flexDirection={isNarrow() ? "column" : "row"} paddingX={1}>
         <Navigator rows={treeRows()} selectedPageId={selectedPageId()} focused={focusPane() === "navigator"} viewMode={pageViewMode()} onSetViewMode={switchPageView} />
         <Reader page={readerPage()} focused={focusPane() === "document"} sideRailFocused={focusPane() === "side-rail"} sideRailPanel={sideRailPanel()} sideRailSelectedIndex={sideRailSelectedIndex()} outlineItems={outlineNavigationItems()} relatedItems={relatedNavigationItems()} narrow={isNarrow()} treeSitterClient={treeSitterClient()} imageRenderMode={inlineImageRenderMode()} setDocumentScrollbox={(scrollbox) => { documentScrollbox = scrollbox }} setImageRenderable={setReaderImageRenderable} />
       </box>
-      <StatusBar focusPane={focusPane()} editorOpen={editorOpen()} editorDirty={editorDirty()} editMessage={editStatusMessage()} />
+      <StatusBar focusPane={focusPane()} editorOpen={editorOpen()} editorDirty={editorDirty()} editMessage={editStatusMessage()} reloading={pageReloading()} />
       <Show when={editorOpen()} fallback={<box height={0} />}>
         <EditorOverlay
           pageTitle={editorPageTitle()}
@@ -1491,7 +1526,7 @@ function CredentialNotice(props: { status: CredentialWarning }) {
   )
 }
 
-function Header(props: { page: ReaderPage; spaceName: string; syncState: string; draftStatus: PageDraftStatus | null; stagedCount: number; runtimeLabel: string; onOpenOverview: () => void }) {
+export function Header(props: { page: ReaderPage; spaceName: string; syncState: string; draftStatus: PageDraftStatus | null; stagedCount: number; runtimeLabel: string; reloading: boolean; onOpenOverview: () => void }) {
   const syncColor = () => (props.syncState === "fresh" ? theme.good : props.syncState === "stale" ? theme.warn : theme.danger)
   const statusColor = () => (props.draftStatus === "staged" ? theme.good : props.draftStatus === "draft" ? theme.warn : syncColor())
   const statusText = () => `${props.runtimeLabel} · ${props.draftStatus ? `${props.draftStatus} · ` : ""}${props.syncState}`
@@ -1504,6 +1539,9 @@ function Header(props: { page: ReaderPage; spaceName: string; syncState: string;
           <box height={1} width={Math.max(12, `Overview ${props.stagedCount}`.length + 2)} onMouseDown={props.onOpenOverview}>
             <text height={1} fg={theme.accent}>Overview {props.stagedCount}</text>
           </box>
+          <Show when={props.reloading} fallback={<box height={0} />}>
+            <text height={1} fg={theme.warn}><b>RELOADING</b></text>
+          </Show>
           <text height={1} fg={statusColor()}>{statusText()}</text>
         </box>
       </box>
@@ -2601,10 +2639,11 @@ function sideRailRowId(panel: SideRailPanel, index: number) {
   return `side-rail-${panel}-${index}`
 }
 
-function StatusBar(props: { focusPane: string; editorOpen: boolean; editorDirty: boolean; editMessage: string }) {
+export function StatusBar(props: { focusPane: string; editorOpen: boolean; editorDirty: boolean; editMessage: string; reloading: boolean }) {
   const hints = () => statusBarHints(props.focusPane, props.editorOpen)
   const status = () => {
     if (props.editorOpen) return props.editMessage || `editing transient buffer: ${props.editorDirty ? "modified" : "unchanged"}`
+    if (props.reloading) return props.editMessage || "Reloading current page from Confluence..."
     return props.editMessage ? props.editMessage : `focus: ${props.focusPane}`
   }
 
@@ -2624,12 +2663,8 @@ function statusBarHints(focusPane: string, editorOpen: boolean): StatusHintItem[
   if (editorOpen) return [{ key: "Ctrl+T", label: "stage" }, { key: "Esc", label: "close" }]
   if (focusPane === "document") return [
     { key: "/", label: "search" },
-    { key: "s", label: "spaces" },
-    { key: "c", label: "overview" },
-    { key: "i", label: "image" },
     { key: "r", label: "reload" },
-    { key: "e", label: "edit" },
-    { key: "D", label: "delete" },
+    { key: "b", label: "back" },
     { key: "Tab", label: "panes" },
     { key: "j/k", label: "scroll" },
     { key: "d/u", label: "page" },
@@ -2647,13 +2682,9 @@ function statusBarHints(focusPane: string, editorOpen: boolean): StatusHintItem[
   return [
     { key: "/", label: "search" },
     { key: "s", label: "spaces" },
-    { key: "c", label: "overview" },
-    { key: "i", label: "image" },
+    { key: "r", label: "reload" },
+    { key: "b", label: "back" },
     { key: "Tab", label: "panes" },
-    { key: "n", label: "child" },
-    { key: "N", label: "root" },
-    { key: "e", label: "edit" },
-    { key: "D", label: "delete" },
     { key: "j/k", label: "move" },
     { key: "h/l", label: "fold" },
   ]

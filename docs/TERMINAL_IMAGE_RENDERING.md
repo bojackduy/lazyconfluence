@@ -29,7 +29,7 @@ Inline document images are safe but not native terminal images.
 - `src/tui/app.tsx` renders image cards, chooses an `ImageRenderMode`, draws cell previews, and manages the native image viewer lifecycle.
 - `src/tui/kitty.ts` contains Kitty graphics helpers. The viewer prefers direct cached-PNG payloads (`f=100`) and keeps raw RGBA plus file-transfer helpers for fallback/experiments.
 - `src/tui/iterm2.ts` contains OSC 1337 inline image helpers for WezTerm/iTerm2-compatible terminals.
-- `src/tui/sixel.ts` contains a small indexed-color Sixel encoder for terminals that report Sixel support.
+- `src/tui/sixel.ts` contains an indexed-color Sixel encoder for terminals that report Sixel support.
 
 ## Root Causes From The Investigation
 
@@ -86,6 +86,7 @@ Different terminals expose different image mechanisms. They are not interchangea
 - Multiplexers such as tmux/herdr/zellij can block, escape, wrap, or print native image protocol bytes unless passthrough is explicitly supported and configured.
 - Existing tmux sessions are supported by wrapping native image output in tmux passthrough sequences. The app does not run `tmux set` or modify user tmux settings.
 - In tmux, only native image protocol payloads are wrapped. Cursor movement stays unwrapped so tmux can translate pane-local coordinates and the image does not draw into neighboring panes.
+- Kitty image deletion is also wrapped as a native protocol payload in tmux so images are cleared when the viewer closes.
 
 ## Current Safe Behavior
 
@@ -108,6 +109,10 @@ Recommended viewer protocol order:
 5. Non-RGB terminal: mono cell approximation.
 
 For testing protocol-specific behavior, set `LAZYCONFLUENCE_IMAGE_MODE` to one of `kitty`, `iterm2`, `sixel`, `cell-color`, `cell-mono`, or `placeholder`. For example, `LAZYCONFLUENCE_IMAGE_MODE=sixel` forces the Sixel path in WezTerm so it can be compared with the default iTerm2 path.
+
+The Sixel path uses the full native viewer cell region, detected terminal cell pixel size when available, and an expanded 256-color palette. It is still slower than Kitty/iTerm2 because the app must generate and stream a rasterized Sixel payload for each image switch.
+
+When the viewer selects Sixel, the app queries terminal cell size with `CSI 16 t` and parses `CSI 6;<height>;<width>t`. Sixel sizing can be overridden with `LAZYCONFLUENCE_SIXEL_CELL_WIDTH` and `LAZYCONFLUENCE_SIXEL_CELL_HEIGHT`; fallback defaults are `12` and `24`. By default, `LAZYCONFLUENCE_SIXEL_FIT=contain` preserves aspect ratio to keep payloads smaller and avoid overdraw; set `LAZYCONFLUENCE_SIXEL_FIT=stretch` to fill the viewer region even if that changes image aspect ratio. Native Sixel/iTerm2 images are cleared by overwriting the last displayed viewer cell area, since those protocols do not have the Kitty image-delete command. Sixel erasure intentionally includes a small extra margin because terminals may map Sixel pixels to cells differently.
 
 ## Recommended Native Image Strategy
 

@@ -51,6 +51,7 @@ type NavigatorCollapseRow = {
 }
 
 type ReaderImagePart = Extract<ReaderContentPart, { kind: "image" }>
+type CellPixelSize = { width: number; height: number }
 
 const documentHorizontalScrollColumns = 8
 
@@ -130,6 +131,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const [imageViewerOpen, setImageViewerOpen] = createSignal(false)
   const [imageViewerSelectedIndex, setImageViewerSelectedIndex] = createSignal(0)
   const [terminalCapabilities, setTerminalCapabilities] = createSignal<TerminalCapabilities | null>(renderer.capabilities)
+  const [terminalCellPixels, setTerminalCellPixels] = createSignal<CellPixelSize | null>(null)
   const [treeSitterClient, setTreeSitterClient] = createSignal<TreeSitterClient | undefined>()
   const readerImageRenderables = new Map<string, BoxRenderable>()
   let documentScrollbox: ScrollBoxRenderable | undefined
@@ -205,6 +207,20 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     renderer.on(CliRenderEvents.CAPABILITIES, updateCapabilities)
 
     onCleanup(() => renderer.off(CliRenderEvents.CAPABILITIES, updateCapabilities))
+  })
+
+  createEffect(() => {
+    if (terminalCellPixels()) return
+    if (viewerImageRenderMode() !== "sixel") return
+
+    let cancelled = false
+    void detectTerminalCellPixels(renderer).then((size) => {
+      if (!cancelled && size) setTerminalCellPixels(size)
+    })
+
+    onCleanup(() => {
+      cancelled = true
+    })
   })
 
   let lastImageModeDebugKey = ""
@@ -1073,6 +1089,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
           top={2}
           width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 2 : 8))}
           height={Math.max(10, dimensions().height - 4)}
+          cellPixels={terminalCellPixels()}
           onClose={closeImageViewer}
         />
       </Show>
@@ -1281,17 +1298,18 @@ function ImagePreviewCard(props: { part: Extract<ReaderContentPart, { kind: "ima
   )
 }
 
-export function ImageViewerOverlay(props: { visible: boolean; pageTitle: string; images: ReaderImagePart[]; selectedIndex: number; renderMode: ImageRenderMode; left: number; top: number; width: number; height: number; onClose: () => void }) {
+export function ImageViewerOverlay(props: { visible: boolean; pageTitle: string; images: ReaderImagePart[]; selectedIndex: number; renderMode: ImageRenderMode; left: number; top: number; width: number; height: number; cellPixels?: CellPixelSize | null; onClose: () => void }) {
   const renderer = useRenderer()
   const selectedImage = createMemo(() => props.images[props.selectedIndex] ?? null)
   const loaded = createMemo(() => props.visible && selectedImage() ? loadImagePreview(selectedImage()!.asset) : { status: "error", message: "No image selected." } satisfies ImageLoadResult)
   const image = createMemo(() => imageFromLoadResult(loaded()))
   const fallbackMessage = createMemo(() => messageFromLoadResult(loaded()))
-  const previewHeight = createMemo(() => image() ? imageViewerPreviewHeight(image()!, props.width, props.height) : Math.max(3, props.height - 8))
+  const previewHeight = createMemo(() => image() ? imageViewerPreviewHeight(image()!, props.width, props.height, isNativeImageRenderMode(props.renderMode)) : Math.max(3, props.height - 8))
   let nativePreviewRenderable: BoxRenderable | undefined
   let queuedNativeImage: NativeViewerImage | null = null
   let queuedNativeKey = ""
   let displayedKittyId: number | null = null
+  let displayedNativeArea: NativeImageArea | null = null
   let displayedNativeKey = ""
   let nativeFlushTimer: ReturnType<typeof setTimeout> | undefined
   let lastRenderAfterDebugKey = ""
@@ -1404,6 +1422,7 @@ export function ImageViewerOverlay(props: { visible: boolean; pageTitle: string;
       id: kittyImageId(`viewer:${part.nodeId}:${part.asset?.cachePath ?? part.label}`),
       image: decoded,
       renderable: nativePreviewRenderable,
+      cellPixels: props.cellPixels ?? null,
       columns,
       rows,
     }
@@ -1461,7 +1480,7 @@ export function ImageViewerOverlay(props: { visible: boolean; pageTitle: string;
       return
     }
 
-    if (displayedKittyId !== null) deleteDisplayedKittyImage()
+    clearDisplayedNativeImage()
 
     const command = nativeImageCommandForImage(input)
     const output = `\x1b7\x1b[${row};${column}H${wrapNativeProtocolCommand(command.command)}\x1b8`
@@ -1506,6 +1525,7 @@ export function ImageViewerOverlay(props: { visible: boolean; pageTitle: string;
     } else if (input.mode === "sixel") {
       logImageDebug("sixel_write", { id: input.id, accepted, row, column, columns: input.columns, rows: input.rows, commandBytes: output.length, transfer: command.transfer })
     }
+    displayedNativeArea = nativeEraseArea(input.mode, row, column, input.columns, input.rows, command.width, command.height, input.cellPixels)
     displayedNativeKey = key
   }
 
@@ -1514,16 +1534,32 @@ export function ImageViewerOverlay(props: { visible: boolean; pageTitle: string;
     queuedNativeImage = null
     queuedNativeKey = ""
     displayedNativeKey = ""
-    deleteDisplayedKittyImage()
+    clearDisplayedNativeImage()
+  }
+
+  function clearDisplayedNativeImage() {
+    if (displayedKittyId !== null) deleteDisplayedKittyImage()
+    if (displayedNativeArea) eraseDisplayedNativeArea(displayedNativeArea)
+    displayedNativeArea = null
   }
 
   function deleteDisplayedKittyImage() {
     if (displayedKittyId === null) return
 
     const id = displayedKittyId
-    const accepted = writeRawTerminal(renderer, kittyDeleteImageCommand(id))
+    const accepted = writeRawTerminal(renderer, wrapNativeProtocolCommand(kittyDeleteImageCommand(id)))
     logImageDebug("kitty_delete", { id, accepted })
     displayedKittyId = null
+  }
+
+  function eraseDisplayedNativeArea(area: NativeImageArea) {
+    const blank = " ".repeat(Math.max(1, Math.min(renderer.terminalWidth - area.column + 1, area.columns)))
+    let output = "\x1b7"
+    const rows = Math.max(1, Math.min(renderer.terminalHeight - area.row + 1, area.rows))
+    for (let row = 0; row < rows; row += 1) output += `\x1b[${area.row + row};${area.column}H${blank}`
+    output += "\x1b8"
+    const accepted = writeRawTerminal(renderer, output)
+    logImageDebug("native_erase", { ...area, accepted })
   }
 
   function logViewerRenderAfter(buffer: OptimizedBuffer, decoded: DecodedImage) {
@@ -1599,7 +1635,8 @@ function ImagePreviewFallback(props: { part: Extract<ReaderContentPart, { kind: 
 
 type ImageLoadResult = { status: "ready"; image: DecodedImage } | { status: "error"; message: string }
 type NativeImageRenderMode = Extract<ImageRenderMode, "kitty" | "iterm2" | "sixel">
-type NativeViewerImage = { mode: NativeImageRenderMode; key: string; id: number; image: DecodedImage; asset: MediaAsset | null; renderable: BoxRenderable; columns: number; rows: number }
+type NativeViewerImage = { mode: NativeImageRenderMode; key: string; id: number; image: DecodedImage; asset: MediaAsset | null; renderable: BoxRenderable; cellPixels: CellPixelSize | null; columns: number; rows: number }
+type NativeImageArea = { mode: NativeImageRenderMode; row: number; column: number; columns: number; rows: number }
 type KittyGraphicsCommandCacheEntry = { command: string; width: number; height: number; chunks: number }
 type NativeImageCommandResult = KittyGraphicsCommandCacheEntry & { cached: boolean; transfer: string }
 
@@ -1719,9 +1756,11 @@ function imagePreviewSize(image: DecodedImage, narrow: boolean) {
   return { width, height }
 }
 
-function imageViewerPreviewHeight(image: DecodedImage, overlayWidth: number, overlayHeight: number) {
+function imageViewerPreviewHeight(image: DecodedImage, overlayWidth: number, overlayHeight: number, native: boolean) {
   const maxWidth = Math.max(8, overlayWidth - 6)
   const maxHeight = Math.max(3, overlayHeight - 10)
+  if (native) return maxHeight
+
   const aspectHeight = Math.max(3, Math.round((maxWidth * image.height / image.width) * 0.5))
 
   return Math.min(maxHeight, aspectHeight)
@@ -1775,8 +1814,36 @@ function scaledImageForKitty(image: DecodedImage, columns: number, rows: number)
   return scaledImageForSize(image, Math.min(image.width, Math.max(1, columns * 4)), Math.min(image.height, Math.max(1, rows * 8)))
 }
 
-function scaledImageForSixel(image: DecodedImage, columns: number, rows: number): ScaledImage {
-  return scaledImageForSize(image, Math.min(image.width, Math.max(1, columns * 2)), Math.min(image.height, Math.max(1, rows * 4)))
+function scaledImageForSixel(image: DecodedImage, columns: number, rows: number, cellPixels: CellPixelSize | null): ScaledImage {
+  const cellWidth = sixelCellPixelWidth(cellPixels)
+  const cellHeight = sixelCellPixelHeight(cellPixels)
+  const maxWidth = Math.max(1, columns * cellWidth)
+  const maxHeight = Math.max(1, rows * cellHeight)
+  if (sixelFitMode() === "stretch") return scaledImageForSize(image, maxWidth, maxHeight)
+
+  const scale = Math.min(maxWidth / image.width, maxHeight / image.height)
+  const width = Math.max(1, Math.round(image.width * scale))
+  const height = Math.max(1, Math.round(image.height * scale))
+
+  return scaledImageForSize(image, width, height)
+}
+
+function sixelFitMode() {
+  return process.env.LAZYCONFLUENCE_SIXEL_FIT === "stretch" ? "stretch" : "contain"
+}
+
+function sixelCellPixelWidth(cellPixels: CellPixelSize | null = null) {
+  return positiveIntegerEnv("LAZYCONFLUENCE_SIXEL_CELL_WIDTH", cellPixels?.width ?? 12)
+}
+
+function sixelCellPixelHeight(cellPixels: CellPixelSize | null = null) {
+  return positiveIntegerEnv("LAZYCONFLUENCE_SIXEL_CELL_HEIGHT", cellPixels?.height ?? 24)
+}
+
+function positiveIntegerEnv(name: string, fallback: number) {
+  const value = Number.parseInt(process.env[name] ?? "", 10)
+
+  return Number.isFinite(value) && value > 0 ? value : fallback
 }
 
 function nativeDisplayKey(mode: NativeImageRenderMode, id: number, columns: number, rows: number, image: DecodedImage, asset: MediaAsset | null, renderable: BoxRenderable, renderer: CliRenderer) {
@@ -1792,6 +1859,18 @@ function nativeImageCommandForImage(input: NativeViewerImage): NativeImageComman
   if (input.mode === "iterm2") return iterm2NativeCommandForImage(input)
 
   return sixelNativeCommandForImage(input)
+}
+
+function nativeEraseArea(mode: NativeImageRenderMode, row: number, column: number, columns: number, rows: number, pixelWidth: number, pixelHeight: number, cellPixels: CellPixelSize | null): NativeImageArea {
+  if (mode !== "sixel") return { mode, row, column, columns, rows }
+
+  return {
+    mode,
+    row,
+    column,
+    columns: Math.max(columns, Math.ceil(pixelWidth / sixelCellPixelWidth(cellPixels)) + 2),
+    rows: Math.max(rows, Math.ceil(pixelHeight / sixelCellPixelHeight(cellPixels)) + 2),
+  }
 }
 
 function kittyNativeCommandForImage(input: NativeViewerImage): NativeImageCommandResult {
@@ -1815,7 +1894,7 @@ function iterm2NativeCommandForImage(input: NativeViewerImage): NativeImageComma
 }
 
 function sixelNativeCommandForImage(input: NativeViewerImage): NativeImageCommandResult {
-  const scaled = scaledImageForSixel(input.image, input.columns, input.rows)
+  const scaled = scaledImageForSixel(input.image, input.columns, input.rows, input.cellPixels)
   const command = sixelImageCommand(scaled)
 
   return { command, width: scaled.width, height: scaled.height, chunks: 1, cached: false, transfer: "sixel-indexed" }
@@ -1865,6 +1944,49 @@ function writeRawTerminal(renderer: CliRenderer, value: string) {
   const stdout = (renderer as unknown as { stdout?: NodeJS.WriteStream }).stdout ?? process.stdout
 
   return stdout.write(value)
+}
+
+async function detectTerminalCellPixels(renderer: CliRenderer): Promise<CellPixelSize | null> {
+  const stdin = (renderer as unknown as { stdin?: NodeJS.ReadStream }).stdin ?? process.stdin
+  if (!stdin?.on) return null
+
+  return new Promise((resolve) => {
+    let buffer = ""
+    const timeout = setTimeout(() => {
+      cleanup()
+      logImageDebug("terminal_cell_size", { status: "timeout" })
+      resolve(null)
+    }, 250)
+
+    const cleanup = () => {
+      clearTimeout(timeout)
+      stdin.off("data", onData)
+    }
+    const onData = (chunk: Buffer | string) => {
+      buffer += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : chunk
+      const size = parseTerminalCellPixels(buffer)
+      if (!size) return
+
+      cleanup()
+      logImageDebug("terminal_cell_size", { status: "detected", ...size })
+      resolve(size)
+    }
+
+    stdin.on("data", onData)
+    logImageDebug("terminal_cell_size", { status: "query" })
+    writeRawTerminal(renderer, wrapNativeProtocolCommand("\x1b[16t"))
+  })
+}
+
+export function parseTerminalCellPixels(response: string): CellPixelSize | null {
+  const match = /\x1b\[6;(\d+);(\d+)t/.exec(response)
+  if (!match) return null
+
+  const height = Number.parseInt(match[1], 10)
+  const width = Number.parseInt(match[2], 10)
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null
+
+  return { width, height }
 }
 
 function wrapNativeProtocolCommand(value: string) {

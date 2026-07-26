@@ -4,24 +4,7 @@ export interface SixelImageInput {
   rgba: Uint8Array
 }
 
-const sixelPalette = [
-  [0, 0, 0],
-  [85, 85, 85],
-  [170, 170, 170],
-  [255, 255, 255],
-  [170, 0, 0],
-  [0, 170, 0],
-  [170, 85, 0],
-  [0, 0, 170],
-  [170, 0, 170],
-  [0, 170, 170],
-  [255, 85, 85],
-  [85, 255, 85],
-  [255, 255, 85],
-  [85, 85, 255],
-  [255, 85, 255],
-  [85, 255, 255],
-] as const
+const sixelPalette = createSixelPalette()
 
 export function sixelImageCommand(input: SixelImageInput) {
   const width = Math.max(1, Math.floor(input.width))
@@ -35,7 +18,9 @@ export function sixelImageCommand(input: SixelImageInput) {
   }
 
   for (let y = 0; y < height; y += 6) {
-    for (let color = 0; color < sixelPalette.length; color += 1) {
+    const colors = colorsInBand(indexed, width, height, y)
+    for (let colorIndex = 0; colorIndex < colors.length; colorIndex += 1) {
+      const color = colors[colorIndex]
       let line = `#${color}`
       let runChar = ""
       let runLength = 0
@@ -60,7 +45,7 @@ export function sixelImageCommand(input: SixelImageInput) {
 
       line += encodeRun(runChar, runLength)
       parts.push(line)
-      if (color < sixelPalette.length - 1) parts.push("$")
+      if (colorIndex < colors.length - 1) parts.push("$")
     }
     if (y + 6 < height) parts.push("-")
   }
@@ -79,26 +64,29 @@ function indexedPixels(rgba: Uint8Array, width: number, height: number) {
       continue
     }
 
-    indexed[target] = nearestPaletteColor(rgba[source], rgba[source + 1], rgba[source + 2])
+    indexed[target] = rgbCubePaletteIndex(rgba[source], rgba[source + 1], rgba[source + 2])
   }
 
   return indexed
 }
 
-function nearestPaletteColor(red: number, green: number, blue: number) {
-  let best = 0
-  let bestDistance = Number.POSITIVE_INFINITY
-
-  for (let index = 0; index < sixelPalette.length; index += 1) {
-    const [paletteRed, paletteGreen, paletteBlue] = sixelPalette[index]
-    const distance = (red - paletteRed) ** 2 + (green - paletteGreen) ** 2 + (blue - paletteBlue) ** 2
-    if (distance < bestDistance) {
-      best = index
-      bestDistance = distance
-    }
+function colorsInBand(indexed: Uint8Array, width: number, height: number, y: number) {
+  const used = new Set<number>()
+  for (let bit = 0; bit < 6; bit += 1) {
+    const py = y + bit
+    if (py >= height) continue
+    for (let x = 0; x < width; x += 1) used.add(indexed[py * width + x])
   }
 
-  return best
+  return [...used].sort((left, right) => left - right)
+}
+
+function rgbCubePaletteIndex(red: number, green: number, blue: number) {
+  const r = Math.max(0, Math.min(5, Math.round(red / 51)))
+  const g = Math.max(0, Math.min(5, Math.round(green / 51)))
+  const b = Math.max(0, Math.min(5, Math.round(blue / 51)))
+
+  return 1 + r * 36 + g * 6 + b
 }
 
 function encodeRun(char: string, length: number) {
@@ -110,4 +98,22 @@ function encodeRun(char: string, length: number) {
 
 function toSixelPercent(value: number) {
   return Math.round(value / 255 * 100)
+}
+
+function createSixelPalette() {
+  const palette: Array<readonly [number, number, number]> = [[0, 0, 0]]
+  const steps = [0, 51, 102, 153, 204, 255]
+
+  for (const red of steps) {
+    for (const green of steps) {
+      for (const blue of steps) palette.push([red, green, blue])
+    }
+  }
+
+  for (let index = 0; index < 39; index += 1) {
+    const value = Math.round(index * 255 / 38)
+    palette.push([value, value, value])
+  }
+
+  return palette
 }

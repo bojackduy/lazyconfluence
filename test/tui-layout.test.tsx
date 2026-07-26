@@ -4,7 +4,7 @@ import { dirname, join } from "node:path"
 import { Writable } from "node:stream"
 import { describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
-import { App, ImageViewerOverlay, NewPageOverlay, StagedChangesOverlay, documentHorizontalScrollDeltaForKey, imageRenderModeForCapabilities, nearestImageIndexForViewport, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, type SearchKeyLike } from "../src/tui/app"
+import { App, ImageViewerOverlay, NewPageOverlay, StagedChangesOverlay, documentHorizontalScrollDeltaForKey, imageRenderModeForCapabilities, nearestImageIndexForViewport, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, parseTerminalCellPixels, type SearchKeyLike } from "../src/tui/app"
 import { createLocalConfig } from "../src/config"
 import type { CredentialStatus } from "../src/config"
 import { openIndexRepository } from "../src/index/repository"
@@ -317,6 +317,7 @@ describe("main TUI layout", () => {
         />
       ), { width: 120, height: 36, stdout })
 
+      let destroyed = false
       try {
         await rendered.renderOnce()
         await rendered.flush()
@@ -388,6 +389,7 @@ describe("main TUI layout", () => {
         />
       ), { width: 120, height: 36, stdout })
 
+      let destroyed = false
       try {
         await rendered.renderOnce()
         await rendered.flush()
@@ -401,8 +403,15 @@ describe("main TUI layout", () => {
         expect(rawOutput).toContain("\x1b\\\x1b8")
         expect(rawOutput).not.toContain("\x1bPtmux;\x1b\x1b7")
         expect(rawOutput).not.toContain("\x1b\x1b[1;")
-      } finally {
+
         rendered.renderer.destroy()
+        destroyed = true
+        await waitForTimers()
+
+        const outputAfterClose = writes.join("")
+        expect(outputAfterClose).toContain("\x1bPtmux;\x1b\x1b_Ga=d,d=i")
+      } finally {
+        if (!destroyed) rendered.renderer.destroy()
       }
     } finally {
       restoreEnv("TMUX", previousTmux)
@@ -481,6 +490,9 @@ describe("main TUI layout", () => {
     const stdout = createCaptureStdout(120, 36, writes)
     const previousImageDebug = process.env.LAZYCONFLUENCE_IMAGE_DEBUG
     const previousImageDebugLog = process.env.LAZYCONFLUENCE_IMAGE_DEBUG_LOG
+    const previousSixelCellWidth = process.env.LAZYCONFLUENCE_SIXEL_CELL_WIDTH
+    const previousSixelCellHeight = process.env.LAZYCONFLUENCE_SIXEL_CELL_HEIGHT
+    const previousSixelFit = process.env.LAZYCONFLUENCE_SIXEL_FIT
     const imageAsset: MediaAsset = {
       pageId: "local-home",
       nodeId: "image-node",
@@ -497,6 +509,8 @@ describe("main TUI layout", () => {
       await writeFile(imagePath, Buffer.from(tinyPngBase64, "base64"))
       process.env.LAZYCONFLUENCE_IMAGE_DEBUG = "1"
       process.env.LAZYCONFLUENCE_IMAGE_DEBUG_LOG = logPath
+      process.env.LAZYCONFLUENCE_SIXEL_CELL_WIDTH = "4"
+      process.env.LAZYCONFLUENCE_SIXEL_CELL_HEIGHT = "8"
 
       const rendered = await testRender(() => (
         <ImageViewerOverlay
@@ -513,26 +527,118 @@ describe("main TUI layout", () => {
         />
       ), { width: 120, height: 36, stdout })
 
+      let destroyed = false
       try {
         await rendered.renderOnce()
         await rendered.flush()
         await waitForTimers()
 
         const rawOutput = writes.join("")
-        expect(rawOutput).toContain("\x1bPq")
+        expect(rawOutput).toContain("\x1bPq\"1;1;112;112")
         expect(rawOutput).toContain("\x1b\\")
 
         const events = await readImageDebugEvents(logPath)
         expect(events.map((event) => event.event)).toContain("sixel_write")
-        expect(events.find((event) => event.event === "sixel_write")).toMatchObject({ transfer: "sixel-indexed" })
+        const sixelWrite = events.find((event) => event.event === "sixel_write")
+        expect(sixelWrite).toMatchObject({ transfer: "sixel-indexed" })
+        expect(Number(sixelWrite?.commandBytes)).toBeGreaterThan(2000)
+        expect(events.find((event) => event.event === "native_write")).toMatchObject({ scaledWidth: 112, scaledHeight: 112 })
+
+        rendered.renderer.destroy()
+        destroyed = true
+        await waitForTimers()
+
+        const outputAfterClose = writes.join("")
+        expect(outputAfterClose).toContain("\x1b7")
+        expect(outputAfterClose).toContain("\x1b8")
+        expect(outputAfterClose).toContain("    ")
+        const eventsAfterClose = await readImageDebugEvents(logPath)
+        expect(eventsAfterClose.map((event) => event.event)).toContain("native_erase")
+        expect(eventsAfterClose.find((event) => event.event === "native_erase")).toMatchObject({ columns: 74, rows: 16 })
+      } finally {
+        if (!destroyed) rendered.renderer.destroy()
+      }
+    } finally {
+      restoreEnv("LAZYCONFLUENCE_IMAGE_DEBUG", previousImageDebug)
+      restoreEnv("LAZYCONFLUENCE_IMAGE_DEBUG_LOG", previousImageDebugLog)
+      restoreEnv("LAZYCONFLUENCE_SIXEL_CELL_WIDTH", previousSixelCellWidth)
+      restoreEnv("LAZYCONFLUENCE_SIXEL_CELL_HEIGHT", previousSixelCellHeight)
+      restoreEnv("LAZYCONFLUENCE_SIXEL_FIT", previousSixelFit)
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("image viewer sizes Sixel payloads from detected terminal cell pixels", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lazyconfluence-sixel-detected-viewer-"))
+    const imagePath = join(dir, "system-overview.png")
+    const logPath = join(dir, "image-debug.jsonl")
+    const writes: string[] = []
+    const stdout = createCaptureStdout(120, 36, writes)
+    const previousImageDebug = process.env.LAZYCONFLUENCE_IMAGE_DEBUG
+    const previousImageDebugLog = process.env.LAZYCONFLUENCE_IMAGE_DEBUG_LOG
+    const previousSixelCellWidth = process.env.LAZYCONFLUENCE_SIXEL_CELL_WIDTH
+    const previousSixelCellHeight = process.env.LAZYCONFLUENCE_SIXEL_CELL_HEIGHT
+    const imageAsset: MediaAsset = {
+      pageId: "local-home",
+      nodeId: "image-node",
+      title: "System overview",
+      sourceUrl: null,
+      cachePath: imagePath,
+      contentType: "image/png",
+      width: 1,
+      height: 1,
+      updatedAt: "2026-07-23T12:00:00Z",
+    }
+
+    try {
+      await writeFile(imagePath, Buffer.from(tinyPngBase64, "base64"))
+      process.env.LAZYCONFLUENCE_IMAGE_DEBUG = "1"
+      process.env.LAZYCONFLUENCE_IMAGE_DEBUG_LOG = logPath
+      delete process.env.LAZYCONFLUENCE_SIXEL_CELL_WIDTH
+      delete process.env.LAZYCONFLUENCE_SIXEL_CELL_HEIGHT
+
+      const rendered = await testRender(() => (
+        <ImageViewerOverlay
+          visible
+          pageTitle="Local Engineering Home"
+          images={[{ kind: "image", nodeId: "image-node", label: "System overview", details: "Attachment on this Confluence page.", asset: imageAsset }]}
+          selectedIndex={0}
+          renderMode="sixel"
+          left={2}
+          top={2}
+          width={80}
+          height={24}
+          cellPixels={{ width: 6, height: 10 }}
+          onClose={() => {}}
+        />
+      ), { width: 120, height: 36, stdout })
+
+      try {
+        await rendered.renderOnce()
+        await rendered.flush()
+        await waitForTimers()
+
+        const rawOutput = writes.join("")
+        expect(rawOutput).toContain("\x1bPq\"1;1;140;140")
+        const events = await readImageDebugEvents(logPath)
+        expect(events.find((event) => event.event === "native_write")).toMatchObject({ scaledWidth: 140, scaledHeight: 140 })
       } finally {
         rendered.renderer.destroy()
       }
     } finally {
       restoreEnv("LAZYCONFLUENCE_IMAGE_DEBUG", previousImageDebug)
       restoreEnv("LAZYCONFLUENCE_IMAGE_DEBUG_LOG", previousImageDebugLog)
+      restoreEnv("LAZYCONFLUENCE_SIXEL_CELL_WIDTH", previousSixelCellWidth)
+      restoreEnv("LAZYCONFLUENCE_SIXEL_CELL_HEIGHT", previousSixelCellHeight)
       await rm(dir, { recursive: true, force: true })
     }
+  })
+
+  test("parses terminal cell pixel size responses", () => {
+    expect(parseTerminalCellPixels("\x1b[6;24;12t")).toEqual({ width: 12, height: 24 })
+    expect(parseTerminalCellPixels("noise\x1b[6;19;9tmore")).toEqual({ width: 9, height: 19 })
+    expect(parseTerminalCellPixels("\x1b[6;0;12t")).toBeNull()
+    expect(parseTerminalCellPixels("no response")).toBeNull()
   })
 
   test("image viewer deletes Kitty image between close and reopen", async () => {

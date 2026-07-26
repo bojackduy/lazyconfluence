@@ -68,4 +68,4 @@ export interface SpaceSearchResult {
   matchedIn: "key" | "name" | "sync" | "all"
 }
 
-export type FocusPane = "navigator" | "document"
+export type FocusPane = "navigator" | "document" | "side-rail"

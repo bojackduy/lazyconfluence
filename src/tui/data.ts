@@ -3,7 +3,7 @@ import { applyPageCreateToConfluence, applyPageDeleteToConfluence, applyPageDraf
 import type { FetchLike } from "../confluence/client"
 import { formatMarkdownDiff, readEditableDraftInput, savePageDraft, type EditableDraftInput } from "../editing"
 import { openIndexRepository, type IndexRepository, type PageBodyArtifact, type PageCreate, type PageDelete, type PageDraft, type PageDraftStatus } from "../index/repository"
-import { compareSearchResults, scorePageSearchResult } from "../index/search"
+import { compareSearchResults, pageUrlKey, scorePageSearchResult } from "../index/search"
 import { getDefaultPageId as getDefaultMockPageId, getPagesForSpace as getMockPagesForSpace, getReaderPage as getMockReaderPage, mockPages, mockSpaces, searchPagesInSpace as searchMockPagesInSpace, searchSpaces as searchMockSpaces } from "../mock-data"
 import type { IndexedPage, PageViewMode, ReaderPage, SearchResult, SpaceSearchResult, SpaceSummary } from "../model"
 
@@ -23,6 +23,8 @@ export interface TuiDataSource {
   getEditableDraftInput: (pageId: string) => EditableDraftInput
   getEditablePageInput: (pageId: string) => TuiEditablePageInput
   getPageDraftStatus: (pageId: string) => PageDraftStatus | null
+  getPageById: (pageId: string) => IndexedPage | null
+  getPageByUrl: (url: string) => IndexedPage | null
   getPagesForSpace: (spaceKey: string, view?: PageViewMode) => IndexedPage[]
   getReaderPage: (pageId: string, view?: PageViewMode) => ReaderPage | null
   listStagedDraftChanges: (spaceKey: string) => TuiDraftChange[]
@@ -148,6 +150,14 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
     getEditableDraftInput: (pageId) => readEditableDraftInput(repository, pageId),
     getEditablePageInput: (pageId) => readEditablePageInput(repository, pageId),
     getPageDraftStatus: (pageId) => createIdFromPageId(pageId) || repository.getPageDelete(pageId) ? "staged" : repository.getPageDraft(pageId)?.status ?? null,
+    getPageById: (pageId) => {
+      const createId = createIdFromPageId(pageId)
+      if (!createId) return repository.getPage(pageId)
+
+      const create = repository.getPageCreate(createId)
+      return create ? virtualPageForCreate(repository, create) : null
+    },
+    getPageByUrl: (url) => repository.matchPageUrl(url),
     getPagesForSpace: (spaceKey, view = "current") => listPagesWithCreates(repository, spaceKey, view),
     getReaderPage: (pageId, view = "current") => {
       const createId = createIdFromPageId(pageId)
@@ -291,6 +301,8 @@ export function createMockTuiDataSource(): TuiDataSource {
       return { kind: "update", page: input.page, markdown: input.body.editableMarkdown, draftStatus: null }
     },
     getPageDraftStatus: () => null,
+    getPageById: (pageId) => mockPages.find((page) => page.pageId === pageId) ?? null,
+    getPageByUrl: (url) => mockPages.find((page) => pageUrlKey(page.url) === pageUrlKey(url)) ?? null,
     getPagesForSpace: (spaceKey, view = "current") => view === "archived" ? [] : getMockPagesForSpace(spaceKey),
     getReaderPage: (pageId, view = "current") => pageId === emptyPageId || view === "archived" ? null : getMockReaderPage(pageId),
     listStagedDraftChanges: () => [],

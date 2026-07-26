@@ -1,4 +1,4 @@
-export type CommandContext = "main" | "navigator" | "document" | "page-search" | "document-find" | "space-switcher" | "command-palette" | "new-page" | "editor" | "changes" | "image-viewer" | "help"
+export type CommandContext = "main" | "navigator" | "document" | "side-rail" | "page-search" | "document-find" | "space-switcher" | "command-palette" | "new-page" | "editor" | "changes" | "image-viewer" | "help"
 
 export type CommandGroup = "Global" | "Navigation" | "Reader" | "Editing" | "Images"
 
@@ -61,13 +61,13 @@ export const tuiCommands: readonly TuiCommand[] = [
   command("open-browser", "Open in browser", "Open the selected Confluence page in your browser.", "o", "Global", ["main"], true),
   command("refresh", "Refresh", "Sync configured spaces from Confluence.", "r", "Global", ["main"], false, "Sync runs explicitly from the CLI today."),
   command("go-back", "Go back", "Return to the previous page in navigation history.", "b", "Navigation", ["main"], true),
-  command("focus-next-pane", "Next pane", "Move focus between navigator and document.", "Tab", "Navigation", ["main", "navigator", "document"], true),
-  command("focus-previous-pane", "Previous pane", "Move focus to the previous pane.", "Shift+Tab", "Navigation", ["main", "navigator", "document"], true),
-  command("move-down", "Move down", "Move selection or scroll down.", "j · Down", "Navigation", ["navigator", "document", "changes", "image-viewer", "help"], true),
-  command("move-up", "Move up", "Move selection or scroll up.", "k · Up", "Navigation", ["navigator", "document", "changes", "image-viewer", "help"], true),
-  command("move-left", "Move left", "Collapse a page or scroll document left.", "h · Left", "Navigation", ["navigator", "document"], true),
-  command("move-right", "Move right", "Expand a page or scroll document right.", "l · Right", "Navigation", ["navigator", "document"], true),
-  command("activate", "Activate", "Open the selected item or switch focus.", "Enter", "Navigation", ["navigator", "page-search", "space-switcher", "new-page"], true),
+  command("focus-next-pane", "Next pane", "Move focus between navigator, document, and side rail.", "Tab", "Navigation", ["main", "navigator", "document", "side-rail"], true),
+  command("focus-previous-pane", "Previous pane", "Move focus to the previous pane.", "Shift+Tab", "Navigation", ["main", "navigator", "document", "side-rail"], true),
+  command("move-down", "Move down", "Move selection or scroll down.", "j · Down", "Navigation", ["navigator", "document", "side-rail", "changes", "image-viewer", "help"], true),
+  command("move-up", "Move up", "Move selection or scroll up.", "k · Up", "Navigation", ["navigator", "document", "side-rail", "changes", "image-viewer", "help"], true),
+  command("move-left", "Move left", "Collapse a page, scroll document left, or select Outline.", "h · Left", "Navigation", ["navigator", "document", "side-rail"], true),
+  command("move-right", "Move right", "Expand a page, scroll document right, or activate Related.", "l · Right", "Navigation", ["navigator", "document", "side-rail"], true),
+  command("activate", "Activate", "Open the selected item or switch focus.", "Enter", "Navigation", ["navigator", "side-rail", "page-search", "space-switcher", "new-page"], true),
   command("open-overview", "Overview", "Review staged local changes.", "c", "Editing", ["main"], true),
   command("toggle-page-view", "Current / archived", "Switch navigator content status.", "a", "Reader", ["main"], true),
   command("edit-page", "Edit page", "Edit the selected local page draft.", "e", "Editing", ["main"], true),

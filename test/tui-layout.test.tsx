@@ -4,7 +4,7 @@ import { dirname, join } from "node:path"
 import { Writable } from "node:stream"
 import { describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
-import { App, CommandPaletteOverlay, DocumentFindOverlay, HelpOverlay, ImageViewerOverlay, NewPageOverlay, StagedChangesOverlay, documentHorizontalScrollDeltaForKey, findDocumentMatches, imageRenderModeForCapabilities, nearestImageIndexForViewport, nextDocumentFindIndex, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, parseTerminalCellPixels, searchPaletteCommands, type SearchKeyLike } from "../src/tui/app"
+import { App, CommandPaletteOverlay, DocumentFindOverlay, HelpOverlay, ImageViewerOverlay, NewPageOverlay, StagedChangesOverlay, documentHorizontalScrollDeltaForKey, documentOutlineItems, findDocumentMatches, imageRenderModeForCapabilities, nearestImageIndexForViewport, nextDocumentFindIndex, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, parseTerminalCellPixels, relatedNavigationItemsForPage, searchPaletteCommands, type SearchKeyLike } from "../src/tui/app"
 import { commandsForContext } from "../src/tui/commands"
 import { createLocalConfig } from "../src/config"
 import type { CredentialStatus } from "../src/config"
@@ -12,7 +12,7 @@ import { openIndexRepository } from "../src/index/repository"
 import type { PageBodyArtifact, PageDraft } from "../src/index/repository"
 import { createDevTuiRuntime } from "../src/tui/runtime"
 import { createRepositoryTuiDataSource } from "../src/tui/data"
-import type { IndexedPage, MediaAsset, SpaceSummary } from "../src/model"
+import type { IndexedPage, MediaAsset, ReaderPage, SpaceSummary } from "../src/model"
 
 describe("main TUI layout", () => {
   test("renders navigator and document labels in a headless frame", async () => {
@@ -902,15 +902,41 @@ describe("main TUI layout", () => {
   })
 
 
-  test("focus keys keep h/l document-local and map Tab between panes", () => {
+  test("focus keys keep h/l document-local and cycle all panes", () => {
     expect(nextFocusPaneForKey("navigator", key("tab", "\t"))).toBe("document")
-    expect(nextFocusPaneForKey("document", key("tab", "\t"))).toBe("navigator")
+    expect(nextFocusPaneForKey("document", key("tab", "\t"))).toBe("side-rail")
+    expect(nextFocusPaneForKey("side-rail", key("tab", "\t"))).toBe("navigator")
     expect(nextFocusPaneForKey("document", key("tab", "\x1B[Z", { shift: true }))).toBe("navigator")
-    expect(nextFocusPaneForKey("navigator", key("tab", "\x1B[Z", { shift: true }))).toBe("document")
+    expect(nextFocusPaneForKey("navigator", key("tab", "\x1B[Z", { shift: true }))).toBe("side-rail")
     expect(nextFocusPaneForKey("document", key("h", "h"))).toBe("document")
     expect(nextFocusPaneForKey("document", key("left", "\x1B[D"))).toBe("document")
     expect(nextFocusPaneForKey("navigator", key("l", "l"))).toBe("navigator")
     expect(nextFocusPaneForKey("navigator", key("return", "\r"))).toBe("document")
+  })
+
+  test("projects headings and related links into selectable side-rail items", () => {
+    expect(documentOutlineItems("# Title\n\n## First\ntext\n### Second ##")).toEqual([
+      { title: "First", level: 2, line: 2 },
+      { title: "Second", level: 3, line: 4 },
+    ])
+
+    const page: ReaderPage = {
+      ...indexedPage("current", "Current"),
+      children: [indexedPage("child", "Child")],
+      outgoingLinks: [
+        { fromPageId: "current", targetUrl: "https://example.com", title: "External", kind: "external", targetPageId: null },
+        { fromPageId: "current", targetUrl: "https://example.com/internal", title: "Internal", kind: "internal", targetPageId: "target" },
+      ],
+      backlinks: [{ fromPageId: "source", targetUrl: "https://example.com/current", title: "Current", kind: "internal", targetPageId: "current" }],
+      outline: [],
+    }
+
+    expect(relatedNavigationItemsForPage(page, (pageId) => pageId === "source" ? indexedPage("source", "Source") : null)).toEqual([
+      { kind: "child", label: "Child", pageId: "child" },
+      { kind: "external", label: "External", url: "https://example.com" },
+      { kind: "internal", label: "Internal", pageId: "target" },
+      { kind: "backlink", label: "Source", pageId: "source" },
+    ])
   })
 
   test("a toggles current and archived page views", () => {
@@ -1352,6 +1378,10 @@ const home: IndexedPage = {
   updatedAt: "2026-07-21T09:00:00Z",
   contentMarkdown: "# Local Engineering Home\n\nLocal synced content from SQLite with `inline metadata`.\n\n```ts\nconst answer = 42\n```\n\n| Area | Owner |\n| --- | --- |\n| Sync | Platform |",
   snippet: "Local synced content from SQLite.",
+}
+
+function indexedPage(pageId: string, title: string): IndexedPage {
+  return { ...home, pageId, title }
 }
 
 const homeBody: PageBodyArtifact = {

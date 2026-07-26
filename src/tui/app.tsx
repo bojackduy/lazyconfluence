@@ -23,7 +23,7 @@ import {
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import { decodeImageFile, type DecodedImage } from "../media/image"
 import { openBrowserUrl, type BrowserOpenResult } from "../browser"
-import type { FocusPane, IndexedPage, MediaAsset, PageViewMode, ReaderPage, SearchResult, SpaceSearchResult } from "../model"
+import type { FocusPane, IndexedPage, MediaAsset, PageLink, PageViewMode, ReaderPage, SearchResult, SpaceSearchResult } from "../model"
 import { loadCredentialStatus, type CredentialStatus } from "../config"
 import type { PageDraftStatus } from "../index/repository"
 import type { ApplyPageDraftResult } from "../apply"
@@ -58,6 +58,14 @@ type NavigatorCollapseRow = {
 type ReaderImagePart = Extract<ReaderContentPart, { kind: "image" }>
 type CellPixelSize = { width: number; height: number }
 type NavigationTarget = Pick<NavigationLocation, "spaceKey" | "pageViewMode" | "pageId" | "expandedPageIds"> & { focusPane?: FocusPane }
+type SideRailPanel = "outline" | "related"
+
+export type OutlineNavigationItem = { title: string; level: number; line: number }
+export type RelatedNavigationItem =
+  | { kind: "child"; label: string; pageId: string }
+  | { kind: "internal"; label: string; pageId: string }
+  | { kind: "backlink"; label: string; pageId: string }
+  | { kind: "external"; label: string; url: string }
 
 export type DocumentFindMatch = { line: number; column: number; preview: string }
 
@@ -108,7 +116,9 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
   const [selectedPageId, setSelectedPageId] = createSignal(initialSelectedPageId)
   const [expandedPageIds, setExpandedPageIds] = createSignal(new Set(initialSelectedPageId === emptyPageId ? [] : [initialSelectedPageId]))
   const [navigationHistory, setNavigationHistory] = createSignal<NavigationLocation[]>([])
-  const [focusPane, setFocusPane] = createSignal<"navigator" | "document">("navigator")
+  const [focusPane, setFocusPane] = createSignal<FocusPane>("navigator")
+  const [sideRailPanel, setSideRailPanel] = createSignal<SideRailPanel>("outline")
+  const [sideRailSelectedIndex, setSideRailSelectedIndex] = createSignal(0)
   const [pageSearchOpen, setPageSearchOpen] = createSignal(false)
   const [pageSearchQuery, setPageSearchQuery] = createSignal("")
   const [pageSearchSelectedIndex, setPageSearchSelectedIndex] = createSignal(0)
@@ -192,6 +202,9 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     return dataSource.listStagedChanges(activeSpaceKey())
   })
   const readerImageParts = createMemo(() => readerImagePartsForPage(readerPage()))
+  const outlineNavigationItems = createMemo(() => documentOutlineItems(readerPage().contentMarkdown))
+  const relatedNavigationItems = createMemo(() => relatedNavigationItemsForPage(readerPage(), dataSource.getPageById))
+  const sideRailItems = createMemo(() => sideRailPanel() === "outline" ? outlineNavigationItems() : relatedNavigationItems())
   const inlineImageRenderDecision = createMemo(() => imageRenderModeDecisionForCapabilities(terminalCapabilities()))
   const viewerImageRenderDecision = createMemo(() => imageRenderModeDecisionForCapabilities(terminalCapabilities(), { nativeProtocols: true }))
   const inlineImageRenderMode = createMemo(() => inlineImageRenderDecision().mode)
@@ -372,6 +385,11 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
   })
 
   createEffect(() => {
+    const maxIndex = Math.max(0, sideRailItems().length - 1)
+    if (sideRailSelectedIndex() > maxIndex) setSideRailSelectedIndex(maxIndex)
+  })
+
+  createEffect(() => {
     const changes = stagedChanges()
     const maxIndex = Math.max(0, changes.length - 1)
 
@@ -423,9 +441,12 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
 
   const openSelectedPageInBrowser = () => {
     const page = readerPage()
-    const result = browserOpener(page.url)
+    openUrlInBrowser(page.url, page.title)
+  }
 
-    setEditStatusMessage(result.status === "opened" ? `Opened ${page.title} in your browser.` : result.reason)
+  const openUrlInBrowser = (url: string, label: string) => {
+    const result = browserOpener(url)
+    setEditStatusMessage(result.status === "opened" ? `Opened ${label} in your browser.` : result.reason)
   }
 
   const closeDocumentFind = () => {
@@ -520,6 +541,48 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     setEditStatusMessage(pageExists ? `Returned to ${pageId}.` : "The previous page is no longer available; opened the space default instead.")
   }
 
+  const moveSideRailSelection = (direction: number) => {
+    const items = sideRailItems()
+    if (!items.length) return
+    setSideRailSelectedIndex((current) => Math.max(0, Math.min(items.length - 1, current + direction)))
+  }
+
+  const switchSideRailPanel = (panel: SideRailPanel) => {
+    if (sideRailPanel() === panel) return
+    setSideRailPanel(panel)
+    setSideRailSelectedIndex(0)
+  }
+
+  const activateSideRailItem = () => {
+    if (sideRailPanel() === "outline") {
+      const item = outlineNavigationItems()[sideRailSelectedIndex()]
+      if (!item) return
+      documentScrollbox?.scrollTo(item.line)
+      setFocusPane("document")
+      return
+    }
+
+    const item = relatedNavigationItems()[sideRailSelectedIndex()]
+    if (!item) return
+
+    const page = item.kind === "external" ? dataSource.getPageByUrl(item.url) : dataSource.getPageById(item.pageId)
+    if (!page) {
+      if (item.kind === "external") {
+        openUrlInBrowser(item.url, item.label)
+        return
+      }
+      setEditStatusMessage(`${item.label} is no longer in the local index.`)
+      return
+    }
+
+    navigateToPage({
+      spaceKey: page.spaceKey,
+      pageViewMode: isArchivedPage(page) ? "archived" : "current",
+      pageId: page.pageId,
+      expandedPageIds: [page.pageId],
+    })
+  }
+
   const closePageSearch = () => {
     setPageSearchOpen(false)
     setPageSearchQuery("")
@@ -603,7 +666,8 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     else if (command.id === "edit-page") openEditorForSelectedPage()
     else if (command.id === "open-image-viewer") openImageViewer()
     else if (command.id === "stage-delete") stageDeleteSelectedPage()
-    else if (command.id === "focus-next-pane" || command.id === "focus-previous-pane") setFocusPane((current) => current === "navigator" ? "document" : "navigator")
+    else if (command.id === "focus-next-pane") setFocusPane((current) => current === "navigator" ? "document" : current === "document" ? "side-rail" : "navigator")
+    else if (command.id === "focus-previous-pane") setFocusPane((current) => current === "navigator" ? "side-rail" : current === "side-rail" ? "document" : "navigator")
     else if (command.id === "page-down") scrollDocumentBy(halfPageScrollAmount())
     else if (command.id === "page-up") scrollDocumentBy(-halfPageScrollAmount())
   }
@@ -1273,6 +1337,18 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
       if (horizontalDelta !== 0) scrollDocumentHorizontallyBy(horizontalDelta)
       return
     }
+
+    if (focusPane() === "side-rail") {
+      if (command === "move-down") moveSideRailSelection(1)
+      if (command === "move-up") moveSideRailSelection(-1)
+      if (command === "move-left") switchSideRailPanel("outline")
+      if (command === "move-right") {
+        if (sideRailPanel() === "outline") switchSideRailPanel("related")
+        else activateSideRailItem()
+      }
+      if (command === "activate") activateSideRailItem()
+      return
+    }
   }
 
   useKeyboard(handleKeyPress)
@@ -1283,7 +1359,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
       <Show when={credentialWarning()} fallback={<box height={0} />}>{(status) => <CredentialNotice status={status()} />}</Show>
       <box flexGrow={1} minHeight={0} flexDirection={isNarrow() ? "column" : "row"} paddingX={1}>
         <Navigator rows={treeRows()} selectedPageId={selectedPageId()} focused={focusPane() === "navigator"} viewMode={pageViewMode()} onSetViewMode={switchPageView} />
-        <Reader page={readerPage()} focused={focusPane() === "document"} narrow={isNarrow()} treeSitterClient={treeSitterClient()} imageRenderMode={inlineImageRenderMode()} setDocumentScrollbox={(scrollbox) => { documentScrollbox = scrollbox }} setImageRenderable={setReaderImageRenderable} />
+        <Reader page={readerPage()} focused={focusPane() === "document"} sideRailFocused={focusPane() === "side-rail"} sideRailPanel={sideRailPanel()} sideRailSelectedIndex={sideRailSelectedIndex()} outlineItems={outlineNavigationItems()} relatedItems={relatedNavigationItems()} narrow={isNarrow()} treeSitterClient={treeSitterClient()} imageRenderMode={inlineImageRenderMode()} setDocumentScrollbox={(scrollbox) => { documentScrollbox = scrollbox }} setImageRenderable={setReaderImageRenderable} />
       </box>
       <StatusBar focusPane={focusPane()} editorOpen={editorOpen()} editorDirty={editorDirty()} editMessage={editStatusMessage()} />
       <Show when={editorOpen()} fallback={<box height={0} />}>
@@ -1528,7 +1604,7 @@ function navigatorDocumentKind(row: TreeRow): NavigatorDocumentKind {
   return "page"
 }
 
-function Reader(props: { page: ReaderPage; focused: boolean; narrow: boolean; treeSitterClient?: TreeSitterClient; imageRenderMode: ImageRenderMode; setDocumentScrollbox: (scrollbox: ScrollBoxRenderable) => void; setImageRenderable: (nodeId: string, renderable: BoxRenderable) => void }) {
+function Reader(props: { page: ReaderPage; focused: boolean; sideRailFocused: boolean; sideRailPanel: SideRailPanel; sideRailSelectedIndex: number; outlineItems: OutlineNavigationItem[]; relatedItems: RelatedNavigationItem[]; narrow: boolean; treeSitterClient?: TreeSitterClient; imageRenderMode: ImageRenderMode; setDocumentScrollbox: (scrollbox: ScrollBoxRenderable) => void; setImageRenderable: (nodeId: string, renderable: BoxRenderable) => void }) {
   const renderer = useRenderer()
   const renderCodeBlock = createReadableCodeBlockRenderer(renderer)
   const contentParts = createMemo(() => splitReaderImagePlaceholders(props.page.contentMarkdown, props.page.mediaAssets ?? []))
@@ -1574,7 +1650,7 @@ function Reader(props: { page: ReaderPage; focused: boolean; narrow: boolean; tr
             </box>
           </scrollbox>
         </box>
-        <SideRail page={props.page} narrow={props.narrow} />
+        <SideRail narrow={props.narrow} focused={props.sideRailFocused} panel={props.sideRailPanel} selectedIndex={props.sideRailSelectedIndex} outlineItems={props.outlineItems} relatedItems={props.relatedItems} />
       </box>
     </box>
   )
@@ -2479,24 +2555,50 @@ function readableCodeLanguage(language: string | undefined) {
   return normalized ? `code: ${normalized}` : "code"
 }
 
-function SideRail(props: { page: ReaderPage; narrow: boolean }) {
+function SideRail(props: { narrow: boolean; focused: boolean; panel: SideRailPanel; selectedIndex: number; outlineItems: OutlineNavigationItem[]; relatedItems: RelatedNavigationItem[] }) {
   return (
     <box width={props.narrow ? "100%" : 30} minWidth={props.narrow ? 0 : 24} marginLeft={props.narrow ? 0 : 1} height={props.narrow ? 10 : "100%"} flexDirection="column">
-      <InfoPanel title="OUTLINE" items={props.page.outline} empty="No headings" />
-      <InfoPanel title="RELATED" items={relatedItems(props.page)} empty="No links yet" />
+      <SideRailPanelView panel="outline" title="OUTLINE" empty="No headings" active={props.panel === "outline"} focused={props.focused} selectedIndex={props.selectedIndex} items={props.outlineItems} />
+      <SideRailPanelView panel="related" title="RELATED" empty="No links yet" active={props.panel === "related"} focused={props.focused} selectedIndex={props.selectedIndex} items={props.relatedItems} />
     </box>
   )
 }
 
-function InfoPanel(props: { title: string; items: string[]; empty: string }) {
+function SideRailPanelView(props: { panel: SideRailPanel; title: string; empty: string; active: boolean; focused: boolean; selectedIndex: number; items: Array<OutlineNavigationItem | RelatedNavigationItem> }) {
+  const [scrollbox, setScrollbox] = createSignal<ScrollBoxRenderable>()
+
+  createEffect(() => {
+    const current = scrollbox()
+    if (!props.active || !props.focused || !current || props.selectedIndex < 0 || props.selectedIndex >= props.items.length) return
+    current.scrollChildIntoView(sideRailRowId(props.panel, props.selectedIndex))
+  })
+
   return (
-    <box border borderStyle="single" borderColor={theme.border} paddingX={1} paddingY={1} flexGrow={1} minHeight={0} flexDirection="column">
-      <text height={1} fg={theme.muted} attributes={1}>{props.title}</text>
+    <box border borderStyle="single" borderColor={props.focused && props.active ? theme.borderActive : theme.border} paddingX={1} paddingY={1} flexGrow={1} minHeight={0} flexDirection="column">
+      <text height={1} fg={props.focused && props.active ? theme.accent : theme.muted} attributes={1}>{props.title}</text>
       <Show when={props.items.length > 0} fallback={<text height={1} fg={theme.subtle}>{props.empty}</text>}>
-        <For each={props.items.slice(0, 8)}>{(item) => <text height={1} fg={theme.text}>- {item}</text>}</For>
+        <scrollbox ref={setScrollbox} flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
+          <box flexDirection="column" width="100%">
+            <For each={props.items}>{(item, index) => <SideRailRow id={sideRailRowId(props.panel, index())} item={item} selected={props.focused && props.active && index() === props.selectedIndex} />}</For>
+          </box>
+        </scrollbox>
       </Show>
     </box>
   )
+}
+
+function SideRailRow(props: { id: string; item: OutlineNavigationItem | RelatedNavigationItem; selected: boolean }) {
+  const label = () => "level" in props.item ? `${"  ".repeat(Math.max(0, props.item.level - 2))}${props.item.title}` : relatedNavigationLabel(props.item)
+
+  return (
+    <box id={props.id} height={1} width="100%" backgroundColor={props.selected ? theme.accentSoft : undefined} paddingX={1}>
+      <text height={1} fg={props.selected ? theme.text : theme.muted}>{props.selected ? "▶ " : "  "}{label()}</text>
+    </box>
+  )
+}
+
+function sideRailRowId(panel: SideRailPanel, index: number) {
+  return `side-rail-${panel}-${index}`
 }
 
 function StatusBar(props: { focusPane: string; editorOpen: boolean; editorDirty: boolean; editMessage: string }) {
@@ -2530,6 +2632,14 @@ function statusBarHints(focusPane: string, editorOpen: boolean): StatusHintItem[
     { key: "Tab", label: "panes" },
     { key: "j/k", label: "scroll" },
     { key: "d/u", label: "page" },
+  ]
+
+  if (focusPane === "side-rail") return [
+    { key: "Tab", label: "panes" },
+    { key: "j/k", label: "select" },
+    { key: "h/l", label: "panels" },
+    { key: "Enter", label: "open" },
+    { key: "b", label: "back" },
   ]
 
   return [
@@ -3001,10 +3111,10 @@ function CommandPaletteRow(props: { id: string; command: TuiCommand; selected: b
     <box id={props.id} height={3} width="100%" backgroundColor={props.selected ? theme.accentSoft : undefined} paddingX={1} flexDirection="column">
       <box height={1} flexDirection="row">
         <text height={1} width={24} fg={props.command.available ? theme.good : theme.subtle}>{props.command.keys}</text>
-        <text height={1} fg={color()} attributes={props.command.available ? 1 : 0}>{props.command.label}</text>
+        <text height={1} fg={color()}>{props.command.available ? <b>{props.command.label}</b> : props.command.label}</text>
       </box>
-      <text height={1} fg={props.command.available ? theme.subtle : theme.muted}>  {detail()}</text>
-      <text height={1} fg={theme.muted}>  {props.command.group}</text>
+      <text height={1} fg={props.command.available ? theme.subtle : theme.muted}>{"  " + detail()}</text>
+      <text height={1} fg={theme.muted}>{"  " + props.command.group}</text>
     </box>
   )
 }
@@ -3202,7 +3312,8 @@ export function pageSearchKeyAction(key: SearchKeyLike): PageSearchKeyAction {
 }
 
 export function nextFocusPaneForKey(current: FocusPane, key: SearchKeyLike): FocusPane {
-  if (isShiftTabKey(key) || isTabKey(key)) return current === "navigator" ? "document" : "navigator"
+  if (isShiftTabKey(key)) return current === "navigator" ? "side-rail" : current === "side-rail" ? "document" : "navigator"
+  if (isTabKey(key)) return current === "navigator" ? "document" : current === "document" ? "side-rail" : "navigator"
   if (current === "navigator" && key.name === "return") return "document"
   return current
 }
@@ -3272,12 +3383,33 @@ function diffLineColor(line: string) {
   return theme.text
 }
 
-function relatedItems(page: ReaderPage) {
+export function documentOutlineItems(markdown: string): OutlineNavigationItem[] {
+  return markdown.split("\n").flatMap((line, index) => {
+    const match = /^(#{2,6})\s+(.+?)\s*#*\s*$/.exec(line)
+    if (!match) return []
+
+    return [{ title: match[2], level: match[1].length, line: index }]
+  })
+}
+
+export function relatedNavigationItemsForPage(page: ReaderPage, getPageById: (pageId: string) => IndexedPage | null): RelatedNavigationItem[] {
   return [
-    ...page.children.map((child) => `child: ${child.title}`),
-    ...page.outgoingLinks.map((link) => `${link.kind === "internal" ? "->" : "external"} ${link.title}`),
-    ...page.backlinks.map((link) => `<- ${link.title}`),
+    ...page.children.map((child) => ({ kind: "child" as const, label: child.title, pageId: child.pageId })),
+    ...page.outgoingLinks.map((link) => relatedItemForOutgoingLink(link)),
+    ...page.backlinks.map((link) => ({ kind: "backlink" as const, label: getPageById(link.fromPageId)?.title ?? link.fromPageId, pageId: link.fromPageId })),
   ]
+}
+
+function relatedItemForOutgoingLink(link: PageLink): RelatedNavigationItem {
+  if (link.kind === "internal" && link.targetPageId) return { kind: "internal", label: link.title, pageId: link.targetPageId }
+  return { kind: "external", label: link.title, url: link.targetUrl }
+}
+
+function relatedNavigationLabel(item: RelatedNavigationItem) {
+  if (item.kind === "child") return `child: ${item.label}`
+  if (item.kind === "internal") return `-> ${item.label}`
+  if (item.kind === "backlink") return `<- ${item.label}`
+  return `external: ${item.label}`
 }
 
 export function findDocumentMatches(markdown: string, query: string): DocumentFindMatch[] {

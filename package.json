@@ -47,12 +47,13 @@
     "release:major": "bun run typecheck && bun test && npm version major -m \"major: release %s\" && git push && git push origin $(git describe --tags --abbrev=0)"
   },
   "dependencies": {
-    "@opentui/core": "latest",
-    "@opentui/solid": "latest",
-    "solid-js": "latest"
+    "@opentui/core": "0.4.5",
+    "@opentui/solid": "0.4.5",
+    "jpeg-js": "^0.4.4",
+    "solid-js": "1.9.14"
   },
   "devDependencies": {
-    "@types/bun": "latest",
-    "typescript": "latest"
+    "@types/bun": "1.3.14",
+    "typescript": "7.0.2"
   }
 }

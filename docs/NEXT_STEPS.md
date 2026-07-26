@@ -2,7 +2,7 @@
 
 This is the current execution checklist for `lazyconfluence`. Use it with `docs/TASK_TRACKER.md`; this document answers what to build next, while the tracker records completed work.
 
-Last updated: 2026-07-26
+Last updated: 2026-07-27
 
 ## Current State
 
@@ -11,7 +11,8 @@ Last updated: 2026-07-26
 - [x] Active-space page search and space switcher.
 - [x] Command registry, context-aware keymap, and scrollable Help overlay.
 - [x] Cached PNG inline previews and native image viewer support for Kitty, Ghostty, WezTerm, and configured tmux passthrough.
-- [ ] Document find, command palette, all-space search UI, browser open, navigation history, and navigable related links.
+- [x] Document find, command palette, browser open, navigation history, and navigable related links and outline entries.
+- [ ] All-space search UI.
 - [ ] End-to-end quality and documentation reconciliation.
 
 ## Next Recommended Slice
@@ -65,13 +66,13 @@ Work in this order unless product priorities change. Complete one slice and upda
 - [x] Mark `open-browser` available after tests pass.
 - [x] Mark `go-back` available after tests pass.
 
-### 4. Related Links and Outline Navigation (`l`, `Enter`)
+### 4. Related Links and Outline Navigation - Complete
 
-- [ ] Make child pages, outgoing links, backlinks, and outline entries selectable.
-- [ ] Follow indexed internal targets locally.
-- [ ] Route external URLs to the explicit browser-open action.
-- [ ] Jump outline entries to their document location.
-- [ ] Preserve document-first layout and avoid remote calls.
+- [x] Make child pages, outgoing links, backlinks, and outline entries selectable in the side rail.
+- [x] Follow indexed internal targets locally through the existing history-aware navigator.
+- [x] Route external URLs to the explicit browser-open action.
+- [x] Jump outline entries to their document location.
+- [x] Preserve document-first layout and avoid remote calls.
 
 ### 5. All-Space Page Search
 
@@ -82,7 +83,7 @@ Work in this order unless product priorities change. Complete one slice and upda
 
 ### 6. Media and Image Polish
 
-- [ ] Add JPEG decoding.
+- [x] Add JPEG decoding. Implementation and focused decoder tests are complete; shared workspace verification is pending concurrent TUI changes.
 - [ ] Define an SVG strategy: render safely or show a useful placeholder.
 - [ ] Add media-cache failure diagnostics and an optional cache-maintenance command.
 - [ ] Keep Sixel a fallback/debug path; do not regress Kitty/Ghostty/WezTerm defaults.
@@ -118,4 +119,5 @@ YYYY-MM-DD  Slice  Result  Verification  Next
 2026-07-26  Command Palette scroll  Palette selection now calls `scrollChildIntoView` so arrow/Ctrl navigation keeps the active command visible.  bun run typecheck; bun test test/tui-keymap.test.ts test/tui-layout.test.tsx (48 pass, 0 fail, 288 assertions); git diff --check.  Browser open and navigation history.
 2026-07-26  Browser open  Added cross-platform explicit browser opening for canonical `http`/`https` page URLs: macOS `open`, Linux `xdg-open`, and Windows `cmd.exe start`. `o` and the Command Palette use the same injected launcher.  bun run typecheck; bun test (149 pass, 0 fail, 709 assertions); git diff --check.  Navigation history.
 2026-07-26  Navigation history  Added a bounded in-memory history for Page Search and Space Switcher navigation. `b` restores page, space, view, navigator expansion, and document offsets; missing historic pages safely fall back.  bun run typecheck; bun test (151 pass, 0 fail, 713 assertions); git diff --check.  Related-link navigation.
+2026-07-27  Related links and outline  Added a selectable Related/Outline side rail with a third focus pane. Internal targets navigate locally with history, external links use the explicit browser launcher, and headings scroll to their source line.  bun run typecheck; bun test (156 pass, 0 fail, 727 assertions); git diff --check.  All-space page search.
 ```

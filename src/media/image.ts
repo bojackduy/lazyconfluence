@@ -1,12 +1,13 @@
 import { readFileSync } from "node:fs"
 import { inflateSync } from "node:zlib"
+import { decode as decodeJpegBytes } from "jpeg-js"
 
 export interface DecodedImage {
   width: number
   height: number
   rgba: Uint8Array
   grayscale: Float32Array
-  format: "png"
+  format: "png" | "jpeg"
 }
 
 const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
@@ -15,12 +16,17 @@ export function decodeImageFile(filePath: string): DecodedImage {
   const bytes = readFileSync(filePath)
 
   if (isPng(bytes)) return decodePng(bytes)
+  if (isJpeg(bytes)) return decodeJpeg(bytes)
 
-  throw new Error("Unsupported cached image format. PNG is supported in this preview renderer.")
+  throw new Error("Unsupported cached image format. PNG and JPEG are supported in this preview renderer.")
 }
 
 function isPng(bytes: Uint8Array) {
   return pngSignature.every((byte, index) => bytes[index] === byte)
+}
+
+function isJpeg(bytes: Uint8Array) {
+  return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
 }
 
 function decodePng(bytes: Uint8Array): DecodedImage {
@@ -84,6 +90,23 @@ function decodePng(bytes: Uint8Array): DecodedImage {
   const rgba = rgbaFromPngPixels(unfiltered, width, height, colorType, bytesPerPixel)
 
   return { width, height, rgba, grayscale: grayscaleFromRgba(rgba), format: "png" }
+}
+
+function decodeJpeg(bytes: Uint8Array): DecodedImage {
+  try {
+    const image = decodeJpegBytes(bytes, { useTArray: true, formatAsRGBA: true })
+    const rgba = new Uint8Array(image.data)
+
+    if (!image.width || !image.height || rgba.length !== image.width * image.height * 4) {
+      throw new Error("decoded pixel data is invalid")
+    }
+
+    return { width: image.width, height: image.height, rgba, grayscale: grayscaleFromRgba(rgba), format: "jpeg" }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+
+    throw new Error(`Invalid JPEG: ${message}`)
+  }
 }
 
 function pngBytesPerPixel(colorType: number) {

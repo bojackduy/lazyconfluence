@@ -80,6 +80,7 @@ describe("mock data", () => {
     expect(dataSource.getDefaultPageId("ENG")).toBe("eng-home")
     expect(dataSource.listSpaces().map((space) => space.key)).toEqual(["ENG", "OPS", "ARCH", "PLAT", "TEAM"])
     expect(dataSource.getReaderPage("eng-home")?.contentMarkdown).toContain("Engineering Home")
+    expect(dataSource.searchPagesAcrossSpaces("observability")[0]?.page.spaceKey).toBe("PLAT")
     const architecture = mockPages.find((page) => page.pageId === "architecture")!
     expect(dataSource.getPageByUrl(`${architecture.url}?focusedCommentId=1#details`)?.pageId).toBe("architecture")
     expect(dataSource.getEditablePageInput("eng-home").markdown).toContain("Engineering Home")

@@ -81,12 +81,12 @@ Work in this order unless product priorities change. Complete one slice and upda
 - [x] Keep full-space sync as the CLI `lazyconfluence sync` workflow.
 - [x] Block reload when the selected page has a local draft or staged draft.
 
-### 5. All-Space Page Search
+### 5. All-Space Page Search - Complete
 
-- [ ] Add a separate all-space search lens; do not overload active-space `/`.
-- [ ] Search local SQLite only, including result space and path.
-- [ ] Selecting a result switches active space and opens its page locally.
-- [ ] Keep Current/Archived scope explicit.
+- [x] Add a separate `S` all-space search lens; active-space `/` remains unchanged.
+- [x] Search local SQLite only, including result space and path.
+- [x] Selecting a result switches active space and opens its page locally.
+- [x] Keep Current/Archived scope explicit.
 
 ### 6. Media and Image Polish
 
@@ -128,4 +128,5 @@ YYYY-MM-DD  Slice  Result  Verification  Next
 2026-07-26  Navigation history  Added a bounded in-memory history for Page Search and Space Switcher navigation. `b` restores page, space, view, navigator expansion, and document offsets; missing historic pages safely fall back.  bun run typecheck; bun test (151 pass, 0 fail, 713 assertions); git diff --check.  Related-link navigation.
 2026-07-27  Related links and outline  Added a selectable Related/Outline side rail with a third focus pane. Internal targets navigate locally with history, external links use the explicit browser launcher, and headings scroll to their source line.  bun run typecheck; bun test (156 pass, 0 fail, 727 assertions); git diff --check.  All-space page search.
 2026-07-27  Current-page reload  Added `r` to explicitly fetch and reindex only the selected Confluence page. Reload preserves other local pages, blocks local drafts, and leaves full-space sync in the CLI.  bun run typecheck; bun test (159 pass, 0 fail, 737 assertions); git diff --check.  All-space page search.
+2026-07-27  All-space page search  Added `S` for a separate local-only cross-space search lens. Results show space and path, preserve Current/Archived scope, and open through history-aware local navigation.  bun run typecheck; bun test (162 pass, 0 fail, 746 assertions); git diff --check.  Media and image polish.
 ```

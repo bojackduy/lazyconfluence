@@ -4,7 +4,7 @@ import { dirname, join } from "node:path"
 import { Writable } from "node:stream"
 import { describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
-import { App, CommandPaletteOverlay, DocumentFindOverlay, Header, HelpOverlay, ImageViewerOverlay, NewPageOverlay, StagedChangesOverlay, StatusBar, documentHorizontalScrollDeltaForKey, documentOutlineItems, findDocumentMatches, imageRenderModeForCapabilities, nearestImageIndexForViewport, nextDocumentFindIndex, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, parseTerminalCellPixels, relatedNavigationItemsForPage, searchPaletteCommands, type SearchKeyLike } from "../src/tui/app"
+import { App, CommandPaletteOverlay, DocumentFindOverlay, Header, HelpOverlay, ImageViewerOverlay, NewPageOverlay, PageSearchOverlay, StagedChangesOverlay, StatusBar, documentHorizontalScrollDeltaForKey, documentOutlineItems, findDocumentMatches, imageRenderModeForCapabilities, nearestImageIndexForViewport, nextDocumentFindIndex, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, parseTerminalCellPixels, relatedNavigationItemsForPage, searchPaletteCommands, statusBarHints, type SearchKeyLike } from "../src/tui/app"
 import { commandsForContext } from "../src/tui/commands"
 import { createLocalConfig } from "../src/config"
 import type { CredentialStatus } from "../src/config"
@@ -34,7 +34,7 @@ describe("main TUI layout", () => {
       expect(output).toContain("DOCUMENT")
       expect(output).toContain("j/k move")
       expect(output).toContain("h/l fold")
-      expect(output).toContain("s spaces")
+      expect(output).toContain("S all spaces")
       expect(output).toContain("·")
       expect(output).toContain("Overview 0")
       expect(output).toContain("r reload")
@@ -61,7 +61,7 @@ describe("main TUI layout", () => {
     const rendered = await testRender(() => (
       <box width="100%" height="100%" flexDirection="column">
         <Header page={page} spaceName="Local Engineering" syncState="fresh" draftStatus={null} stagedCount={0} runtimeLabel="PROD local" reloading onOpenOverview={() => {}} />
-        <StatusBar focusPane="navigator" editorOpen={false} editorDirty={false} editMessage="Reloading Local Engineering Home from Confluence..." reloading />
+        <StatusBar focusPane="navigator" editorOpen={false} editorDirty={false} editMessage="Reloading Local Engineering Home from Confluence..." reloading width={120} />
       </box>
     ), { width: 120, height: 10 })
 
@@ -73,6 +73,49 @@ describe("main TUI layout", () => {
       expect(frame).toContain("Reloading Local Engineering Home from Confluence...")
       expect(frame).toContain("r reload")
       expect(frame).toContain("b back")
+    } finally {
+      rendered.renderer.destroy()
+    }
+  })
+
+  test("prioritizes all-space search and pane actions within the footer budget", () => {
+    expect(statusBarHints("navigator", false, 70)).toEqual([
+      { key: "S", label: "all spaces" },
+      { key: "b", label: "back" },
+      { key: "Tab", label: "panes" },
+      { key: "?", label: "help" },
+    ])
+    expect(statusBarHints("document", false, 100).map((hint) => hint.key)).toEqual(["/", "S", "b", "Tab"])
+    expect(statusBarHints("navigator", false, 140, 16).map((hint) => hint.key)).toEqual(["/", "S", "r", "b", "Tab", "j/k", "h/l", "e", "D", "n", "N"])
+    expect(statusBarHints("document", false, 140, 15).map((hint) => hint.key)).toEqual(["/", "S", "r", "b", "Tab", "j/k", "e", "D", "d/u", "i"])
+    expect(statusBarHints("document", false, 120, 40).map((hint) => hint.key)).toEqual(["/", "S", "r", "b", "Tab", "j/k"])
+  })
+
+  test("renders all-space search with each result's space and path", async () => {
+    const rendered = await testRender(() => (
+      <PageSearchOverlay
+        visible
+        query="ops"
+        results={[{ page: otherPage, score: 100, matchedIn: "title" }]}
+        selectedIndex={0}
+        scope="all"
+        activeSpaceName="Local Engineering"
+        viewMode="current"
+        left={2}
+        width={90}
+        height={14}
+        onQueryChange={() => {}}
+        onKeyDown={() => false}
+      />
+    ), { width: 100, height: 18 })
+
+    try {
+      await rendered.renderOnce()
+      const frame = rendered.captureCharFrame()
+
+      expect(frame).toContain("ALL-SPACE SEARCH")
+      expect(frame).toContain("local index · current")
+      expect(frame).toContain("[OPS] Ops Home")
     } finally {
       rendered.renderer.destroy()
     }

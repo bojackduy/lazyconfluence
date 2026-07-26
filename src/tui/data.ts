@@ -34,6 +34,7 @@ export interface TuiDataSource {
   listSpaces: () => SpaceSummary[]
   reloadPage: (pageId: string) => Promise<ReloadTuiPageResult>
   savePageDraft: (pageId: string, draftMarkdown: string) => SaveTuiPageDraftResult
+  searchPagesAcrossSpaces: (query: string, view?: PageViewMode) => SearchResult[]
   searchPagesInSpace: (spaceKey: string, query: string, view?: PageViewMode) => SearchResult[]
   searchSpaces: (query: string) => SpaceSearchResult[]
   stagePageCreate: (input: { spaceKey: string; parentPageId: string | null; title: string }) => TuiCreateChange
@@ -213,6 +214,7 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
       return { status: "reloaded", pageTitle: result.page.title }
     },
     savePageDraft: (pageId, draftMarkdown) => saveTuiPageDraft(repository, pageId, draftMarkdown, now),
+    searchPagesAcrossSpaces: (query, view = "current") => searchPagesAcrossSpacesWithCreates(repository, query, 20, view),
     searchPagesInSpace: (spaceKey, query, view = "current") => searchPagesWithCreates(repository, spaceKey, query, 20, view),
     searchSpaces: (query) => searchSpaces(repository.listSpaces(), query),
     stagePageCreate: (input) => {
@@ -326,6 +328,7 @@ export function createMockTuiDataSource(): TuiDataSource {
     listSpaces: () => mockSpaces,
     reloadPage: async (pageId) => ({ status: "blocked", pageTitle: mockPageTitle(pageId), reason: "demo-mode" }),
     savePageDraft: (pageId) => ({ status: "unchanged", pageTitle: mockPageTitle(pageId) }),
+    searchPagesAcrossSpaces: (query, view = "current") => view === "archived" ? [] : mockPages.map((page) => scorePageSearchResult(page, query)).filter((result): result is SearchResult => result !== null).sort(compareSearchResults),
     searchPagesInSpace: (spaceKey, query, view = "current") => view === "archived" ? [] : searchMockPagesInSpace(spaceKey, query),
     searchSpaces: (query) => searchMockSpaces(query),
     stagePageCreate: () => {
@@ -481,6 +484,27 @@ function searchPagesWithCreates(repository: IndexRepository, spaceKey: string, q
     const result = scorePageSearchResult(page, query)
     if (!result) continue
 
+    byPageId.set(page.pageId, { ...result, score: result.score + 5 })
+  }
+
+  return [...byPageId.values()].sort(compareSearchResults).slice(0, limit)
+}
+
+function searchPagesAcrossSpacesWithCreates(repository: IndexRepository, query: string, limit: number, view: PageViewMode = "current"): SearchResult[] {
+  const byPageId = new Map<string, SearchResult>()
+
+  for (const result of repository.searchPagesAcrossSpaces(query, limit, view)) {
+    byPageId.set(result.page.pageId, result)
+  }
+
+  if (view !== "current") return [...byPageId.values()].sort(compareSearchResults).slice(0, limit)
+
+  for (const create of repository.listPageCreates()) {
+    const page = virtualPageForCreate(repository, create)
+    if (!page) continue
+
+    const result = scorePageSearchResult(page, query)
+    if (!result) continue
     byPageId.set(page.pageId, { ...result, score: result.score + 5 })
   }
 

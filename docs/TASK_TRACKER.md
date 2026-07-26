@@ -137,6 +137,9 @@ YYYY-MM-DD  ID  Result  Verification  Follow-up
 2026-07-27  reload-feedback  Prioritized `r` reload and `b` back in the compact reader footer, and added a visible `RELOADING` header badge plus footer progress state while page refresh is in flight.  bun run typecheck; bun test (160 pass, 0 fail, 738 assertions); git diff --check.  Next: all-space page search.
 2026-07-27  configured-default-space  Production TUI startup now prefers the configured `defaultSpaceKey` when it has locally indexed content, rather than taking the database’s alphabetical first space.  bun run typecheck; bun test (161 pass, 0 fail, 740 assertions); git diff --check.  Next: all-space page search.
 2026-07-27  outline-related-focus  Split Outline and Related into distinct Tab focus stops. `h/l` now moves directly between their panels while `Enter` jumps to headings or opens the selected link.  bun run typecheck; bun test (161 pass, 0 fail, 741 assertions); git diff --check.  Next: all-space page search.
+2026-07-27  all-space-search  Added `S` all-space page search using only the local index. Results show space/path, follow Current/Archived scope, and switch spaces through history-aware local navigation.  bun run typecheck; bun test (162 pass, 0 fail, 746 assertions); git diff --check.  Next: media and image polish.
+2026-07-27  adaptive-footer-hints  Made reader footer shortcuts width-aware: narrow terminals prioritize all-space search, back, panes, and help; wide terminals add reload and pane-local controls.  bun run typecheck; bun test (163 pass, 0 fail, 749 assertions); git diff --check.  Next: media and image polish.
+2026-07-27  footer-action-budget  Footer hints now reserve space for the current status message and add pane edit/delete controls before secondary actions when width permits.  bun run typecheck; bun test (163 pass, 0 fail, 751 assertions); git diff --check.  Next: media and image polish.
 ```
 
 ## Contract Changes

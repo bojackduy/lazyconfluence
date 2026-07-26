@@ -121,6 +121,9 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
   const [pageSearchOpen, setPageSearchOpen] = createSignal(false)
   const [pageSearchQuery, setPageSearchQuery] = createSignal("")
   const [pageSearchSelectedIndex, setPageSearchSelectedIndex] = createSignal(0)
+  const [allSpaceSearchOpen, setAllSpaceSearchOpen] = createSignal(false)
+  const [allSpaceSearchQuery, setAllSpaceSearchQuery] = createSignal("")
+  const [allSpaceSearchSelectedIndex, setAllSpaceSearchSelectedIndex] = createSignal(0)
   const [documentFindOpen, setDocumentFindOpen] = createSignal(false)
   const [documentFindQuery, setDocumentFindQuery] = createSignal("")
   const [documentFindSelectedIndex, setDocumentFindSelectedIndex] = createSignal(0)
@@ -193,6 +196,10 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
   const pageSearchResults = createMemo(() => {
     draftRevision()
     return dataSource.searchPagesInSpace(activeSpaceKey(), pageSearchQuery(), pageViewMode())
+  })
+  const allSpaceSearchResults = createMemo(() => {
+    draftRevision()
+    return dataSource.searchPagesAcrossSpaces(allSpaceSearchQuery(), pageViewMode())
   })
   const documentFindMatches = createMemo(() => findDocumentMatches(readerPage().contentMarkdown, documentFindQuery()))
   const spaceSwitcherResults = createMemo(() => dataSource.searchSpaces(spaceSwitcherQuery()))
@@ -378,6 +385,12 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
   })
 
   createEffect(() => {
+    const maxIndex = Math.max(0, allSpaceSearchResults().length - 1)
+
+    if (allSpaceSearchSelectedIndex() > maxIndex) setAllSpaceSearchSelectedIndex(maxIndex)
+  })
+
+  createEffect(() => {
     const maxIndex = Math.max(0, spaceSwitcherResults().length - 1)
 
     if (spaceSwitcherSelectedIndex() > maxIndex) setSpaceSwitcherSelectedIndex(maxIndex)
@@ -417,6 +430,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
 
   const openPageSearch = () => {
     setDocumentFindOpen(false)
+    setAllSpaceSearchOpen(false)
     setSpaceSwitcherOpen(false)
     setCommandPaletteOpen(false)
     setChangesOpen(false)
@@ -426,8 +440,21 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     setPageSearchSelectedIndex(0)
   }
 
+  const openAllSpaceSearch = () => {
+    setDocumentFindOpen(false)
+    setPageSearchOpen(false)
+    setSpaceSwitcherOpen(false)
+    setCommandPaletteOpen(false)
+    setChangesOpen(false)
+    setNewPageOpen(false)
+    setAllSpaceSearchOpen(true)
+    setAllSpaceSearchQuery("")
+    setAllSpaceSearchSelectedIndex(0)
+  }
+
   const openDocumentFind = () => {
     setPageSearchOpen(false)
+    setAllSpaceSearchOpen(false)
     setSpaceSwitcherOpen(false)
     setCommandPaletteOpen(false)
     setChangesOpen(false)
@@ -588,6 +615,12 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     setPageSearchSelectedIndex(0)
   }
 
+  const closeAllSpaceSearch = () => {
+    setAllSpaceSearchOpen(false)
+    setAllSpaceSearchQuery("")
+    setAllSpaceSearchSelectedIndex(0)
+  }
+
   const handlePageSearchInputKey = (key: SearchKeyLike) => {
     const action = pageSearchKeyAction(key)
 
@@ -599,8 +632,20 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     return action === "close" || action === "submit" || action === "next" || action === "previous"
   }
 
+  const handleAllSpaceSearchInputKey = (key: SearchKeyLike) => {
+    const action = pageSearchKeyAction(key)
+
+    if (action === "close") closeAllSpaceSearch()
+    else if (action === "submit") selectAllSpaceSearchResult()
+    else if (action === "next") moveAllSpaceSearchSelection(1)
+    else if (action === "previous") moveAllSpaceSearchSelection(-1)
+
+    return action === "close" || action === "submit" || action === "next" || action === "previous"
+  }
+
   const openSpaceSwitcher = () => {
     setPageSearchOpen(false)
+    setAllSpaceSearchOpen(false)
     setChangesOpen(false)
     setNewPageOpen(false)
     setCommandPaletteOpen(false)
@@ -617,6 +662,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
 
   const openCommandPalette = () => {
     setPageSearchOpen(false)
+    setAllSpaceSearchOpen(false)
     setDocumentFindOpen(false)
     setSpaceSwitcherOpen(false)
     setChangesOpen(false)
@@ -656,6 +702,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     else if (command.id === "show-help") setHelpOpen(true)
     else if (command.id === "open-command-palette") openCommandPalette()
     else if (command.id === "open-page-search") openPageSearch()
+    else if (command.id === "open-all-space-search") openAllSpaceSearch()
     else if (command.id === "open-document-find") openDocumentFind()
     else if (command.id === "open-space-switcher") openSpaceSwitcher()
     else if (command.id === "open-browser") openSelectedPageInBrowser()
@@ -695,6 +742,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
 
   const openChanges = (focusChangeKey?: string) => {
     setPageSearchOpen(false)
+    setAllSpaceSearchOpen(false)
     setNewPageOpen(false)
     setSpaceSwitcherOpen(false)
     setImageViewerOpen(false)
@@ -869,6 +917,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
 
   const openNewPageWithParent = (parentPageId: string | null) => {
     setPageSearchOpen(false)
+    setAllSpaceSearchOpen(false)
     setSpaceSwitcherOpen(false)
     setChangesOpen(false)
     setImageViewerOpen(false)
@@ -914,8 +963,25 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     closePageSearch()
   }
 
+  const selectAllSpaceSearchResult = () => {
+    const result = allSpaceSearchResults()[allSpaceSearchSelectedIndex()]
+
+    if (!result) return
+    navigateToPage({
+      spaceKey: result.page.spaceKey,
+      pageViewMode: pageViewMode(),
+      pageId: result.page.pageId,
+      expandedPageIds: [result.page.pageId],
+    })
+    closeAllSpaceSearch()
+  }
+
   const movePageSearchSelection = (direction: number) => {
     setPageSearchSelectedIndex((current) => Math.max(0, Math.min(pageSearchResults().length - 1, current + direction)))
+  }
+
+  const moveAllSpaceSearchSelection = (direction: number) => {
+    setAllSpaceSearchSelectedIndex((current) => Math.max(0, Math.min(allSpaceSearchResults().length - 1, current + direction)))
   }
 
   const selectSpaceSwitcherResult = () => {
@@ -1000,6 +1066,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     }
 
     setPageSearchOpen(false)
+    setAllSpaceSearchOpen(false)
     setSpaceSwitcherOpen(false)
     setChangesOpen(false)
     setNewPageOpen(false)
@@ -1065,6 +1132,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     if (editorOpen()) return "editor"
     if (documentFindOpen()) return "document-find"
     if (pageSearchOpen()) return "page-search"
+    if (allSpaceSearchOpen()) return "all-space-search"
     if (spaceSwitcherOpen()) return "space-switcher"
     if (commandPaletteOpen()) return "command-palette"
     if (resolveKeyCommand(key, focusPane())) return "command"
@@ -1240,6 +1308,11 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
       return
     }
 
+    if (allSpaceSearchOpen()) {
+      handleAllSpaceSearchInputKey(key)
+      return
+    }
+
     if (spaceSwitcherOpen()) {
       handleSpaceSwitcherInputKey(key)
       return
@@ -1290,6 +1363,11 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
 
     if (command === "open-page-search") {
       openPageSearch()
+      return
+    }
+
+    if (command === "open-all-space-search") {
+      openAllSpaceSearch()
       return
     }
 
@@ -1391,7 +1469,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
         <Navigator rows={treeRows()} selectedPageId={selectedPageId()} focused={focusPane() === "navigator"} viewMode={pageViewMode()} onSetViewMode={switchPageView} />
         <Reader page={readerPage()} focused={focusPane() === "document"} focusedSideRailPanel={focusPane() === "outline" ? "outline" : focusPane() === "related" ? "related" : null} sideRailSelectedIndex={sideRailSelectedIndex()} outlineItems={outlineNavigationItems()} relatedItems={relatedNavigationItems()} narrow={isNarrow()} treeSitterClient={treeSitterClient()} imageRenderMode={inlineImageRenderMode()} setDocumentScrollbox={(scrollbox) => { documentScrollbox = scrollbox }} setImageRenderable={setReaderImageRenderable} />
       </box>
-      <StatusBar focusPane={focusPane()} editorOpen={editorOpen()} editorDirty={editorDirty()} editMessage={editStatusMessage()} reloading={pageReloading()} />
+      <StatusBar focusPane={focusPane()} editorOpen={editorOpen()} editorDirty={editorDirty()} editMessage={editStatusMessage()} reloading={pageReloading()} width={dimensions().width} />
       <Show when={editorOpen()} fallback={<box height={0} />}>
         <EditorOverlay
           pageTitle={editorPageTitle()}
@@ -1437,6 +1515,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
         query={pageSearchQuery()}
         results={pageSearchResults()}
         selectedIndex={pageSearchSelectedIndex()}
+        scope="active"
         activeSpaceName={space().name}
         viewMode={pageViewMode()}
         left={dimensions().width < 72 ? 2 : 8}
@@ -1444,6 +1523,20 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
         height={Math.min(18, Math.max(10, dimensions().height - 8))}
         onQueryChange={setPageSearchQuery}
         onKeyDown={handlePageSearchInputKey}
+      />
+      <PageSearchOverlay
+        visible={allSpaceSearchOpen()}
+        query={allSpaceSearchQuery()}
+        results={allSpaceSearchResults()}
+        selectedIndex={allSpaceSearchSelectedIndex()}
+        scope="all"
+        activeSpaceName={space().name}
+        viewMode={pageViewMode()}
+        left={dimensions().width < 72 ? 2 : 8}
+        width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 4 : 16))}
+        height={Math.min(18, Math.max(10, dimensions().height - 8))}
+        onQueryChange={setAllSpaceSearchQuery}
+        onKeyDown={handleAllSpaceSearchInputKey}
       />
       <DocumentFindOverlay
         visible={documentFindOpen()}
@@ -2634,13 +2727,13 @@ function sideRailRowId(panel: SideRailPanel, index: number) {
   return `side-rail-${panel}-${index}`
 }
 
-export function StatusBar(props: { focusPane: string; editorOpen: boolean; editorDirty: boolean; editMessage: string; reloading: boolean }) {
-  const hints = () => statusBarHints(props.focusPane, props.editorOpen)
+export function StatusBar(props: { focusPane: string; editorOpen: boolean; editorDirty: boolean; editMessage: string; reloading: boolean; width: number }) {
   const status = () => {
     if (props.editorOpen) return props.editMessage || `editing transient buffer: ${props.editorDirty ? "modified" : "unchanged"}`
     if (props.reloading) return props.editMessage || "Reloading current page from Confluence..."
     return props.editMessage ? props.editMessage : `focus: ${props.focusPane}`
   }
+  const hints = () => statusBarHints(props.focusPane, props.editorOpen, props.width, status().length)
 
   return (
     <box height={1} backgroundColor={theme.accentSoft} paddingX={1} flexDirection="row" justifyContent="space-between">
@@ -2654,44 +2747,46 @@ export function StatusBar(props: { focusPane: string; editorOpen: boolean; edito
 
 type StatusHintItem = { key: string; label: string }
 
-function statusBarHints(focusPane: string, editorOpen: boolean): StatusHintItem[] {
+export function statusBarHints(focusPane: string, editorOpen: boolean, width: number, statusWidth = 0): StatusHintItem[] {
   if (editorOpen) return [{ key: "Ctrl+T", label: "stage" }, { key: "Esc", label: "close" }]
-  if (focusPane === "document") return [
+  if (width < 80) return [
+    { key: "S", label: "all spaces" },
+    { key: "b", label: "back" },
+    { key: "Tab", label: "panes" },
+    { key: "?", label: "help" },
+  ]
+
+  const globalHints: StatusHintItem[] = [
     { key: "/", label: "search" },
-    { key: "r", label: "reload" },
+    { key: "S", label: "all spaces" },
     { key: "b", label: "back" },
     { key: "Tab", label: "panes" },
-    { key: "j/k", label: "scroll" },
-    { key: "d/u", label: "page" },
   ]
+  if (width < 110) return globalHints
 
-  if (focusPane === "outline") return [
-    { key: "Tab", label: "panes" },
-    { key: "j/k", label: "select" },
-    { key: "h/l", label: "related" },
-    { key: "Enter", label: "jump" },
-    { key: "b", label: "back" },
-    { key: "r", label: "reload" },
-  ]
+  const paneHints: StatusHintItem[] = focusPane === "document"
+    ? [{ key: "j/k", label: "scroll" }, { key: "e", label: "edit" }, { key: "D", label: "delete" }, { key: "d/u", label: "page" }, { key: "i", label: "image" }]
+    : focusPane === "outline"
+      ? [{ key: "j/k", label: "select" }, { key: "h/l", label: "related" }, { key: "e", label: "edit" }, { key: "D", label: "delete" }, { key: "Enter", label: "jump" }]
+      : focusPane === "related"
+        ? [{ key: "j/k", label: "select" }, { key: "h/l", label: "outline" }, { key: "e", label: "edit" }, { key: "D", label: "delete" }, { key: "Enter", label: "open" }]
+        : [{ key: "j/k", label: "move" }, { key: "h/l", label: "fold" }, { key: "e", label: "edit" }, { key: "D", label: "delete" }, { key: "n", label: "child" }, { key: "N", label: "root" }]
 
-  if (focusPane === "related") return [
-    { key: "Tab", label: "panes" },
-    { key: "j/k", label: "select" },
-    { key: "h/l", label: "outline" },
-    { key: "Enter", label: "open" },
-    { key: "b", label: "back" },
-    { key: "r", label: "reload" },
-  ]
+  return hintsWithinWidth([...globalHints.slice(0, 2), { key: "r", label: "reload" }, ...globalHints.slice(2), ...paneHints], width - statusWidth - 3)
+}
 
-  return [
-    { key: "/", label: "search" },
-    { key: "s", label: "spaces" },
-    { key: "r", label: "reload" },
-    { key: "b", label: "back" },
-    { key: "Tab", label: "panes" },
-    { key: "j/k", label: "move" },
-    { key: "h/l", label: "fold" },
-  ]
+function hintsWithinWidth(hints: StatusHintItem[], width: number) {
+  const visible: StatusHintItem[] = []
+  let used = 0
+
+  for (const hint of hints) {
+    const hintWidth = hint.key.length + hint.label.length + 4
+    if (used + hintWidth > width) break
+    visible.push(hint)
+    used += hintWidth
+  }
+
+  return visible
 }
 
 function StatusHint(props: { hint: StatusHintItem }) {
@@ -2930,7 +3025,7 @@ export function NewPageOverlay(props: { visible: boolean; title: string; parentP
   )
 }
 
-function PageSearchOverlay(props: { visible: boolean; query: string; results: SearchResult[]; selectedIndex: number; activeSpaceName: string; viewMode: PageViewMode; left: number; width: number; height: number; onQueryChange: (query: string) => void; onKeyDown: (key: SearchKeyLike) => boolean }) {
+export function PageSearchOverlay(props: { visible: boolean; query: string; results: SearchResult[]; selectedIndex: number; scope: "active" | "all"; activeSpaceName: string; viewMode: PageViewMode; left: number; width: number; height: number; onQueryChange: (query: string) => void; onKeyDown: (key: SearchKeyLike) => boolean }) {
   return (
     <box
       visible={props.visible}
@@ -2949,17 +3044,17 @@ function PageSearchOverlay(props: { visible: boolean; query: string; results: Se
       zIndex={20}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.accent}><b>PAGE SEARCH</b></text>
-        <text height={1} fg={theme.muted}>{props.activeSpaceName} · {props.viewMode}</text>
+        <text height={1} fg={theme.accent}><b>{props.scope === "all" ? "ALL-SPACE SEARCH" : "PAGE SEARCH"}</b></text>
+        <text height={1} fg={theme.muted}>{props.scope === "all" ? `local index · ${props.viewMode}` : `${props.activeSpaceName} · ${props.viewMode}`}</text>
       </box>
-      <SearchInput visible={props.visible} prefix="/" value={props.query} placeholder="type title, path, or content" onInput={props.onQueryChange} onKeyDown={props.onKeyDown} />
+      <SearchInput visible={props.visible} prefix={props.scope === "all" ? "S" : "/"} value={props.query} placeholder="type title, path, or content" onInput={props.onQueryChange} onKeyDown={props.onKeyDown} />
       <text height={1} fg={theme.subtle}>{props.results.length} result{props.results.length === 1 ? "" : "s"}  type to search  up/down move  enter open  esc close</text>
       <box height={1} />
       <Show when={props.results.length > 0} fallback={<EmptySearchState query={props.query} />}>
         <scrollbox flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
           <box flexDirection="column" width="100%">
             <For each={props.results.slice(0, 8)}>
-              {(result, index) => <SearchResultRow result={result} selected={index() === props.selectedIndex} />}
+              {(result, index) => <SearchResultRow result={result} selected={index() === props.selectedIndex} showSpace={props.scope === "all"} />}
             </For>
           </box>
         </scrollbox>
@@ -3228,13 +3323,13 @@ function HelpCommandRow(props: { command: TuiCommand }) {
   )
 }
 
-function SearchResultRow(props: { result: SearchResult; selected: boolean }) {
+function SearchResultRow(props: { result: SearchResult; selected: boolean; showSpace?: boolean }) {
   const marker = () => (props.selected ? "▶" : " ")
 
   return (
     <box height={3} width="100%" backgroundColor={props.selected ? theme.accentSoft : undefined} paddingX={1} flexDirection="column">
       <text height={1} fg={props.selected ? theme.text : theme.muted}>{marker() + " " + props.result.page.title + "  ·  " + props.result.matchedIn}</text>
-      <text height={1} fg={theme.subtle}>{"  " + props.result.page.path.join(" / ")}</text>
+      <text height={1} fg={theme.subtle}>{"  " + (props.showSpace ? `[${props.result.page.spaceKey}] ` : "") + props.result.page.path.join(" / ")}</text>
       <text height={1} fg={theme.muted}>{"  " + props.result.page.snippet}</text>
     </box>
   )

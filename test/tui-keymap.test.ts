@@ -12,6 +12,7 @@ describe("TUI command registry", () => {
       "quit",
       "show-help",
       "open-page-search",
+      "open-all-space-search",
       "open-document-find",
       "open-space-switcher",
       "open-command-palette",
@@ -41,6 +42,7 @@ describe("context-aware key resolution", () => {
   test("resolves main reader commands", () => {
     expect(resolveKeyCommand(key("?"), "navigator")).toBe("show-help")
     expect(resolveKeyCommand(key("/"), "document")).toBe("open-page-search")
+    expect(resolveKeyCommand(key("S"), "document")).toBe("open-all-space-search")
     expect(resolveKeyCommand(key("s"), "navigator")).toBe("open-space-switcher")
     expect(resolveKeyCommand(key("p"), "document")).toBe("open-command-palette")
     expect(resolveKeyCommand(key("f"), "document")).toBe("open-document-find")

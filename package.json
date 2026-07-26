@@ -40,11 +40,11 @@
     "start:prod": "bun run src/main.tsx prod",
     "build": "bun build src/main.tsx --target=bun --packages=external --outdir=dist",
     "typecheck": "tsc --noEmit",
-    "test": "bun test",
+    "test": "bun --conditions=browser test",
     "lint": "bun run typecheck",
-    "release:patch": "bun run typecheck && bun test && npm version patch -m \"chore: release %s\" && git push && git push origin $(git describe --tags --abbrev=0)",
-    "release:minor": "bun run typecheck && bun test && npm version minor -m \"minor: release %s\" && git push && git push origin $(git describe --tags --abbrev=0)",
-    "release:major": "bun run typecheck && bun test && npm version major -m \"major: release %s\" && git push && git push origin $(git describe --tags --abbrev=0)"
+    "release:patch": "bun run typecheck && bun run test && npm version patch -m \"chore: release %s\" && git push && git push origin $(git describe --tags --abbrev=0)",
+    "release:minor": "bun run typecheck && bun run test && npm version minor -m \"minor: release %s\" && git push && git push origin $(git describe --tags --abbrev=0)",
+    "release:major": "bun run typecheck && bun run test && npm version major -m \"major: release %s\" && git push && git push origin $(git describe --tags --abbrev=0)"
   },
   "dependencies": {
     "@opentui/core": "0.4.5",

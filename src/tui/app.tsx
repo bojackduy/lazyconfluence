@@ -419,6 +419,16 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     setDocumentFindSelectedIndex((current) => nextDocumentFindIndex(current, direction, matches.length))
   }
 
+  const handleDocumentFindInputKey = (key: SearchKeyLike) => {
+    const command = resolveKeyCommand(key, "document-find")
+
+    if (command === "close-overlay") closeDocumentFind()
+    else if (command === "search-next") moveDocumentFindSelection(1)
+    else if (command === "search-previous") moveDocumentFindSelection(-1)
+
+    return command === "close-overlay" || command === "search-next" || command === "search-previous"
+  }
+
   const switchPageView = (view: PageViewMode) => {
     if (pageViewMode() === view) return
 
@@ -441,6 +451,17 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     setPageSearchSelectedIndex(0)
   }
 
+  const handlePageSearchInputKey = (key: SearchKeyLike) => {
+    const action = pageSearchKeyAction(key)
+
+    if (action === "close") closePageSearch()
+    else if (action === "submit") selectPageSearchResult()
+    else if (action === "next") movePageSearchSelection(1)
+    else if (action === "previous") movePageSearchSelection(-1)
+
+    return action === "close" || action === "submit" || action === "next" || action === "previous"
+  }
+
   const openSpaceSwitcher = () => {
     setPageSearchOpen(false)
     setChangesOpen(false)
@@ -454,6 +475,17 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     setSpaceSwitcherOpen(false)
     setSpaceSwitcherQuery("")
     setSpaceSwitcherSelectedIndex(0)
+  }
+
+  const handleSpaceSwitcherInputKey = (key: SearchKeyLike) => {
+    const action = pageSearchKeyAction(key)
+
+    if (action === "close") closeSpaceSwitcher()
+    else if (action === "submit") selectSpaceSwitcherResult()
+    else if (action === "next") moveSpaceSwitcherSelection(1)
+    else if (action === "previous") moveSpaceSwitcherSelection(-1)
+
+    return action === "close" || action === "submit" || action === "next" || action === "previous"
   }
 
   const openChanges = (focusChangeKey?: string) => {
@@ -958,38 +990,17 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     }
 
     if (documentFindOpen()) {
-      const command = resolveKeyCommand(key, "document-find")
-      const action = pageSearchKeyAction(key)
-
-      if (command === "close-overlay") closeDocumentFind()
-      else if (command === "search-next") moveDocumentFindSelection(1)
-      else if (command === "search-previous") moveDocumentFindSelection(-1)
-      else if (command === "input-delete") updateDocumentFindQuery(documentFindQuery().slice(0, -1))
-      else if (action === "append") updateDocumentFindQuery(documentFindQuery() + key.sequence)
+      handleDocumentFindInputKey(key)
       return
     }
 
     if (pageSearchOpen()) {
-      const action = pageSearchKeyAction(key)
-
-      if (action === "close") closePageSearch()
-      else if (action === "submit") selectPageSearchResult()
-      else if (action === "next") movePageSearchSelection(1)
-      else if (action === "previous") movePageSearchSelection(-1)
-      else if (action === "delete") setPageSearchQuery((query) => query.slice(0, -1))
-      else if (action === "append") setPageSearchQuery((query) => query + key.sequence)
+      handlePageSearchInputKey(key)
       return
     }
 
     if (spaceSwitcherOpen()) {
-      const action = pageSearchKeyAction(key)
-
-      if (action === "close") closeSpaceSwitcher()
-      else if (action === "submit") selectSpaceSwitcherResult()
-      else if (action === "next") moveSpaceSwitcherSelection(1)
-      else if (action === "previous") moveSpaceSwitcherSelection(-1)
-      else if (action === "delete") setSpaceSwitcherQuery((query) => query.slice(0, -1))
-      else if (action === "append") setSpaceSwitcherQuery((query) => query + key.sequence)
+      handleSpaceSwitcherInputKey(key)
       return
     }
 
@@ -1156,6 +1167,8 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
         left={dimensions().width < 72 ? 2 : 8}
         width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 4 : 16))}
         height={Math.min(18, Math.max(10, dimensions().height - 8))}
+        onQueryChange={setPageSearchQuery}
+        onKeyDown={handlePageSearchInputKey}
       />
       <DocumentFindOverlay
         visible={documentFindOpen()}
@@ -1166,6 +1179,8 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
         left={dimensions().width < 72 ? 2 : 8}
         width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 4 : 16))}
         height={Math.min(18, Math.max(10, dimensions().height - 8))}
+        onQueryChange={updateDocumentFindQuery}
+        onKeyDown={handleDocumentFindInputKey}
       />
       <SpaceSwitcherOverlay
         visible={spaceSwitcherOpen()}
@@ -1176,6 +1191,8 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
         left={dimensions().width < 72 ? 2 : 8}
         width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 4 : 16))}
         height={Math.min(16, Math.max(10, dimensions().height - 8))}
+        onQueryChange={setSpaceSwitcherQuery}
+        onKeyDown={handleSpaceSwitcherInputKey}
       />
       <HelpOverlay
         visible={helpOpen()}
@@ -2583,7 +2600,7 @@ export function NewPageOverlay(props: { visible: boolean; title: string; parentP
   )
 }
 
-function PageSearchOverlay(props: { visible: boolean; query: string; results: SearchResult[]; selectedIndex: number; activeSpaceName: string; viewMode: PageViewMode; left: number; width: number; height: number }) {
+function PageSearchOverlay(props: { visible: boolean; query: string; results: SearchResult[]; selectedIndex: number; activeSpaceName: string; viewMode: PageViewMode; left: number; width: number; height: number; onQueryChange: (query: string) => void; onKeyDown: (key: SearchKeyLike) => boolean }) {
   return (
     <box
       visible={props.visible}
@@ -2605,7 +2622,7 @@ function PageSearchOverlay(props: { visible: boolean; query: string; results: Se
         <text height={1} fg={theme.accent} attributes={1}>PAGE SEARCH</text>
         <text height={1} fg={theme.muted}>{props.activeSpaceName} · {props.viewMode}</text>
       </box>
-      <text height={1} fg={theme.text}>/ {props.query || "type title, path, or content"}_</text>
+      <SearchInput visible={props.visible} prefix="/" value={props.query} placeholder="type title, path, or content" onInput={props.onQueryChange} onKeyDown={props.onKeyDown} />
       <text height={1} fg={theme.subtle}>{props.results.length} result{props.results.length === 1 ? "" : "s"}  type to search  up/down move  enter open  esc close</text>
       <box height={1} />
       <Show when={props.results.length > 0} fallback={<EmptySearchState query={props.query} />}>
@@ -2621,7 +2638,31 @@ function PageSearchOverlay(props: { visible: boolean; query: string; results: Se
   )
 }
 
-export function DocumentFindOverlay(props: { visible: boolean; query: string; matches: DocumentFindMatch[]; selectedIndex: number; pageTitle: string; left: number; width: number; height: number }) {
+function SearchInput(props: { visible: boolean; prefix: string; value: string; placeholder: string; onInput: (value: string) => void; onKeyDown: (key: SearchKeyLike) => boolean }) {
+  return (
+    <box height={1} flexDirection="row" width="100%">
+      <text height={1} fg={theme.text}>{props.prefix} </text>
+      <input
+        value={props.value}
+        focused={props.visible}
+        flexGrow={1}
+        backgroundColor="#08111f"
+        focusedBackgroundColor="#08111f"
+        textColor={theme.text}
+        focusedTextColor={theme.text}
+        placeholder={props.placeholder}
+        placeholderColor={theme.subtle}
+        cursorColor={theme.accent}
+        onInput={props.onInput}
+        onKeyDown={(key) => {
+          if (props.onKeyDown(key)) key.preventDefault()
+        }}
+      />
+    </box>
+  )
+}
+
+export function DocumentFindOverlay(props: { visible: boolean; query: string; matches: DocumentFindMatch[]; selectedIndex: number; pageTitle: string; left: number; width: number; height: number; onQueryChange: (query: string) => void; onKeyDown: (key: SearchKeyLike) => boolean }) {
   const selectedMatch = () => props.matches[props.selectedIndex]
 
   return (
@@ -2645,7 +2686,7 @@ export function DocumentFindOverlay(props: { visible: boolean; query: string; ma
         <text height={1} fg={theme.accent} attributes={1}>FIND IN DOCUMENT</text>
         <text height={1} fg={theme.muted}>{props.pageTitle}</text>
       </box>
-      <text height={1} fg={theme.text}>f {props.query || "type text to find"}_</text>
+      <SearchInput visible={props.visible} prefix="f" value={props.query} placeholder="type text to find" onInput={props.onQueryChange} onKeyDown={props.onKeyDown} />
       <text height={1} fg={theme.subtle}>{props.query ? props.matches.length ? `${props.selectedIndex + 1}/${props.matches.length} matches  enter next  shift+enter previous  esc close` : "no matches  type to search  esc close" : "type to search  esc close"}</text>
       <box height={1} />
       <Show when={selectedMatch()} fallback={<EmptyDocumentFindState query={props.query} />}>
@@ -2670,7 +2711,7 @@ function EmptyDocumentFindState(props: { query: string }) {
   )
 }
 
-function SpaceSwitcherOverlay(props: { visible: boolean; query: string; results: SpaceSearchResult[]; selectedIndex: number; activeSpaceKey: string; left: number; width: number; height: number }) {
+function SpaceSwitcherOverlay(props: { visible: boolean; query: string; results: SpaceSearchResult[]; selectedIndex: number; activeSpaceKey: string; left: number; width: number; height: number; onQueryChange: (query: string) => void; onKeyDown: (key: SearchKeyLike) => boolean }) {
   return (
     <box
       visible={props.visible}
@@ -2692,7 +2733,7 @@ function SpaceSwitcherOverlay(props: { visible: boolean; query: string; results:
         <text height={1} fg={theme.accent} attributes={1}>SWITCH SPACE</text>
         <text height={1} fg={theme.muted}>active: {props.activeSpaceKey}</text>
       </box>
-      <text height={1} fg={theme.text}>s {props.query || "type space key or name"}_</text>
+      <SearchInput visible={props.visible} prefix="s" value={props.query} placeholder="type space key or name" onInput={props.onQueryChange} onKeyDown={props.onKeyDown} />
       <text height={1} fg={theme.subtle}>{props.results.length} space{props.results.length === 1 ? "" : "s"}  type to filter  up/down move  enter switch  esc close</text>
       <box height={1} />
       <Show when={props.results.length > 0} fallback={<EmptySpaceState query={props.query} />}>

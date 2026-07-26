@@ -865,7 +865,7 @@ describe("main TUI layout", () => {
   test("renders the document find overlay with selected match details", async () => {
     const matches = findDocumentMatches("# Start\n\nStart here", "start")
     const rendered = await testRender(() => (
-      <DocumentFindOverlay visible query="start" matches={matches} selectedIndex={1} pageTitle="Engineering Home" left={2} width={90} height={14} />
+      <DocumentFindOverlay visible query="start" matches={matches} selectedIndex={1} pageTitle="Engineering Home" left={2} width={90} height={14} onQueryChange={() => {}} onKeyDown={() => false} />
     ), { width: 100, height: 18 })
 
     try {

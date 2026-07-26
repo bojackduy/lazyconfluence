@@ -126,6 +126,7 @@ YYYY-MM-DD  ID  Result  Verification  Follow-up
 2026-07-26  07  Replaced fake page-search, document-find, and space-switcher input rows with focused native OpenTUI inputs. Placeholders render muted and the renderer controls the blinking cursor over the leading placeholder character.  bun run typecheck; bun test test/tui-keymap.test.ts test/tui-layout.test.tsx (46 pass, 0 fail, 278 assertions).  Next: command palette.
 2026-07-26  07  Deferred native search-input focus by one event-loop tick so overlay opener keys such as `/` and `f` cannot become query text.  bun run typecheck; bun test (143 pass, 0 fail, 690 assertions); git diff --check.  Next: command palette.
 2026-07-26  07  Added `p` command palette with shared-registry filtering, native input, available-command dispatch, and unavailable-command reasons.  bun run typecheck; bun test (145 pass, 0 fail, 700 assertions); git diff --check.  Next: browser open and navigation history.
+2026-07-26  07  Command-palette selection now scrolls its active row into view during arrow/Ctrl navigation.  bun run typecheck; bun test test/tui-keymap.test.ts test/tui-layout.test.tsx (48 pass, 0 fail, 288 assertions); git diff --check.  Next: browser open and navigation history.
 ```
 
 ## Contract Changes

@@ -2865,6 +2865,14 @@ function SpaceSwitcherOverlay(props: { visible: boolean; query: string; results:
 }
 
 export function CommandPaletteOverlay(props: { visible: boolean; query: string; commands: TuiCommand[]; selectedIndex: number; left: number; width: number; height: number; onQueryChange: (query: string) => void; onKeyDown: (key: SearchKeyLike) => boolean }) {
+  const [scrollbox, setScrollbox] = createSignal<ScrollBoxRenderable>()
+
+  createEffect(() => {
+    const current = scrollbox()
+    if (!props.visible || !current || props.selectedIndex < 0 || props.selectedIndex >= props.commands.length) return
+    current.scrollChildIntoView(commandPaletteRowId(props.selectedIndex))
+  })
+
   return (
     <box
       visible={props.visible}
@@ -2890,9 +2898,9 @@ export function CommandPaletteOverlay(props: { visible: boolean; query: string; 
       <text height={1} fg={theme.subtle}>{props.commands.length} command{props.commands.length === 1 ? "" : "s"}  type to filter  up/down move  enter run  esc close</text>
       <box height={1} />
       <Show when={props.commands.length > 0} fallback={<EmptyCommandPaletteState query={props.query} />}>
-        <scrollbox flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
+        <scrollbox ref={setScrollbox} flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
           <box flexDirection="column" width="100%">
-            <For each={props.commands}>{(command, index) => <CommandPaletteRow command={command} selected={index() === props.selectedIndex} />}</For>
+            <For each={props.commands}>{(command, index) => <CommandPaletteRow id={commandPaletteRowId(index())} command={command} selected={index() === props.selectedIndex} />}</For>
           </box>
         </scrollbox>
       </Show>
@@ -2900,12 +2908,12 @@ export function CommandPaletteOverlay(props: { visible: boolean; query: string; 
   )
 }
 
-function CommandPaletteRow(props: { command: TuiCommand; selected: boolean }) {
+function CommandPaletteRow(props: { id: string; command: TuiCommand; selected: boolean }) {
   const color = () => props.command.available ? theme.text : theme.muted
   const detail = () => props.command.available ? props.command.description : props.command.unavailableReason ?? props.command.description
 
   return (
-    <box height={3} width="100%" backgroundColor={props.selected ? theme.accentSoft : undefined} paddingX={1} flexDirection="column">
+    <box id={props.id} height={3} width="100%" backgroundColor={props.selected ? theme.accentSoft : undefined} paddingX={1} flexDirection="column">
       <box height={1} flexDirection="row">
         <text height={1} width={24} fg={props.command.available ? theme.good : theme.subtle}>{props.command.keys}</text>
         <text height={1} fg={color()} attributes={props.command.available ? 1 : 0}>{props.command.label}</text>
@@ -2914,6 +2922,10 @@ function CommandPaletteRow(props: { command: TuiCommand; selected: boolean }) {
       <text height={1} fg={theme.muted}>  {props.command.group}</text>
     </box>
   )
+}
+
+function commandPaletteRowId(index: number) {
+  return `command-palette-row-${index}`
 }
 
 function EmptyCommandPaletteState(props: { query: string }) {

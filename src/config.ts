@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { resolveConfigPaths, type ConfigPaths } from "./paths"
 
@@ -127,6 +128,15 @@ export async function loadAtlassianAuth(env: NodeJS.ProcessEnv = process.env): P
   }
 }
 
+export function loadConfiguredDefaultSpaceKey(env: NodeJS.ProcessEnv = process.env): string | null {
+  try {
+    const configText = readFileSync(resolveConfigPaths(env).configFile, "utf8")
+    return parseLocalConfig(configText).atlassian.defaultSpaceKey
+  } catch {
+    return null
+  }
+}
+
 export async function loadCredentialStatus(env: NodeJS.ProcessEnv = process.env): Promise<CredentialStatus> {
   const paths = resolveConfigPaths(env)
 
@@ -172,12 +182,16 @@ function parseLocalConfig(configText: string): LocalConfig {
   if (value.version !== 1 || !atlassian) throw new Error("Unsupported lazyconfluence config format.")
   if (!Array.isArray(atlassian.spaceKeys)) throw new Error("Config must include atlassian.spaceKeys.")
 
-  return createLocalConfig({
+  const config = createLocalConfig({
     siteUrl: String(atlassian.siteUrl || ""),
     email: String(atlassian.email || ""),
     spaceKeys: atlassian.spaceKeys.map(String),
     apiTokenEnv: String(atlassian.apiTokenEnv || DEFAULT_API_TOKEN_ENV),
   })
+  const defaultSpaceKey = String(atlassian.defaultSpaceKey || "").trim()
+  if (config.atlassian.spaceKeys.includes(defaultSpaceKey)) config.atlassian.defaultSpaceKey = defaultSpaceKey
+
+  return config
 }
 
 async function readApiTokenFromCredentialFile(path: string, apiTokenEnv: string): Promise<string | null> {

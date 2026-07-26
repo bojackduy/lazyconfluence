@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { applyPageCreateToConfluence, applyPageDeleteToConfluence, applyPageDraftToConfluence, type ApplyPageDraftResult } from "../apply"
+import { loadConfiguredDefaultSpaceKey } from "../config"
 import type { FetchLike } from "../confluence/client"
 import { formatMarkdownDiff, readEditableDraftInput, savePageDraft, type EditableDraftInput } from "../editing"
 import { openIndexRepository, type IndexRepository, type PageBodyArtifact, type PageCreate, type PageDelete, type PageDraft, type PageDraftStatus } from "../index/repository"
@@ -95,6 +96,7 @@ export type TuiEditablePageInput =
 
 export function createRepositoryTuiDataSource(repository: IndexRepository = openIndexRepository(), options: TuiDataSourceOptions = {}): TuiDataSource {
   const now = options.now ?? (() => new Date())
+  const configuredDefaultSpaceKey = loadConfiguredDefaultSpaceKey(options.env)
 
   return {
     applyPageDraft: async (pageId, draftMarkdown) => {
@@ -145,7 +147,7 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
       const input = readEditableDraftInput(repository, pageId)
       return formatMarkdownDiff(input.body.editableMarkdown, draftMarkdown)
     },
-    getDefaultSpaceKey: () => repository.listSpaces()[0]?.key ?? null,
+    getDefaultSpaceKey: () => configuredDefaultSpaceKey && repository.getSpace(configuredDefaultSpaceKey) ? configuredDefaultSpaceKey : repository.listSpaces()[0]?.key ?? null,
     getDefaultPageId: (spaceKey, view = "current") => {
       const key = spaceKey ?? repository.listSpaces()[0]?.key
       if (!key) return null

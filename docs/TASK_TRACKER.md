@@ -135,6 +135,8 @@ YYYY-MM-DD  ID  Result  Verification  Follow-up
 2026-07-27  legacy-related-link-resolution  Added same-origin resolution for legacy Confluence `viewpage.action?pageId=...` links, which are present in the local index. These links now navigate locally at activation and are classified as internal on future syncs.  bun run typecheck; bun test (157 pass, 0 fail, 731 assertions); git diff --check.  Next: all-space page search.
 2026-07-27  current-page-reload  Added explicit `r` reload for the selected page. It fetches and reindexes only that page, replacing its body, links, and media metadata while preserving other indexed pages; local drafts and staged drafts block the action.  bun run typecheck; bun test (159 pass, 0 fail, 737 assertions); git diff --check.  Next: all-space page search.
 2026-07-27  reload-feedback  Prioritized `r` reload and `b` back in the compact reader footer, and added a visible `RELOADING` header badge plus footer progress state while page refresh is in flight.  bun run typecheck; bun test (160 pass, 0 fail, 738 assertions); git diff --check.  Next: all-space page search.
+2026-07-27  configured-default-space  Production TUI startup now prefers the configured `defaultSpaceKey` when it has locally indexed content, rather than taking the database’s alphabetical first space.  bun run typecheck; bun test (161 pass, 0 fail, 740 assertions); git diff --check.  Next: all-space page search.
+2026-07-27  outline-related-focus  Split Outline and Related into distinct Tab focus stops. `h/l` now moves directly between their panels while `Enter` jumps to headings or opens the selected link.  bun run typecheck; bun test (161 pass, 0 fail, 741 assertions); git diff --check.  Next: all-space page search.
 ```
 
 ## Contract Changes

@@ -923,10 +923,11 @@ describe("main TUI layout", () => {
 
   test("focus keys keep h/l document-local and cycle all panes", () => {
     expect(nextFocusPaneForKey("navigator", key("tab", "\t"))).toBe("document")
-    expect(nextFocusPaneForKey("document", key("tab", "\t"))).toBe("side-rail")
-    expect(nextFocusPaneForKey("side-rail", key("tab", "\t"))).toBe("navigator")
+    expect(nextFocusPaneForKey("document", key("tab", "\t"))).toBe("outline")
+    expect(nextFocusPaneForKey("outline", key("tab", "\t"))).toBe("related")
+    expect(nextFocusPaneForKey("related", key("tab", "\t"))).toBe("navigator")
     expect(nextFocusPaneForKey("document", key("tab", "\x1B[Z", { shift: true }))).toBe("navigator")
-    expect(nextFocusPaneForKey("navigator", key("tab", "\x1B[Z", { shift: true }))).toBe("side-rail")
+    expect(nextFocusPaneForKey("navigator", key("tab", "\x1B[Z", { shift: true }))).toBe("related")
     expect(nextFocusPaneForKey("document", key("h", "h"))).toBe("document")
     expect(nextFocusPaneForKey("document", key("left", "\x1B[D"))).toBe("document")
     expect(nextFocusPaneForKey("navigator", key("l", "l"))).toBe("navigator")

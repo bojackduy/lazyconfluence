@@ -11,6 +11,24 @@ import type { IndexedPage, SpaceSummary } from "../src/model"
 import { createRepositoryTuiDataSource } from "../src/tui/data"
 
 describe("apply page draft", () => {
+  test("uses the configured default space when it exists in the local index", async () => {
+    const setup = await createApplySetup()
+    const repository = openIndexRepository({ path: setup.dbPath })
+
+    try {
+      await saveLocalAuth(createLocalConfig({ siteUrl: "https://example.atlassian.net", email: "reader@example.com", spaceKeys: ["OPS", "ENG"] }), "token", setup.env)
+      repository.upsertSpaces([
+        { key: "ENG", name: "Engineering", lastSyncedAt: "2026-07-21T10:00:00Z", pageCount: 0, syncState: "fresh" },
+        { key: "OPS", name: "Operations", lastSyncedAt: "2026-07-21T10:00:00Z", pageCount: 0, syncState: "fresh" },
+      ])
+
+      expect(createRepositoryTuiDataSource(repository, { env: setup.env }).getDefaultSpaceKey()).toBe("OPS")
+    } finally {
+      repository.close()
+      await setup.cleanup()
+    }
+  })
+
   test("blocks page reload while a local draft exists", async () => {
     const setup = await createApplySetup()
     const repository = openIndexRepository({ path: setup.dbPath })

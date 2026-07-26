@@ -87,7 +87,7 @@ export function resolveKeyCommand(key: TuiKey, context: CommandContext): Command
     if (key.name === "return") return "activate"
   }
 
-  if (context === "side-rail") {
+  if (context === "outline" || context === "related") {
     if (matchesAny(key, ["j", "down"])) return "move-down"
     if (matchesAny(key, ["k", "up"])) return "move-up"
     if (matchesAny(key, ["l", "right"])) return "move-right"

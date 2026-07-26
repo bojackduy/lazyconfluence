@@ -117,7 +117,6 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
   const [expandedPageIds, setExpandedPageIds] = createSignal(new Set(initialSelectedPageId === emptyPageId ? [] : [initialSelectedPageId]))
   const [navigationHistory, setNavigationHistory] = createSignal<NavigationLocation[]>([])
   const [focusPane, setFocusPane] = createSignal<FocusPane>("navigator")
-  const [sideRailPanel, setSideRailPanel] = createSignal<SideRailPanel>("outline")
   const [sideRailSelectedIndex, setSideRailSelectedIndex] = createSignal(0)
   const [pageSearchOpen, setPageSearchOpen] = createSignal(false)
   const [pageSearchQuery, setPageSearchQuery] = createSignal("")
@@ -205,7 +204,6 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
   const readerImageParts = createMemo(() => readerImagePartsForPage(readerPage()))
   const outlineNavigationItems = createMemo(() => documentOutlineItems(readerPage().contentMarkdown))
   const relatedNavigationItems = createMemo(() => relatedNavigationItemsForPage(readerPage(), dataSource.getPageById))
-  const sideRailItems = createMemo(() => sideRailPanel() === "outline" ? outlineNavigationItems() : relatedNavigationItems())
   const inlineImageRenderDecision = createMemo(() => imageRenderModeDecisionForCapabilities(terminalCapabilities()))
   const viewerImageRenderDecision = createMemo(() => imageRenderModeDecisionForCapabilities(terminalCapabilities(), { nativeProtocols: true }))
   const inlineImageRenderMode = createMemo(() => inlineImageRenderDecision().mode)
@@ -386,7 +384,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
   })
 
   createEffect(() => {
-    const maxIndex = Math.max(0, sideRailItems().length - 1)
+    const maxIndex = Math.max(0, (focusPane() === "outline" ? outlineNavigationItems() : relatedNavigationItems()).length - 1)
     if (sideRailSelectedIndex() > maxIndex) setSideRailSelectedIndex(maxIndex)
   })
 
@@ -543,19 +541,19 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
   }
 
   const moveSideRailSelection = (direction: number) => {
-    const items = sideRailItems()
+    const items = focusPane() === "outline" ? outlineNavigationItems() : relatedNavigationItems()
     if (!items.length) return
     setSideRailSelectedIndex((current) => Math.max(0, Math.min(items.length - 1, current + direction)))
   }
 
   const switchSideRailPanel = (panel: SideRailPanel) => {
-    if (sideRailPanel() === panel) return
-    setSideRailPanel(panel)
+    if (focusPane() === panel) return
+    setFocusPane(panel)
     setSideRailSelectedIndex(0)
   }
 
   const activateSideRailItem = () => {
-    if (sideRailPanel() === "outline") {
+    if (focusPane() === "outline") {
       const item = outlineNavigationItems()[sideRailSelectedIndex()]
       if (!item) return
       documentScrollbox?.scrollTo(item.line)
@@ -667,8 +665,8 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     else if (command.id === "edit-page") openEditorForSelectedPage()
     else if (command.id === "open-image-viewer") openImageViewer()
     else if (command.id === "stage-delete") stageDeleteSelectedPage()
-    else if (command.id === "focus-next-pane") setFocusPane((current) => current === "navigator" ? "document" : current === "document" ? "side-rail" : "navigator")
-    else if (command.id === "focus-previous-pane") setFocusPane((current) => current === "navigator" ? "side-rail" : current === "side-rail" ? "document" : "navigator")
+    else if (command.id === "focus-next-pane") setFocusPane((current) => current === "navigator" ? "document" : current === "document" ? "outline" : current === "outline" ? "related" : "navigator")
+    else if (command.id === "focus-previous-pane") setFocusPane((current) => current === "navigator" ? "related" : current === "related" ? "outline" : current === "outline" ? "document" : "navigator")
     else if (command.id === "page-down") scrollDocumentBy(halfPageScrollAmount())
     else if (command.id === "page-up") scrollDocumentBy(-halfPageScrollAmount())
   }
@@ -1373,14 +1371,11 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
       return
     }
 
-    if (focusPane() === "side-rail") {
+    if (focusPane() === "outline" || focusPane() === "related") {
       if (command === "move-down") moveSideRailSelection(1)
       if (command === "move-up") moveSideRailSelection(-1)
       if (command === "move-left") switchSideRailPanel("outline")
-      if (command === "move-right") {
-        if (sideRailPanel() === "outline") switchSideRailPanel("related")
-        else activateSideRailItem()
-      }
+      if (command === "move-right") switchSideRailPanel("related")
       if (command === "activate") activateSideRailItem()
       return
     }
@@ -1394,7 +1389,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
       <Show when={credentialWarning()} fallback={<box height={0} />}>{(status) => <CredentialNotice status={status()} />}</Show>
       <box flexGrow={1} minHeight={0} flexDirection={isNarrow() ? "column" : "row"} paddingX={1}>
         <Navigator rows={treeRows()} selectedPageId={selectedPageId()} focused={focusPane() === "navigator"} viewMode={pageViewMode()} onSetViewMode={switchPageView} />
-        <Reader page={readerPage()} focused={focusPane() === "document"} sideRailFocused={focusPane() === "side-rail"} sideRailPanel={sideRailPanel()} sideRailSelectedIndex={sideRailSelectedIndex()} outlineItems={outlineNavigationItems()} relatedItems={relatedNavigationItems()} narrow={isNarrow()} treeSitterClient={treeSitterClient()} imageRenderMode={inlineImageRenderMode()} setDocumentScrollbox={(scrollbox) => { documentScrollbox = scrollbox }} setImageRenderable={setReaderImageRenderable} />
+        <Reader page={readerPage()} focused={focusPane() === "document"} focusedSideRailPanel={focusPane() === "outline" ? "outline" : focusPane() === "related" ? "related" : null} sideRailSelectedIndex={sideRailSelectedIndex()} outlineItems={outlineNavigationItems()} relatedItems={relatedNavigationItems()} narrow={isNarrow()} treeSitterClient={treeSitterClient()} imageRenderMode={inlineImageRenderMode()} setDocumentScrollbox={(scrollbox) => { documentScrollbox = scrollbox }} setImageRenderable={setReaderImageRenderable} />
       </box>
       <StatusBar focusPane={focusPane()} editorOpen={editorOpen()} editorDirty={editorDirty()} editMessage={editStatusMessage()} reloading={pageReloading()} />
       <Show when={editorOpen()} fallback={<box height={0} />}>
@@ -1642,7 +1637,7 @@ function navigatorDocumentKind(row: TreeRow): NavigatorDocumentKind {
   return "page"
 }
 
-function Reader(props: { page: ReaderPage; focused: boolean; sideRailFocused: boolean; sideRailPanel: SideRailPanel; sideRailSelectedIndex: number; outlineItems: OutlineNavigationItem[]; relatedItems: RelatedNavigationItem[]; narrow: boolean; treeSitterClient?: TreeSitterClient; imageRenderMode: ImageRenderMode; setDocumentScrollbox: (scrollbox: ScrollBoxRenderable) => void; setImageRenderable: (nodeId: string, renderable: BoxRenderable) => void }) {
+function Reader(props: { page: ReaderPage; focused: boolean; focusedSideRailPanel: SideRailPanel | null; sideRailSelectedIndex: number; outlineItems: OutlineNavigationItem[]; relatedItems: RelatedNavigationItem[]; narrow: boolean; treeSitterClient?: TreeSitterClient; imageRenderMode: ImageRenderMode; setDocumentScrollbox: (scrollbox: ScrollBoxRenderable) => void; setImageRenderable: (nodeId: string, renderable: BoxRenderable) => void }) {
   const renderer = useRenderer()
   const renderCodeBlock = createReadableCodeBlockRenderer(renderer)
   const contentParts = createMemo(() => splitReaderImagePlaceholders(props.page.contentMarkdown, props.page.mediaAssets ?? []))
@@ -1688,7 +1683,7 @@ function Reader(props: { page: ReaderPage; focused: boolean; sideRailFocused: bo
             </box>
           </scrollbox>
         </box>
-        <SideRail narrow={props.narrow} focused={props.sideRailFocused} panel={props.sideRailPanel} selectedIndex={props.sideRailSelectedIndex} outlineItems={props.outlineItems} relatedItems={props.relatedItems} />
+        <SideRail narrow={props.narrow} focusedPanel={props.focusedSideRailPanel} selectedIndex={props.sideRailSelectedIndex} outlineItems={props.outlineItems} relatedItems={props.relatedItems} />
       </box>
     </box>
   )
@@ -2593,31 +2588,31 @@ function readableCodeLanguage(language: string | undefined) {
   return normalized ? `code: ${normalized}` : "code"
 }
 
-function SideRail(props: { narrow: boolean; focused: boolean; panel: SideRailPanel; selectedIndex: number; outlineItems: OutlineNavigationItem[]; relatedItems: RelatedNavigationItem[] }) {
+function SideRail(props: { narrow: boolean; focusedPanel: SideRailPanel | null; selectedIndex: number; outlineItems: OutlineNavigationItem[]; relatedItems: RelatedNavigationItem[] }) {
   return (
     <box width={props.narrow ? "100%" : 30} minWidth={props.narrow ? 0 : 24} marginLeft={props.narrow ? 0 : 1} height={props.narrow ? 10 : "100%"} flexDirection="column">
-      <SideRailPanelView panel="outline" title="OUTLINE" empty="No headings" active={props.panel === "outline"} focused={props.focused} selectedIndex={props.selectedIndex} items={props.outlineItems} />
-      <SideRailPanelView panel="related" title="RELATED" empty="No links yet" active={props.panel === "related"} focused={props.focused} selectedIndex={props.selectedIndex} items={props.relatedItems} />
+      <SideRailPanelView panel="outline" title="OUTLINE" empty="No headings" active={props.focusedPanel === "outline"} selectedIndex={props.selectedIndex} items={props.outlineItems} />
+      <SideRailPanelView panel="related" title="RELATED" empty="No links yet" active={props.focusedPanel === "related"} selectedIndex={props.selectedIndex} items={props.relatedItems} />
     </box>
   )
 }
 
-function SideRailPanelView(props: { panel: SideRailPanel; title: string; empty: string; active: boolean; focused: boolean; selectedIndex: number; items: Array<OutlineNavigationItem | RelatedNavigationItem> }) {
+function SideRailPanelView(props: { panel: SideRailPanel; title: string; empty: string; active: boolean; selectedIndex: number; items: Array<OutlineNavigationItem | RelatedNavigationItem> }) {
   const [scrollbox, setScrollbox] = createSignal<ScrollBoxRenderable>()
 
   createEffect(() => {
     const current = scrollbox()
-    if (!props.active || !props.focused || !current || props.selectedIndex < 0 || props.selectedIndex >= props.items.length) return
+    if (!props.active || !current || props.selectedIndex < 0 || props.selectedIndex >= props.items.length) return
     current.scrollChildIntoView(sideRailRowId(props.panel, props.selectedIndex))
   })
 
   return (
-    <box border borderStyle="single" borderColor={props.focused && props.active ? theme.borderActive : theme.border} paddingX={1} paddingY={1} flexGrow={1} minHeight={0} flexDirection="column">
-      <text height={1} fg={props.focused && props.active ? theme.accent : theme.muted}><b>{props.title}</b></text>
+    <box border borderStyle="single" borderColor={props.active ? theme.borderActive : theme.border} paddingX={1} paddingY={1} flexGrow={1} minHeight={0} flexDirection="column">
+      <text height={1} fg={props.active ? theme.accent : theme.muted}><b>{props.title}</b></text>
       <Show when={props.items.length > 0} fallback={<text height={1} fg={theme.subtle}>{props.empty}</text>}>
         <scrollbox ref={setScrollbox} flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
           <box flexDirection="column" width="100%">
-            <For each={props.items}>{(item, index) => <SideRailRow id={sideRailRowId(props.panel, index())} item={item} selected={props.focused && props.active && index() === props.selectedIndex} />}</For>
+            <For each={props.items}>{(item, index) => <SideRailRow id={sideRailRowId(props.panel, index())} item={item} selected={props.active && index() === props.selectedIndex} />}</For>
           </box>
         </scrollbox>
       </Show>
@@ -2670,10 +2665,19 @@ function statusBarHints(focusPane: string, editorOpen: boolean): StatusHintItem[
     { key: "d/u", label: "page" },
   ]
 
-  if (focusPane === "side-rail") return [
+  if (focusPane === "outline") return [
     { key: "Tab", label: "panes" },
     { key: "j/k", label: "select" },
-    { key: "h/l", label: "panels" },
+    { key: "h/l", label: "related" },
+    { key: "Enter", label: "jump" },
+    { key: "b", label: "back" },
+    { key: "r", label: "reload" },
+  ]
+
+  if (focusPane === "related") return [
+    { key: "Tab", label: "panes" },
+    { key: "j/k", label: "select" },
+    { key: "h/l", label: "outline" },
     { key: "Enter", label: "open" },
     { key: "b", label: "back" },
     { key: "r", label: "reload" },
@@ -3345,8 +3349,8 @@ export function pageSearchKeyAction(key: SearchKeyLike): PageSearchKeyAction {
 }
 
 export function nextFocusPaneForKey(current: FocusPane, key: SearchKeyLike): FocusPane {
-  if (isShiftTabKey(key)) return current === "navigator" ? "side-rail" : current === "side-rail" ? "document" : "navigator"
-  if (isTabKey(key)) return current === "navigator" ? "document" : current === "document" ? "side-rail" : "navigator"
+  if (isShiftTabKey(key)) return current === "navigator" ? "related" : current === "related" ? "outline" : current === "outline" ? "document" : "navigator"
+  if (isTabKey(key)) return current === "navigator" ? "document" : current === "document" ? "outline" : current === "outline" ? "related" : "navigator"
   if (current === "navigator" && key.name === "return") return "document"
   return current
 }

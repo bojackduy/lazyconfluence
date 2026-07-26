@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
-import { ATLASSIAN_API_TOKEN_URL, createLocalConfig, loadAtlassianAuth, loadCredentialStatus, normalizeAtlassianSiteUrl, parseSpaceKeys, saveLocalAuth } from "../src/config"
+import { ATLASSIAN_API_TOKEN_URL, createLocalConfig, loadAtlassianAuth, loadConfiguredDefaultSpaceKey, loadCredentialStatus, normalizeAtlassianSiteUrl, parseSpaceKeys, saveLocalAuth } from "../src/config"
 
 describe("local auth config", () => {
   test("normalizes Atlassian site URLs", () => {
@@ -31,6 +31,7 @@ describe("local auth config", () => {
 
       expect(loaded?.config.atlassian.siteUrl).toBe("https://example.atlassian.net")
       expect(loaded?.config.atlassian.defaultSpaceKey).toBe("ENG")
+      expect(loadConfiguredDefaultSpaceKey(env)).toBe("ENG")
       expect(loaded?.apiToken).toBe("secret-token")
       expect(configText).not.toContain("secret-token")
       expect(credentialText).toContain(ATLASSIAN_API_TOKEN_URL)

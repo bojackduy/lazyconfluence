@@ -1484,7 +1484,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
 function CredentialNotice(props: { status: CredentialWarning }) {
   return (
     <box height={4} backgroundColor="#1f1607" paddingX={1} flexDirection="column">
-      <text height={1} fg={theme.warn} attributes={1}>{props.status.title}</text>
+      <text height={1} fg={theme.warn}><b>{props.status.title}</b></text>
       <text height={1} fg={theme.text}>{props.status.detail}</text>
       <For each={props.status.help.slice(0, 2)}>{(item) => <text height={1} fg={theme.subtle}>{item}</text>}</For>
     </box>
@@ -1499,7 +1499,7 @@ function Header(props: { page: ReaderPage; spaceName: string; syncState: string;
   return (
     <box height={6} border borderStyle="single" borderColor={theme.border} paddingX={1} flexDirection="column">
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.text} attributes={1}>{props.page.title}</text>
+        <text height={1} fg={theme.text}><b>{props.page.title}</b></text>
         <box height={1} flexDirection="row" gap={2}>
           <box height={1} width={Math.max(12, `Overview ${props.stagedCount}`.length + 2)} onMouseDown={props.onOpenOverview}>
             <text height={1} fg={theme.accent}>Overview {props.stagedCount}</text>
@@ -1529,7 +1529,7 @@ function Navigator(props: { rows: TreeRow[]; selectedPageId: string; focused: bo
       paddingY={1}
       flexDirection="column"
     >
-      <text height={1} fg={props.focused ? theme.accent : theme.muted} attributes={1}>NAVIGATOR</text>
+      <text height={1} fg={props.focused ? theme.accent : theme.muted}><b>NAVIGATOR</b></text>
       <box height={1} flexDirection="row" gap={1}>
         <NavigatorTab label="Current" active={props.viewMode === "current"} onPress={() => props.onSetViewMode("current")} />
         <NavigatorTab label="Archived" active={props.viewMode === "archived"} onPress={() => props.onSetViewMode("archived")} />
@@ -1625,7 +1625,7 @@ function Reader(props: { page: ReaderPage; focused: boolean; sideRailFocused: bo
     >
       <box flexDirection={props.narrow ? "column" : "row"} flexGrow={1} minHeight={0}>
         <box flexGrow={1} minWidth={0} height="100%" flexDirection="column">
-          <text height={1} fg={props.focused ? theme.accent : theme.muted} attributes={1}>DOCUMENT</text>
+          <text height={1} fg={props.focused ? theme.accent : theme.muted}><b>DOCUMENT</b></text>
           <text height={1} fg={theme.subtle}>{props.page.snippet}</text>
           <Show when={isArchivedPage(props.page)} fallback={<box height={0} />}>
             <text height={1} fg={theme.warn}>Archived in Confluence · read-only</text>
@@ -1668,7 +1668,7 @@ function ImagePreviewCard(props: { part: Extract<ReaderContentPart, { kind: "ima
 
   return (
     <box ref={(renderable: BoxRenderable) => props.setRenderable?.(props.part.nodeId, renderable)} width="100%" height={image() ? size().height + 5 : 6} border borderStyle="rounded" borderColor={image() ? theme.good : theme.border} backgroundColor={theme.panel} paddingX={1} marginBottom={1} flexDirection="column">
-      <text height={1} fg={image() ? theme.good : theme.warn} attributes={1}>{image() ? "IMAGE PREVIEW" : "IMAGE PLACEHOLDER"}</text>
+      <text height={1} fg={image() ? theme.good : theme.warn}>{image() ? <b>IMAGE PREVIEW</b> : <b>IMAGE PLACEHOLDER</b>}</text>
       <text height={1} fg={theme.text}>{props.part.label}</text>
       <Show when={image()} fallback={<ImagePreviewFallback part={props.part} message={fallbackMessage()} />}>
         {(decoded) => (
@@ -1983,7 +1983,7 @@ export function ImageViewerOverlay(props: { visible: boolean; pageTitle: string;
       zIndex={80}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={image() ? theme.good : theme.warn} attributes={1}>IMAGE VIEWER</text>
+        <text height={1} fg={image() ? theme.good : theme.warn}><b>IMAGE VIEWER</b></text>
         <box height={1} width={8} onMouseDown={props.onClose}><text height={1} fg={theme.muted}>Close</text></box>
       </box>
       <text height={1} fg={theme.text}>{props.pageTitle}</text>
@@ -2575,7 +2575,7 @@ function SideRailPanelView(props: { panel: SideRailPanel; title: string; empty: 
 
   return (
     <box border borderStyle="single" borderColor={props.focused && props.active ? theme.borderActive : theme.border} paddingX={1} paddingY={1} flexGrow={1} minHeight={0} flexDirection="column">
-      <text height={1} fg={props.focused && props.active ? theme.accent : theme.muted} attributes={1}>{props.title}</text>
+      <text height={1} fg={props.focused && props.active ? theme.accent : theme.muted}><b>{props.title}</b></text>
       <Show when={props.items.length > 0} fallback={<text height={1} fg={theme.subtle}>{props.empty}</text>}>
         <scrollbox ref={setScrollbox} flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
           <box flexDirection="column" width="100%">
@@ -2709,7 +2709,7 @@ function EditorOverlay(props: {
       zIndex={40}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.accent} attributes={1}>EDITOR</text>
+        <text height={1} fg={theme.accent}><b>EDITOR</b></text>
         <text height={1} fg={props.dirty ? theme.warn : theme.good}>{statusText()}</text>
       </box>
       <text height={1} fg={theme.text}>{props.pageTitle}</text>
@@ -2778,14 +2778,14 @@ export function StagedChangesOverlay(props: {
       zIndex={60}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.warn} attributes={1}>OVERVIEW</text>
+        <text height={1} fg={theme.warn}><b>OVERVIEW</b></text>
         <text height={1} fg={theme.muted}>{props.activeSpaceName}</text>
       </box>
       <text height={1} fg={theme.subtle}>{props.applying ? "Applying selected staged changes..." : "space select  a apply selected  d discard selected  esc close"}</text>
       <text height={1} fg={reviewMessageColor(props.message)}>{props.message || `${selectedCount()} of ${props.changes.length} staged change${props.changes.length === 1 ? "" : "s"} selected.`}</text>
       <box flexGrow={1} minHeight={0} flexDirection="row" gap={1}>
         <box width={listWidth()} minWidth={24} height="100%" border borderStyle="single" borderColor={theme.border} paddingX={1} flexDirection="column">
-          <text height={1} fg={theme.muted} attributes={1}>PAGES</text>
+          <text height={1} fg={theme.muted}><b>PAGES</b></text>
           <Show when={props.changes.length > 0} fallback={<text height={1} fg={theme.subtle}>No staged changes in this space.</text>}>
             <scrollbox flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
               <box flexDirection="column" width="100%">
@@ -2877,7 +2877,7 @@ export function NewPageOverlay(props: { visible: boolean; title: string; parentP
       zIndex={70}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.accent} attributes={1}>NEW PAGE</text>
+        <text height={1} fg={theme.accent}><b>NEW PAGE</b></text>
         <text height={1} fg={theme.muted}>type: page</text>
       </box>
       <text height={1} fg={theme.subtle}>Parent: {props.parentPage ? props.parentPage.title : "Space root"}</text>
@@ -2912,7 +2912,7 @@ function PageSearchOverlay(props: { visible: boolean; query: string; results: Se
       zIndex={20}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.accent} attributes={1}>PAGE SEARCH</text>
+        <text height={1} fg={theme.accent}><b>PAGE SEARCH</b></text>
         <text height={1} fg={theme.muted}>{props.activeSpaceName} · {props.viewMode}</text>
       </box>
       <SearchInput visible={props.visible} prefix="/" value={props.query} placeholder="type title, path, or content" onInput={props.onQueryChange} onKeyDown={props.onKeyDown} />
@@ -2993,7 +2993,7 @@ export function DocumentFindOverlay(props: { visible: boolean; query: string; ma
       zIndex={25}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.accent} attributes={1}>FIND IN DOCUMENT</text>
+        <text height={1} fg={theme.accent}><b>FIND IN DOCUMENT</b></text>
         <text height={1} fg={theme.muted}>{props.pageTitle}</text>
       </box>
       <SearchInput visible={props.visible} prefix="f" value={props.query} placeholder="type text to find" onInput={props.onQueryChange} onKeyDown={props.onKeyDown} />
@@ -3040,7 +3040,7 @@ function SpaceSwitcherOverlay(props: { visible: boolean; query: string; results:
       zIndex={30}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.accent} attributes={1}>SWITCH SPACE</text>
+        <text height={1} fg={theme.accent}><b>SWITCH SPACE</b></text>
         <text height={1} fg={theme.muted}>active: {props.activeSpaceKey}</text>
       </box>
       <SearchInput visible={props.visible} prefix="s" value={props.query} placeholder="type space key or name" onInput={props.onQueryChange} onKeyDown={props.onKeyDown} />
@@ -3086,7 +3086,7 @@ export function CommandPaletteOverlay(props: { visible: boolean; query: string; 
       zIndex={35}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.accent} attributes={1}>COMMAND PALETTE</text>
+        <text height={1} fg={theme.accent}><b>COMMAND PALETTE</b></text>
         <text height={1} fg={theme.muted}>p actions</text>
       </box>
       <SearchInput visible={props.visible} prefix="p" value={props.query} placeholder="type an action, key, or description" onInput={props.onQueryChange} onKeyDown={props.onKeyDown} />
@@ -3152,7 +3152,7 @@ export function HelpOverlay(props: { visible: boolean; commands: readonly TuiCom
       zIndex={80}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.accent} attributes={1}>KEYBOARD HELP</text>
+        <text height={1} fg={theme.accent}><b>KEYBOARD HELP</b></text>
         <text height={1} fg={theme.muted}>j/k scroll · u/d page · ?/Esc/q close</text>
       </box>
       <text height={1} fg={theme.subtle}>Available commands reflect the current reader and overlays. Muted commands are planned but unavailable.</text>
@@ -3165,7 +3165,7 @@ export function HelpOverlay(props: { visible: boolean; commands: readonly TuiCom
 
             return (
               <box flexDirection="column" marginBottom={1}>
-                <text height={1} fg={theme.accent} attributes={1}>{group.toUpperCase()}</text>
+                <text height={1} fg={theme.accent}><b>{group.toUpperCase()}</b></text>
                 <For each={commands}>{(command) => <HelpCommandRow command={command} />}</For>
               </box>
             )
@@ -3184,7 +3184,7 @@ function HelpCommandRow(props: { command: TuiCommand }) {
     <box height={2} width="100%" flexDirection="column" paddingLeft={1}>
       <box height={1} flexDirection="row">
         <text height={1} width={24} fg={props.command.available ? theme.good : theme.subtle}>{props.command.keys}</text>
-        <text height={1} fg={color()} attributes={props.command.available ? 1 : 0}>{props.command.label}</text>
+        <text height={1} fg={color()}>{props.command.available ? <b>{props.command.label}</b> : props.command.label}</text>
       </box>
       <text height={1} paddingLeft={24} fg={props.command.available ? theme.subtle : theme.muted}>{detail()}</text>
     </box>
@@ -3196,9 +3196,9 @@ function SearchResultRow(props: { result: SearchResult; selected: boolean }) {
 
   return (
     <box height={3} width="100%" backgroundColor={props.selected ? theme.accentSoft : undefined} paddingX={1} flexDirection="column">
-      <text height={1} fg={props.selected ? theme.text : theme.muted}>{marker()} {props.result.page.title}  ·  {props.result.matchedIn}</text>
-      <text height={1} fg={theme.subtle}>  {props.result.page.path.join(" / ")}</text>
-      <text height={1} fg={theme.muted}>  {props.result.page.snippet}</text>
+      <text height={1} fg={props.selected ? theme.text : theme.muted}>{marker() + " " + props.result.page.title + "  ·  " + props.result.matchedIn}</text>
+      <text height={1} fg={theme.subtle}>{"  " + props.result.page.path.join(" / ")}</text>
+      <text height={1} fg={theme.muted}>{"  " + props.result.page.snippet}</text>
     </box>
   )
 }
@@ -3217,9 +3217,9 @@ function SpaceResultRow(props: { result: SpaceSearchResult; selected: boolean; a
 
   return (
     <box height={3} width="100%" backgroundColor={props.selected ? theme.accentSoft : undefined} paddingX={1} flexDirection="column">
-      <text height={1} fg={props.selected ? theme.text : theme.muted}>{marker()} {props.result.space.key}  ·  {props.result.space.name}</text>
-      <text height={1} fg={syncColor()}>  {props.result.space.syncState}  ·  {props.result.space.pageCount} pages  ·  matched {props.result.matchedIn}</text>
-      <text height={1} fg={theme.subtle}>  last synced {formatOptionalDate(props.result.space.lastSyncedAt)}</text>
+      <text height={1} fg={props.selected ? theme.text : theme.muted}>{marker() + " " + props.result.space.key + "  ·  " + props.result.space.name}</text>
+      <text height={1} fg={syncColor()}>{"  " + props.result.space.syncState + "  ·  " + props.result.space.pageCount + " pages  ·  matched " + props.result.matchedIn}</text>
+      <text height={1} fg={theme.subtle}>{"  last synced " + formatOptionalDate(props.result.space.lastSyncedAt)}</text>
     </box>
   )
 }

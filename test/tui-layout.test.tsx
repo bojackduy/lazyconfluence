@@ -4,7 +4,8 @@ import { dirname, join } from "node:path"
 import { Writable } from "node:stream"
 import { describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
-import { App, ImageViewerOverlay, NewPageOverlay, StagedChangesOverlay, documentHorizontalScrollDeltaForKey, imageRenderModeForCapabilities, nearestImageIndexForViewport, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, parseTerminalCellPixels, type SearchKeyLike } from "../src/tui/app"
+import { App, HelpOverlay, ImageViewerOverlay, NewPageOverlay, StagedChangesOverlay, documentHorizontalScrollDeltaForKey, imageRenderModeForCapabilities, nearestImageIndexForViewport, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, parseTerminalCellPixels, type SearchKeyLike } from "../src/tui/app"
+import { commandsForContext } from "../src/tui/commands"
 import { createLocalConfig } from "../src/config"
 import type { CredentialStatus } from "../src/config"
 import { openIndexRepository } from "../src/index/repository"
@@ -822,6 +823,30 @@ describe("main TUI layout", () => {
     } finally {
       dataSource.close?.()
       await setup.cleanup()
+    }
+  })
+
+  test("renders the Help overlay with available and planned commands", async () => {
+    const rendered = await testRender(() => (
+      <HelpOverlay
+        visible
+        commands={commandsForContext(["main", "navigator", "document", "changes", "image-viewer"])}
+        left={2}
+        top={1}
+        width={90}
+        height={28}
+      />
+    ), { width: 100, height: 30 })
+
+    try {
+      await rendered.renderOnce()
+
+      expect(rendered.captureCharFrame()).toContain("KEYBOARD HELP")
+      expect(rendered.captureCharFrame()).toContain("Command palette")
+      expect(rendered.captureCharFrame()).toContain("Document find")
+      expect(rendered.captureCharFrame()).toContain("not implemented yet")
+    } finally {
+      rendered.renderer.destroy()
     }
   })
 

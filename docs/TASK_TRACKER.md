@@ -20,7 +20,7 @@ Track parallel execution here. Update this file whenever a subagent starts, bloc
 | --- | --- | --- | --- | --- |
 | 01 | Foundation shell | Done | None | `subagents/01-foundation-shell.md` |
 | 02 | Domain and demo data | Done | 01 | `subagents/02-domain-demo-data.md` |
-| 03 | Keymap and command system | Not started | 01, 02 | `subagents/03-keymap-command-system.md` |
+| 03 | Keymap and command system | Done | 01, 02 | `subagents/03-keymap-command-system.md` |
 | 04 | Confluence API mapping | Done | 01, 02 | `subagents/04-confluence-api-mapping.md` |
 | 05 | Local index and search | Done | 01, 02 | `subagents/05-local-index-search.md` |
 | 06 | Reader UI and document detail | Partial | 01, 02 | `subagents/06-reader-ui-document-detail.md` |
@@ -43,7 +43,7 @@ Status values: `Not started`, `In progress`, `Blocked`, `Partial`, `Done`.
 - Sync observability is done for the first remote slice: Confluence requests time out by default, service-level progress events cover remote wait points, and CLI `sync` prints progress unless `--quiet` is set.
 - TUI date rendering is defensive: existing rows with missing or invalid timestamps display `unknown`, and future syncs use the sync timestamp when Confluence omits page dates.
 - TUI focus keys are polished for the current reader slice: `Tab` and `Shift+Tab` cycle between the navigator and document panes, navigator `h/l` fold/unfold without selecting missing detached parents, and document `h/l` scroll wide content horizontally.
-- Keymap and command registry are not started.
+- Keymap and command registry are done: command metadata and context-aware key resolution cover the reader, overlays, editing, and image viewer; `?` renders a discoverable Help overlay. Future product intents such as document find, browser open, refresh, history, and command palette are listed as unavailable until implemented.
 - Quality and integration are not started.
 
 ## Parallel Plan
@@ -57,7 +57,7 @@ Round 1:
 
 - [x] Run 05 after 01 and 02.
 - [x] Run 04 after 01 and 02.
-- [ ] Run 03 after 01 and 02.
+- [x] Run 03 after 01 and 02.
 - [ ] Continue 06 from the current partial mock-backed reader UI.
 
 Round 2:
@@ -119,6 +119,7 @@ YYYY-MM-DD  ID  Result  Verification  Follow-up
 2026-07-24  image-sixel-stretch-fit  Changed Sixel viewer sizing to stretch-fill the available native viewer region by default, with `LAZYCONFLUENCE_SIXEL_FIT=contain` available for aspect-preserving rendering.  bun run typecheck; bun test test/sixel.test.ts test/tui-layout.test.tsx --grep "Sixel|sixel" (2 pass, 0 fail, 14 assertions); bun test (131 pass, 0 fail, 632 assertions); git diff --check.  Next: re-smoke forced WezTerm Sixel and only tune cell width/height if it still underfills.
 2026-07-24  image-sixel-safe-defaults  Reverted Sixel to safer aspect-preserving `contain` by default, reduced default cell pixel estimate to 12x24 to cut payload size/lag, kept `LAZYCONFLUENCE_SIXEL_FIT=stretch` as opt-in, and expanded Sixel erasure with a margin to clear terminal raster leftovers.  bun run typecheck; bun test test/sixel.test.ts test/tui-layout.test.tsx --grep "Sixel|sixel" (2 pass, 0 fail, 15 assertions); bun test (131 pass, 0 fail, 633 assertions); git diff --check.  Next: re-smoke WezTerm forced Sixel with defaults first, then tune cell width/height only if needed.
 2026-07-24  image-sixel-cell-detect  Added adaptive Sixel sizing via terminal cell-size query (`CSI 16 t` / `CSI 6;height;width t`) when Sixel mode is selected, with existing cell-size env vars retained as overrides/fallbacks.  bun run typecheck; bun test test/sixel.test.ts test/tui-layout.test.tsx --grep "Sixel|sixel|cell pixel" (4 pass, 0 fail, 21 assertions); bun test (133 pass, 0 fail, 639 assertions); git diff --check.  Next: verify WezTerm forced Sixel logs `terminal_cell_size` detected and compare size without manual cell env overrides.
+2026-07-26  03  Added data-driven command registry, context-aware key resolver, Help overlay, and command/keymap tests; Help supports `j`/`k` or arrows for line scrolling plus `u`/`d` for viewport scrolling. Unimplemented product intents are explicitly discoverable but unavailable.  bun run typecheck; bun test test/tui-keymap.test.ts test/tui-layout.test.tsx (43 pass, 0 fail, 264 assertions).  Next: implement document find, command palette, and remaining navigation overlays from task 07.
 ```
 
 ## Contract Changes
@@ -155,4 +156,5 @@ YYYY-MM-DD  ID  Contract changed  Impacted tasks
 2026-07-23  image-auth-cache-fix  `ConfluenceClient.fetchAttachmentImage` now depends on `/api/v2/pages/{pageId}/attachments` metadata and returned REST download links.  Impacts attachment fixtures, sync media caching, and future cache diagnostics.
 2026-07-23  image-cell-rendering  Added `ImageRenderMode` and `imageRenderModeForCapabilities`; PNG previews now draw through custom half-block cell rendering instead of OpenTUI's grayscale ramp.  Impacts TUI image rendering, tests, and future native image protocol selection.
 2026-07-23  image-kitty-native  Added `src/tui/kitty.ts` and a guarded TUI Kitty overlay path tied to renderer capabilities and frame events; native output is opt-in, not default.  Impacts image rendering, terminal lifecycle cleanup, and future native protocol support.
+2026-07-26  03  Added `src/tui/commands.ts` command metadata and `src/tui/keymap.ts` context-aware pure key resolution, with Help consuming the registry.  Impacts future command palette, document find, browser open, refresh, history, and overlay wiring.
 ```

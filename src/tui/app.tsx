@@ -27,6 +27,7 @@ import type { PageDraftStatus } from "../index/repository"
 import type { ApplyPageDraftResult } from "../apply"
 import { defaultRuntimeEnv, runtimeEnvFromLegacyDemo, type RuntimeEnv } from "../runtime/env"
 import { emptyPageId, emptyReaderPage, emptySpaceSummary } from "./data"
+import { commandForId, commandsForContext, type CommandContext, type TuiCommand } from "./commands"
 import { iterm2ImageCommand } from "./iterm2"
 import { kittyDeleteImageCommand, kittyGraphicsCommand, kittyGraphicsPngCommand, kittyImageId } from "./kitty"
 import { imageDebugEnabled, imageDebugLogPath, logImageDebug } from "./image-debug"
@@ -35,6 +36,7 @@ import { createTuiRuntime, type TuiRuntime } from "./runtime"
 import { sixelImageCommand } from "./sixel"
 import type { TuiSource, TuiStagedChange } from "./source"
 import { markdownStyle, theme } from "./theme"
+import { isPlainKey, isShiftTabKey, isTabKey, resolveKeyCommand, textInputKeyAction, type TextInputAction, type TuiKey } from "./keymap"
 
 type TreeRow = {
   page: IndexedPage
@@ -55,17 +57,11 @@ type CellPixelSize = { width: number; height: number }
 
 const documentHorizontalScrollColumns = 8
 
-export type SearchKeyLike = {
-  name: string
-  sequence: string
-  ctrl: boolean
-  meta: boolean
-  shift?: boolean
-}
+export type SearchKeyLike = TuiKey
 
 type CredentialWarning = Exclude<CredentialStatus, { kind: "ready" }>
 
-export type PageSearchKeyAction = "append" | "delete" | "submit" | "close" | "next" | "previous" | "ignore"
+export type PageSearchKeyAction = TextInputAction
 
 export type ImageRenderMode = "kitty" | "iterm2" | "sixel" | "cell-color" | "cell-mono" | "placeholder"
 
@@ -130,11 +126,13 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const [editStatusMessage, setEditStatusMessage] = createSignal("")
   const [imageViewerOpen, setImageViewerOpen] = createSignal(false)
   const [imageViewerSelectedIndex, setImageViewerSelectedIndex] = createSignal(0)
+  const [helpOpen, setHelpOpen] = createSignal(false)
   const [terminalCapabilities, setTerminalCapabilities] = createSignal<TerminalCapabilities | null>(renderer.capabilities)
   const [terminalCellPixels, setTerminalCellPixels] = createSignal<CellPixelSize | null>(null)
   const [treeSitterClient, setTreeSitterClient] = createSignal<TreeSitterClient | undefined>()
   const readerImageRenderables = new Map<string, BoxRenderable>()
   let documentScrollbox: ScrollBoxRenderable | undefined
+  let helpScrollbox: ScrollBoxRenderable | undefined
   let editorFocusTimer: ReturnType<typeof setTimeout> | undefined
 
   const spaces = createMemo(() => dataSource.listSpaces())
@@ -182,6 +180,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const inlineImageRenderMode = createMemo(() => inlineImageRenderDecision().mode)
   const viewerImageRenderMode = createMemo(() => viewerImageRenderDecision().mode)
   const isNarrow = createMemo(() => dimensions().width < 96)
+  const helpCommands = commandsForContext(["main", "navigator", "document", "changes", "image-viewer"])
   const halfPageScrollAmount = createMemo(() => Math.max(6, Math.floor((dimensions().height - 9) / 2)))
   const credentialWarning = createMemo<CredentialWarning | null>(() => {
     const status = credentialStatus()
@@ -734,6 +733,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     imageCount: readerImageParts().length,
     imageViewerOpen: imageViewerOpen(),
     changesOpen: changesOpen(),
+    helpOpen: helpOpen(),
     newPageOpen: newPageOpen(),
     editorOpen: editorOpen(),
     pageSearchOpen: pageSearchOpen(),
@@ -744,11 +744,12 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     if (key.ctrl && key.name === "c") return "destroy"
     if (imageViewerOpen()) return "image-viewer"
     if (changesOpen()) return "changes-overlay"
+    if (helpOpen()) return "help-overlay"
     if (newPageOpen()) return "new-page-overlay"
     if (editorOpen()) return "editor"
     if (pageSearchOpen()) return "page-search"
     if (spaceSwitcherOpen()) return "space-switcher"
-    if (isPlainKey(key, "i")) return "open-image-viewer"
+    if (resolveKeyCommand(key, focusPane())) return "command"
     return "main"
   }
 
@@ -865,20 +866,32 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
       return
     }
 
+    if (helpOpen()) {
+      const command = resolveKeyCommand(key, "help")
+      if (command === "close-overlay") setHelpOpen(false)
+      else if (command === "move-down") helpScrollbox?.scrollBy(1)
+      else if (command === "move-up") helpScrollbox?.scrollBy(-1)
+      else if (command === "page-down") helpScrollbox?.scrollBy(1, "viewport")
+      else if (command === "page-up") helpScrollbox?.scrollBy(-1, "viewport")
+      return
+    }
+
     if (imageViewerOpen()) {
-      if (key.name === "escape" || isPlainKey(key, "q")) closeImageViewer()
-      else if (key.name === "j" || key.name === "down" || key.name === "l" || key.name === "right") moveImageViewerSelection(1)
-      else if (key.name === "k" || key.name === "up" || key.name === "h" || key.name === "left") moveImageViewerSelection(-1)
+      const command = resolveKeyCommand(key, "image-viewer")
+      if (command === "close-overlay") closeImageViewer()
+      else if (command === "next-image") moveImageViewerSelection(1)
+      else if (command === "previous-image") moveImageViewerSelection(-1)
       return
     }
 
     if (changesOpen()) {
-      if (key.name === "escape") closeChanges()
-      else if (key.name === "j" || key.name === "down") moveChangesSelection(1)
-      else if (key.name === "k" || key.name === "up") moveChangesSelection(-1)
-      else if (key.sequence === " ") toggleSelectedChange()
-      else if (isPlainKey(key, "a")) applySelectedChanges()
-      else if (isPlainKey(key, "d")) discardSelectedChanges()
+      const command = resolveKeyCommand(key, "changes")
+      if (command === "close-overlay") closeChanges()
+      else if (command === "move-down") moveChangesSelection(1)
+      else if (command === "move-up") moveChangesSelection(-1)
+      else if (command === "toggle-change") toggleSelectedChange()
+      else if (command === "apply-changes") applySelectedChanges()
+      else if (command === "discard-changes") discardSelectedChanges()
       return
     }
 
@@ -893,8 +906,9 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     }
 
     if (editorOpen()) {
-      if (key.name === "escape") closeEditor()
-      else if (key.ctrl && key.name === "t") stageEditorBuffer()
+      const command = resolveKeyCommand(key, "editor")
+      if (command === "close-overlay") closeEditor()
+      else if (command === "stage-editor") stageEditorBuffer()
       return
     }
 
@@ -922,85 +936,98 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
       return
     }
 
-    if (key.name === "q" || key.name === "escape") {
+    const command = resolveKeyCommand(key, focusPane())
+
+    if (command === "quit") {
       renderer.destroy()
       return
     }
 
-    if (key.name === "/") {
+    if (command === "show-help") {
+      helpScrollbox?.scrollTo(0)
+      setHelpOpen(true)
+      return
+    }
+
+    if (command && !commandForId(command)?.available) {
+      setEditStatusMessage(commandForId(command)?.unavailableReason ?? "This command is not available yet.")
+      return
+    }
+
+    if (command === "open-page-search") {
       openPageSearch()
       return
     }
 
-    if (key.name === "s") {
+    if (command === "open-space-switcher") {
       openSpaceSwitcher()
       return
     }
 
-    if (isPlainKey(key, "c")) {
+    if (command === "open-overview") {
       openChanges()
       return
     }
 
-    if (nextPageViewModeForKey(pageViewMode(), key)) {
+    if (command === "toggle-page-view") {
       togglePageView()
       return
     }
 
-    if (isPlainKey(key, "e")) {
+    if (command === "edit-page") {
       openEditorForSelectedPage()
       return
     }
 
-    if (isPlainKey(key, "i")) {
+    if (command === "open-image-viewer") {
       openImageViewer()
       return
     }
 
-    if (isPlainKey(key, "D")) {
+    if (command === "stage-delete") {
       stageDeleteSelectedPage()
       return
     }
 
-    if (focusPane() === "navigator" && isPlainKey(key, "N")) {
+    if (command === "create-root-page") {
       openRootNewPage()
       return
     }
 
-    if (focusPane() === "navigator" && isPlainKey(key, "n")) {
+    if (command === "create-child-page") {
       openNewPage()
       return
     }
 
-    if (isTabKey(key) || isShiftTabKey(key)) {
+    if (command === "focus-next-pane" || command === "focus-previous-pane") {
       setFocusPane(nextFocusPaneForKey(focusPane(), key))
       return
     }
 
-    if (key.name === "d") {
+    if (command === "page-down") {
       scrollDocumentBy(halfPageScrollAmount())
       return
     }
 
-    if (key.name === "u") {
+    if (command === "page-up") {
       scrollDocumentBy(-halfPageScrollAmount())
       return
     }
 
     if (focusPane() === "navigator") {
-      if (key.name === "j" || key.name === "down") moveSelection(1, treeRows(), selectedIndex(), setSelectedPageId)
-      if (key.name === "k" || key.name === "up") moveSelection(-1, treeRows(), selectedIndex(), setSelectedPageId)
-      if (key.name === "l" || key.name === "right") expandSelectedPage()
-      if (key.name === "h" || key.name === "left") collapseSelectedPage()
-      if (key.name === "return") setFocusPane(nextFocusPaneForKey(focusPane(), key))
+      if (command === "move-down") moveSelection(1, treeRows(), selectedIndex(), setSelectedPageId)
+      if (command === "move-up") moveSelection(-1, treeRows(), selectedIndex(), setSelectedPageId)
+      if (command === "move-right") expandSelectedPage()
+      if (command === "move-left") collapseSelectedPage()
+      if (command === "activate") setFocusPane(nextFocusPaneForKey(focusPane(), key))
       return
     }
 
     if (focusPane() === "document") {
       const horizontalDelta = documentHorizontalScrollDeltaForKey(key)
 
-      if (key.name === "j" || key.name === "down") scrollDocumentBy(1)
-      if (key.name === "k" || key.name === "up") scrollDocumentBy(-1)
+      if (command === "move-down") scrollDocumentBy(1)
+      if (command === "move-up") scrollDocumentBy(-1)
       if (horizontalDelta !== 0) scrollDocumentHorizontallyBy(horizontalDelta)
       return
     }
@@ -1077,6 +1104,15 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
         left={dimensions().width < 72 ? 2 : 8}
         width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 4 : 16))}
         height={Math.min(16, Math.max(10, dimensions().height - 8))}
+      />
+      <HelpOverlay
+        visible={helpOpen()}
+        commands={helpCommands}
+        left={dimensions().width < 72 ? 1 : 4}
+        top={2}
+        width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 2 : 8))}
+        height={Math.max(10, dimensions().height - 4)}
+        setScrollbox={(scrollbox) => { helpScrollbox = scrollbox }}
       />
       <Show when={imageViewerOpen()} fallback={<box height={0} />}>
         <ImageViewerOverlay
@@ -2551,6 +2587,66 @@ function SpaceSwitcherOverlay(props: { visible: boolean; query: string; results:
   )
 }
 
+export function HelpOverlay(props: { visible: boolean; commands: readonly TuiCommand[]; left: number; top: number; width: number; height: number; setScrollbox?: (scrollbox: ScrollBoxRenderable) => void }) {
+  const groups = ["Global", "Navigation", "Reader", "Editing", "Images"] as const
+
+  return (
+    <box
+      visible={props.visible}
+      position="absolute"
+      left={props.left}
+      top={props.top}
+      width={props.width}
+      height={props.height}
+      border
+      borderStyle="rounded"
+      borderColor={theme.borderActive}
+      backgroundColor="#08111f"
+      paddingX={2}
+      paddingY={1}
+      flexDirection="column"
+      zIndex={80}
+    >
+      <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
+        <text height={1} fg={theme.accent} attributes={1}>KEYBOARD HELP</text>
+        <text height={1} fg={theme.muted}>j/k scroll · u/d page · ?/Esc/q close</text>
+      </box>
+      <text height={1} fg={theme.subtle}>Available commands reflect the current reader and overlays. Muted commands are planned but unavailable.</text>
+      <box height={1} />
+      <scrollbox ref={props.setScrollbox} flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
+        <box flexDirection="column" width="100%">
+          <For each={groups}>{(group) => {
+            const commands = props.commands.filter((command) => command.group === group)
+            if (!commands.length) return <box height={0} />
+
+            return (
+              <box flexDirection="column" marginBottom={1}>
+                <text height={1} fg={theme.accent} attributes={1}>{group.toUpperCase()}</text>
+                <For each={commands}>{(command) => <HelpCommandRow command={command} />}</For>
+              </box>
+            )
+          }}</For>
+        </box>
+      </scrollbox>
+    </box>
+  )
+}
+
+function HelpCommandRow(props: { command: TuiCommand }) {
+  const color = () => props.command.available ? theme.text : theme.muted
+  const detail = () => props.command.available ? props.command.description : props.command.unavailableReason ?? props.command.description
+
+  return (
+    <box height={2} width="100%" flexDirection="column" paddingLeft={1}>
+      <box height={1} flexDirection="row">
+        <text height={1} width={24} fg={props.command.available ? theme.good : theme.subtle}>{props.command.keys}</text>
+        <text height={1} fg={color()} attributes={props.command.available ? 1 : 0}>{props.command.label}</text>
+      </box>
+      <text height={1} paddingLeft={24} fg={props.command.available ? theme.subtle : theme.muted}>{detail()}</text>
+    </box>
+  )
+}
+
 function SearchResultRow(props: { result: SearchResult; selected: boolean }) {
   const marker = () => (props.selected ? "▶" : " ")
 
@@ -2668,13 +2764,7 @@ function moveSelection(direction: number, rows: TreeRow[], selectedIndex: number
 }
 
 export function pageSearchKeyAction(key: SearchKeyLike): PageSearchKeyAction {
-  if (key.name === "escape") return "close"
-  if (key.name === "return" || key.name === "enter") return "submit"
-  if (key.name === "backspace") return "delete"
-  if (isSearchCharacter(key)) return "append"
-  if (key.name === "down" || (key.ctrl && (key.name === "j" || key.name === "n"))) return "next"
-  if (key.name === "up" || (key.ctrl && (key.name === "k" || key.name === "p"))) return "previous"
-  return "ignore"
+  return textInputKeyAction(key)
 }
 
 export function nextFocusPaneForKey(current: FocusPane, key: SearchKeyLike): FocusPane {
@@ -2702,17 +2792,6 @@ export function documentHorizontalScrollDeltaForKey(key: SearchKeyLike): number 
   return 0
 }
 
-function isSearchCharacter(key: SearchKeyLike) {
-  if (key.ctrl || key.meta) return false
-  if (["return", "tab", "escape", "backspace"].includes(key.name)) return false
-  if (key.sequence === "\t" || key.sequence === "\x1B[Z") return false
-  return key.sequence.length === 1 && key.sequence >= " "
-}
-
-function isPlainKey(key: SearchKeyLike, value: string) {
-  return !key.ctrl && !key.meta && (key.name === value || key.sequence === value)
-}
-
 function keyDebugData(key: SearchKeyLike) {
   return {
     keyName: key.name,
@@ -2733,14 +2812,6 @@ function readableKeySequence(sequence: string) {
 
 function keySequenceHex(sequence: string) {
   return [...sequence].map((character) => character.codePointAt(0)?.toString(16).padStart(2, "0") ?? "").join(" ")
-}
-
-function isTabKey(key: SearchKeyLike) {
-  return key.name === "tab" || key.sequence === "\t"
-}
-
-function isShiftTabKey(key: SearchKeyLike) {
-  return (isTabKey(key) && key.shift) || key.name === "backtab" || key.name === "shift-tab" || key.sequence === "\x1B[Z"
 }
 
 function applyBatchMessage(results: ApplyPageDraftResult[]) {

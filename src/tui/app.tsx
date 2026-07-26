@@ -28,6 +28,7 @@ import { loadCredentialStatus, type CredentialStatus } from "../config"
 import type { PageDraftStatus } from "../index/repository"
 import type { ApplyPageDraftResult } from "../apply"
 import { defaultRuntimeEnv, runtimeEnvFromLegacyDemo, type RuntimeEnv } from "../runtime/env"
+import { popNavigationLocation, pushNavigationLocation, type NavigationLocation } from "./history"
 import { emptyPageId, emptyReaderPage, emptySpaceSummary } from "./data"
 import { commandForId, commandsForContext, type CommandContext, type TuiCommand } from "./commands"
 import { iterm2ImageCommand } from "./iterm2"
@@ -56,6 +57,7 @@ type NavigatorCollapseRow = {
 
 type ReaderImagePart = Extract<ReaderContentPart, { kind: "image" }>
 type CellPixelSize = { width: number; height: number }
+type NavigationTarget = Pick<NavigationLocation, "spaceKey" | "pageViewMode" | "pageId" | "expandedPageIds"> & { focusPane?: FocusPane }
 
 export type DocumentFindMatch = { line: number; column: number; preview: string }
 
@@ -105,6 +107,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
   const initialSelectedPageId = initialPageViewMode === "current" ? initialPageId : initialViewPageId
   const [selectedPageId, setSelectedPageId] = createSignal(initialSelectedPageId)
   const [expandedPageIds, setExpandedPageIds] = createSignal(new Set(initialSelectedPageId === emptyPageId ? [] : [initialSelectedPageId]))
+  const [navigationHistory, setNavigationHistory] = createSignal<NavigationLocation[]>([])
   const [focusPane, setFocusPane] = createSignal<"navigator" | "document">("navigator")
   const [pageSearchOpen, setPageSearchOpen] = createSignal(false)
   const [pageSearchQuery, setPageSearchQuery] = createSignal("")
@@ -145,6 +148,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
   let documentScrollbox: ScrollBoxRenderable | undefined
   let helpScrollbox: ScrollBoxRenderable | undefined
   let editorFocusTimer: ReturnType<typeof setTimeout> | undefined
+  let historyRestoreTimer: ReturnType<typeof setTimeout> | undefined
 
   const spaces = createMemo(() => dataSource.listSpaces())
   const space = createMemo(() => spaces().find((candidate) => candidate.key === activeSpaceKey()) ?? emptySpaceSummary(activeSpaceKey()))
@@ -306,6 +310,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
 
   onCleanup(() => {
     clearEditorFocusTimer()
+    clearHistoryRestoreTimer()
     if (!props.dataSource) dataSource.close?.()
   })
 
@@ -314,6 +319,12 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
 
     clearTimeout(editorFocusTimer)
     editorFocusTimer = undefined
+  }
+
+  const clearHistoryRestoreTimer = () => {
+    if (!historyRestoreTimer) return
+    clearTimeout(historyRestoreTimer)
+    historyRestoreTimer = undefined
   }
 
   const focusEditorInputAfterOpen = (pageId: string) => {
@@ -461,6 +472,54 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     switchPageView(pageViewMode() === "current" ? "archived" : "current")
   }
 
+  const currentNavigationLocation = (): NavigationLocation => ({
+    spaceKey: activeSpaceKey(),
+    pageViewMode: pageViewMode(),
+    pageId: selectedPageId(),
+    expandedPageIds: [...expandedPageIds()],
+    scrollLeft: documentScrollbox?.scrollLeft ?? 0,
+    scrollTop: documentScrollbox?.scrollTop ?? 0,
+  })
+
+  const navigateToPage = (target: NavigationTarget) => {
+    const current = currentNavigationLocation()
+    const changed = current.spaceKey !== target.spaceKey || current.pageViewMode !== target.pageViewMode || current.pageId !== target.pageId
+    if (changed) setNavigationHistory((history) => pushNavigationLocation(history, current))
+
+    setActiveSpaceKey(target.spaceKey)
+    setPageViewMode(target.pageViewMode)
+    setSelectedPageId(target.pageId)
+    setExpandedPageIds(new Set(target.expandedPageIds))
+    documentScrollbox?.scrollTo(0)
+    setFocusPane(target.focusPane ?? "document")
+  }
+
+  const goBack = () => {
+    const result = popNavigationLocation(navigationHistory())
+    if (!result.location) {
+      setEditStatusMessage("No earlier page in history.")
+      return
+    }
+
+    const location = result.location
+    setNavigationHistory(result.history)
+    const available = dataSource.getPagesForSpace(location.spaceKey, location.pageViewMode)
+    const pageExists = available.some((page) => page.pageId === location.pageId)
+    const pageId = pageExists ? location.pageId : dataSource.getDefaultPageId(location.spaceKey, location.pageViewMode) ?? emptyPageId
+
+    setActiveSpaceKey(location.spaceKey)
+    setPageViewMode(location.pageViewMode)
+    setSelectedPageId(pageId)
+    setExpandedPageIds(new Set(location.expandedPageIds))
+    setFocusPane("document")
+    clearHistoryRestoreTimer()
+    historyRestoreTimer = setTimeout(() => {
+      historyRestoreTimer = undefined
+      documentScrollbox?.scrollTo({ x: location.scrollLeft, y: location.scrollTop })
+    }, 0)
+    setEditStatusMessage(pageExists ? `Returned to ${pageId}.` : "The previous page is no longer available; opened the space default instead.")
+  }
+
   const closePageSearch = () => {
     setPageSearchOpen(false)
     setPageSearchQuery("")
@@ -538,6 +597,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     else if (command.id === "open-document-find") openDocumentFind()
     else if (command.id === "open-space-switcher") openSpaceSwitcher()
     else if (command.id === "open-browser") openSelectedPageInBrowser()
+    else if (command.id === "go-back") goBack()
     else if (command.id === "open-overview") openChanges()
     else if (command.id === "toggle-page-view") togglePageView()
     else if (command.id === "edit-page") openEditorForSelectedPage()
@@ -753,9 +813,12 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     const result = pageSearchResults()[pageSearchSelectedIndex()]
 
     if (!result) return
-    setSelectedPageId(result.page.pageId)
-    documentScrollbox?.scrollTo(0)
-    setFocusPane("document")
+    navigateToPage({
+      spaceKey: activeSpaceKey(),
+      pageViewMode: pageViewMode(),
+      pageId: result.page.pageId,
+      expandedPageIds: [...expandedPageIds()],
+    })
     closePageSearch()
   }
 
@@ -769,11 +832,13 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     if (!result) return
 
     const defaultPageId = dataSource.getDefaultPageId(result.space.key) ?? emptyPageId
-    setActiveSpaceKey(result.space.key)
-    setSelectedPageId(defaultPageId)
-    setExpandedPageIds(new Set(defaultPageId === emptyPageId ? [] : [defaultPageId]))
-    documentScrollbox?.scrollTo(0)
-    setFocusPane("navigator")
+    navigateToPage({
+      spaceKey: result.space.key,
+      pageViewMode: "current",
+      pageId: defaultPageId,
+      expandedPageIds: defaultPageId === emptyPageId ? [] : [defaultPageId],
+      focusPane: "navigator",
+    })
     closeSpaceSwitcher()
   }
 
@@ -1113,6 +1178,11 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
 
     if (command === "open-browser") {
       openSelectedPageInBrowser()
+      return
+    }
+
+    if (command === "go-back") {
+      goBack()
       return
     }
 

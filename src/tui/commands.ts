@@ -60,7 +60,7 @@ export const tuiCommands: readonly TuiCommand[] = [
   command("open-space-switcher", "Switch space", "Choose another locally indexed space.", "s", "Global", ["main"], true),
   command("open-browser", "Open in browser", "Open the selected Confluence page in your browser.", "o", "Global", ["main"], true),
   command("refresh", "Refresh", "Sync configured spaces from Confluence.", "r", "Global", ["main"], false, "Sync runs explicitly from the CLI today."),
-  command("go-back", "Go back", "Return to the previous page in navigation history.", "b", "Navigation", ["main"], false, "Navigation history is not implemented yet."),
+  command("go-back", "Go back", "Return to the previous page in navigation history.", "b", "Navigation", ["main"], true),
   command("focus-next-pane", "Next pane", "Move focus between navigator and document.", "Tab", "Navigation", ["main", "navigator", "document"], true),
   command("focus-previous-pane", "Previous pane", "Move focus to the previous pane.", "Shift+Tab", "Navigation", ["main", "navigator", "document"], true),
   command("move-down", "Move down", "Move selection or scroll down.", "j · Down", "Navigation", ["navigator", "document", "changes", "image-viewer", "help"], true),

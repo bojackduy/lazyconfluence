@@ -56,14 +56,14 @@ Work in this order unless product priorities change. Complete one slice and upda
 - [x] Show unavailable commands with their reason, but do not run them.
 - [x] Preserve text-input behavior and `Esc` close behavior.
 
-### 3. Browser Open and Navigation History (`o`, `b`) - Partial
+### 3. Browser Open and Navigation History (`o`, `b`) - Complete
 
 - [x] Add an explicit browser-open service/hook that opens only the selected canonical page URL.
 - [x] Keep browser opening out of rendering components and never use it automatically.
-- [ ] Record local page navigation history when selection changes through search or link following.
-- [ ] Implement `b` to restore page, space, view mode, and navigator expansion as needed.
+- [x] Record local page navigation history for Page Search and Space Switcher selection. Future link following will use the same navigation helper.
+- [x] Implement `b` to restore page, space, view mode, navigator expansion, and document scroll offsets.
 - [x] Mark `open-browser` available after tests pass.
-- [ ] Mark `go-back` available only after tests pass.
+- [x] Mark `go-back` available after tests pass.
 
 ### 4. Related Links and Outline Navigation (`l`, `Enter`)
 
@@ -117,4 +117,5 @@ YYYY-MM-DD  Slice  Result  Verification  Next
 2026-07-26  Command Palette  Added `p` command discovery using the shared registry, native input filtering, available-action dispatch, and unavailable-command reasons.  bun run typecheck; bun test (145 pass, 0 fail, 700 assertions); git diff --check.  Browser open and navigation history.
 2026-07-26  Command Palette scroll  Palette selection now calls `scrollChildIntoView` so arrow/Ctrl navigation keeps the active command visible.  bun run typecheck; bun test test/tui-keymap.test.ts test/tui-layout.test.tsx (48 pass, 0 fail, 288 assertions); git diff --check.  Browser open and navigation history.
 2026-07-26  Browser open  Added cross-platform explicit browser opening for canonical `http`/`https` page URLs: macOS `open`, Linux `xdg-open`, and Windows `cmd.exe start`. `o` and the Command Palette use the same injected launcher.  bun run typecheck; bun test (149 pass, 0 fail, 709 assertions); git diff --check.  Navigation history.
+2026-07-26  Navigation history  Added a bounded in-memory history for Page Search and Space Switcher navigation. `b` restores page, space, view, navigator expansion, and document offsets; missing historic pages safely fall back.  bun run typecheck; bun test (151 pass, 0 fail, 713 assertions); git diff --check.  Related-link navigation.
 ```

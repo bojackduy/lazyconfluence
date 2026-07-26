@@ -32,6 +32,7 @@ describe("TUI command registry", () => {
     expect(commandForId("open-document-find")).toMatchObject({ available: true })
     expect(commandForId("open-command-palette")).toMatchObject({ available: true })
     expect(commandForId("open-browser")).toMatchObject({ available: true })
+    expect(commandForId("go-back")).toMatchObject({ available: true })
     expect(commandForId("refresh")).toMatchObject({ available: false, unavailableReason: expect.stringContaining("CLI") })
   })
 })

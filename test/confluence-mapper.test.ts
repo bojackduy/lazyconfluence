@@ -81,6 +81,28 @@ describe("Confluence mapper", () => {
     ])
   })
 
+  test("classifies legacy Confluence page URLs as internal links", () => {
+    const page: ConfluencePage = {
+      id: "101",
+      title: "Project Architecture",
+      parentId: "100",
+      version: { number: 7, createdAt: "2026-07-19T11:05:00Z" },
+      body: { storage: { value: '<p><a href="/wiki/pages/viewpage.action?pageId=102">Release Checklist</a></p>' } },
+    }
+
+    const mapped = mapConfluencePage({
+      page,
+      space,
+      baseUrl: "https://example.atlassian.net/wiki",
+      ancestors: [{ id: "100", title: "Engineering Home" }],
+    })
+
+    expect(mapped.links[0]).toMatchObject({
+      targetUrl: "https://example.atlassian.net/wiki/pages/viewpage.action?pageId=102",
+      kind: "internal",
+    })
+  })
+
   test("preserves unknown Confluence macros as opaque sidecar nodes", () => {
     const page: ConfluencePage = {
       id: "200",

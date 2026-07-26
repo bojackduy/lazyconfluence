@@ -1,7 +1,7 @@
 import type { IndexedPage, PageLink, SpaceSummary } from "../model"
 import type { CanonicalDocument, MappingSidecar, SourceRepresentation } from "../document/model"
 import { documentLinks, documentSnippet, renderDocumentMarkdown } from "../document/projection"
-import { pageUrlKey } from "../index/search"
+import { confluencePageIdFromUrl, pageUrlKey } from "../index/search"
 import { absoluteConfluenceWebUrl, normalizeConfluenceBaseUrl, type ConfluencePage, type ConfluenceSpace } from "./client"
 import { parseConfluenceStorage } from "./html"
 
@@ -172,5 +172,5 @@ function linksFromDocument(pageId: string, document: CanonicalDocument) {
 }
 
 function isConfluencePageUrl(url: string) {
-  return pageUrlKey(url).includes("/spaces/") && pageUrlKey(url).includes("/pages/")
+  return confluencePageIdFromUrl(url) !== null
 }

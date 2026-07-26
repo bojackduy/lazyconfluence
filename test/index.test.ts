@@ -98,6 +98,9 @@ describe("local index repository", () => {
       const matched = repository.matchPageUrl("https://example.atlassian.net/wiki/spaces/ENG/pages/101/Project+Architecture?focusedCommentId=123#decision-context")
 
       expect(matched?.pageId).toBe("architecture")
+      repository.upsertPage({ ...architecture, pageId: "103", url: "https://example.atlassian.net/wiki/spaces/ENG/pages/103/Legacy+Page" })
+      expect(repository.matchPageUrl("https://example.atlassian.net/wiki/pages/viewpage.action?pageId=103")?.pageId).toBe("103")
+      expect(repository.matchPageUrl("https://other.atlassian.net/wiki/pages/viewpage.action?pageId=103")).toBeNull()
       expect(repository.matchPageUrl("https://example.atlassian.net/wiki/spaces/ENG/pages/999/Missing")).toBeNull()
     })
   })

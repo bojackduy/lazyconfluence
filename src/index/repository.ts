@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite"
 import type { CanonicalDocument, MappingSidecar, SourceRepresentation } from "../document/model"
 import type { IndexedPage, MediaAsset, PageLink, PageLinkKind, PageStatusFilter, SearchResult, SpaceSummary, SyncState } from "../model"
 import { openIndexDatabase, type IndexDatabase, type OpenIndexDatabaseOptions } from "./db"
-import { compareSearchResults, ftsPrefixQuery, normalizeSearchText, pageUrlKey, scorePageSearchResult } from "./search"
+import { compareSearchResults, confluencePageIdFromUrl, ftsPrefixQuery, normalizeSearchText, pageUrlKey, scorePageSearchResult } from "./search"
 
 interface PageRow {
   page_id: string
@@ -654,8 +654,13 @@ export class IndexRepository {
 
   matchPageUrl(url: string): IndexedPage | null {
     const row = this.database.query("SELECT * FROM pages WHERE url_key = ?").get(pageUrlKey(url)) as PageRow | null
+    if (row) return pageFromRow(row)
 
-    return row ? pageFromRow(row) : null
+    const pageId = confluencePageIdFromUrl(url)
+    if (!pageId) return null
+
+    const page = this.getPage(pageId)
+    return page && urlsShareOrigin(page.url, url) ? page : null
   }
 
   searchPagesInSpace(spaceKey: string, query: string, limit = 20, status: PageStatusFilter = "current"): SearchResult[] {
@@ -799,6 +804,14 @@ export function openIndexRepository(input: string | OpenIndexDatabaseOptions = {
   const handle: IndexDatabase = openIndexDatabase(input)
 
   return new IndexRepository(handle.database, () => handle.close(), handle.path)
+}
+
+function urlsShareOrigin(left: string, right: string) {
+  try {
+    return new URL(left).origin === new URL(right).origin
+  } catch {
+    return false
+  }
 }
 
 function pageFromRow(row: PageRow): IndexedPage {

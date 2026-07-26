@@ -2993,7 +2993,7 @@ export function DocumentFindOverlay(props: { visible: boolean; query: string; ma
       zIndex={25}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.accent}><b>FIND IN DOCUMENT</b></text>
+        <text height={1} fg={theme.accent} attributes={1}>FIND IN DOCUMENT</text>
         <text height={1} fg={theme.muted}>{props.pageTitle}</text>
       </box>
       <SearchInput visible={props.visible} prefix="f" value={props.query} placeholder="type text to find" onInput={props.onQueryChange} onKeyDown={props.onKeyDown} />
@@ -3040,7 +3040,7 @@ function SpaceSwitcherOverlay(props: { visible: boolean; query: string; results:
       zIndex={30}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.accent}><b>SWITCH SPACE</b></text>
+        <text height={1} fg={theme.accent} attributes={1}>SWITCH SPACE</text>
         <text height={1} fg={theme.muted}>active: {props.activeSpaceKey}</text>
       </box>
       <SearchInput visible={props.visible} prefix="s" value={props.query} placeholder="type space key or name" onInput={props.onQueryChange} onKeyDown={props.onKeyDown} />
@@ -3086,7 +3086,7 @@ export function CommandPaletteOverlay(props: { visible: boolean; query: string; 
       zIndex={35}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.accent}><b>COMMAND PALETTE</b></text>
+        <text height={1} fg={theme.accent} attributes={1}>COMMAND PALETTE</text>
         <text height={1} fg={theme.muted}>p actions</text>
       </box>
       <SearchInput visible={props.visible} prefix="p" value={props.query} placeholder="type an action, key, or description" onInput={props.onQueryChange} onKeyDown={props.onKeyDown} />
@@ -3152,7 +3152,7 @@ export function HelpOverlay(props: { visible: boolean; commands: readonly TuiCom
       zIndex={80}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.accent}><b>KEYBOARD HELP</b></text>
+        <text height={1} fg={theme.accent} attributes={1}>KEYBOARD HELP</text>
         <text height={1} fg={theme.muted}>j/k scroll · u/d page · ?/Esc/q close</text>
       </box>
       <text height={1} fg={theme.subtle}>Available commands reflect the current reader and overlays. Muted commands are planned but unavailable.</text>
@@ -3165,7 +3165,7 @@ export function HelpOverlay(props: { visible: boolean; commands: readonly TuiCom
 
             return (
               <box flexDirection="column" marginBottom={1}>
-                <text height={1} fg={theme.accent}><b>{group.toUpperCase()}</b></text>
+                <text height={1} fg={theme.accent} attributes={1}>{group.toUpperCase()}</text>
                 <For each={commands}>{(command) => <HelpCommandRow command={command} />}</For>
               </box>
             )

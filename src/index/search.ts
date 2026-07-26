@@ -57,6 +57,19 @@ export function pageUrlKey(value: string) {
   }
 }
 
+export function confluencePageIdFromUrl(value: string) {
+  try {
+    const url = new URL(value.trim())
+    const canonicalMatch = /\/(?:wiki\/)?spaces\/[^/]+\/pages\/([^/]+)(?:\/|$)/i.exec(url.pathname)
+    if (canonicalMatch) return canonicalMatch[1]
+
+    if (!/\/(?:wiki\/)?pages\/viewpage\.action$/i.test(url.pathname)) return null
+    return url.searchParams.get("pageId")?.trim() || null
+  } catch {
+    return null
+  }
+}
+
 function safeDecode(value: string) {
   try {
     return decodeURIComponent(value)

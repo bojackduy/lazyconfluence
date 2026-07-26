@@ -132,6 +132,7 @@ YYYY-MM-DD  ID  Result  Verification  Follow-up
 2026-07-26  navigation-history  Added bounded in-memory history for Page Search and Space Switcher navigation. `b` restores page, space, view, expanded navigator nodes, and document scroll offsets; missing historic pages safely fall back.  bun run typecheck; bun test (151 pass, 0 fail, 713 assertions); git diff --check.  Next: related-link navigation.
 2026-07-27  related-outline-navigation  Added a selectable Related/Outline side rail and third Tab focus pane. Internal targets use history-aware local navigation, external URLs use the explicit browser launcher, and outline headings scroll to their document source lines.  bun run typecheck; bun test (156 pass, 0 fail, 727 assertions); git diff --check.  Next: all-space page search.
 2026-07-27  related-link-local-fallback  Related links now re-check their canonical URL against the complete local index at activation time. A match opens locally and switches spaces when needed; only absent targets open in the browser.  bun run typecheck; bun test (156 pass, 0 fail, 728 assertions); git diff --check.  Next: all-space page search.
+2026-07-27  legacy-related-link-resolution  Added same-origin resolution for legacy Confluence `viewpage.action?pageId=...` links, which are present in the local index. These links now navigate locally at activation and are classified as internal on future syncs.  bun run typecheck; bun test (157 pass, 0 fail, 731 assertions); git diff --check.  Next: all-space page search.
 ```
 
 ## Contract Changes

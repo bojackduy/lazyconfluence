@@ -881,6 +881,7 @@ describe("main TUI layout", () => {
     }
   })
 
+
   test("focus keys keep h/l document-local and map Tab between panes", () => {
     expect(nextFocusPaneForKey("navigator", key("tab", "\t"))).toBe("document")
     expect(nextFocusPaneForKey("document", key("tab", "\t"))).toBe("navigator")

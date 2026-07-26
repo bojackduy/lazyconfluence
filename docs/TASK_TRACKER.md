@@ -124,6 +124,7 @@ YYYY-MM-DD  ID  Result  Verification  Follow-up
 2026-07-26  03  Added data-driven command registry, context-aware key resolver, Help overlay, and command/keymap tests; Help supports `j`/`k` or arrows for line scrolling plus `u`/`d` for viewport scrolling. Unimplemented product intents are explicitly discoverable but unavailable.  bun run typecheck; bun test test/tui-keymap.test.ts test/tui-layout.test.tsx (43 pass, 0 fail, 264 assertions).  Next: implement document find, command palette, and remaining navigation overlays from task 07.
 2026-07-26  07  Added a local-only document-find overlay with case-insensitive rendered-Markdown matches, wraparound navigation, and document scrolling. `f` is now available; Enter/Ctrl+N advances, Shift+Enter/Ctrl+P moves back, and printable text remains searchable.  bun run typecheck; bun test (143 pass, 0 fail, 690 assertions); git diff --check.  Next: command palette.
 2026-07-26  07  Replaced fake page-search, document-find, and space-switcher input rows with focused native OpenTUI inputs. Placeholders render muted and the renderer controls the blinking cursor over the leading placeholder character.  bun run typecheck; bun test test/tui-keymap.test.ts test/tui-layout.test.tsx (46 pass, 0 fail, 278 assertions).  Next: command palette.
+2026-07-26  07  Deferred native search-input focus by one event-loop tick so overlay opener keys such as `/` and `f` cannot become query text.  bun run typecheck; bun test (143 pass, 0 fail, 690 assertions); git diff --check.  Next: command palette.
 ```
 
 ## Contract Changes

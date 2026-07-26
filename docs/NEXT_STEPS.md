@@ -112,4 +112,5 @@ YYYY-MM-DD  Slice  Result  Verification  Next
 2026-07-26  Keymap + Help  Command registry, context-aware routing, and Help scrolling implemented.  bun run typecheck; bun test (140 pass, 0 fail, 676 assertions); git diff --check.  Document find.
 2026-07-26  Document Find  Local Markdown find overlay with case-insensitive matches, wraparound selection, and document scrolling implemented.  bun run typecheck; bun test (143 pass, 0 fail, 690 assertions); git diff --check.  Command palette.
 2026-07-26  Search input polish  Replaced fake search-field text and underscore cursors with focused native OpenTUI inputs for page search, document find, and space switching. Placeholders use muted text and the renderer owns the blinking cursor.  bun run typecheck; bun test test/tui-keymap.test.ts test/tui-layout.test.tsx (46 pass, 0 fail, 278 assertions).  Command palette.
+2026-07-26  Search opener focus  Deferred native search-input focus by one tick so `/` and `f` open their overlays without leaking into the query.  bun run typecheck; bun test (143 pass, 0 fail, 690 assertions); git diff --check.  Command palette.
 ```

@@ -5,6 +5,7 @@ import {
   CliRenderEvents,
   CodeRenderable,
   type CliRenderer,
+  type InputRenderable,
   type OptimizedBuffer,
   RGBA,
   TextAttributes,
@@ -2639,12 +2640,29 @@ function PageSearchOverlay(props: { visible: boolean; query: string; results: Se
 }
 
 function SearchInput(props: { visible: boolean; prefix: string; value: string; placeholder: string; onInput: (value: string) => void; onKeyDown: (key: SearchKeyLike) => boolean }) {
+  const [input, setInput] = createSignal<InputRenderable>()
+
+  createEffect(() => {
+    const node = input()
+    if (!props.visible || !node || node.isDestroyed) return
+
+    // Let the shortcut that opened the overlay finish before the input captures text.
+    const timer = setTimeout(() => node.focus(), 1)
+    onCleanup(() => clearTimeout(timer))
+  })
+
+  createEffect(() => {
+    const node = input()
+    if (!node || node.isDestroyed || props.visible) return
+    node.blur()
+  })
+
   return (
     <box height={1} flexDirection="row" width="100%">
       <text height={1} fg={theme.text}>{props.prefix} </text>
       <input
+        ref={setInput}
         value={props.value}
-        focused={props.visible}
         flexGrow={1}
         backgroundColor="#08111f"
         focusedBackgroundColor="#08111f"

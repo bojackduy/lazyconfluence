@@ -4,6 +4,7 @@ import type { FetchLike } from "../confluence/client"
 import { formatMarkdownDiff, readEditableDraftInput, savePageDraft, type EditableDraftInput } from "../editing"
 import { openIndexRepository, type IndexRepository, type PageBodyArtifact, type PageCreate, type PageDelete, type PageDraft, type PageDraftStatus } from "../index/repository"
 import { compareSearchResults, pageUrlKey, scorePageSearchResult } from "../index/search"
+import { reloadConfluencePage } from "../sync"
 import { getDefaultPageId as getDefaultMockPageId, getPagesForSpace as getMockPagesForSpace, getReaderPage as getMockReaderPage, mockPages, mockSpaces, searchPagesInSpace as searchMockPagesInSpace, searchSpaces as searchMockSpaces } from "../mock-data"
 import type { IndexedPage, PageViewMode, ReaderPage, SearchResult, SpaceSearchResult, SpaceSummary } from "../model"
 
@@ -30,6 +31,7 @@ export interface TuiDataSource {
   listStagedDraftChanges: (spaceKey: string) => TuiDraftChange[]
   listStagedChanges: (spaceKey: string) => TuiStagedChange[]
   listSpaces: () => SpaceSummary[]
+  reloadPage: (pageId: string) => Promise<ReloadTuiPageResult>
   savePageDraft: (pageId: string, draftMarkdown: string) => SaveTuiPageDraftResult
   searchPagesInSpace: (spaceKey: string, query: string, view?: PageViewMode) => SearchResult[]
   searchSpaces: (query: string) => SpaceSearchResult[]
@@ -50,6 +52,10 @@ export type SaveTuiPageDraftResult =
   | { status: "saved"; pageTitle: string }
   | { status: "cleared"; pageTitle: string }
   | { status: "unchanged"; pageTitle: string }
+
+export type ReloadTuiPageResult =
+  | { status: "reloaded"; pageTitle: string }
+  | { status: "blocked"; pageTitle: string; reason: "local-draft" | "demo-mode" }
 
 export interface TuiDraftChange {
   kind: "update"
@@ -196,6 +202,14 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
         .filter((change): change is TuiDeleteChange => change !== null && change.page.spaceKey === spaceKey),
     ].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.title.localeCompare(right.title)),
     listSpaces: () => repository.listSpaces(),
+    reloadPage: async (pageId) => {
+      const page = repository.getPage(pageId)
+      if (!page) throw new Error(`Page ${pageId} is not in the local index.`)
+      if (repository.getPageDraft(pageId)) return { status: "blocked", pageTitle: page.title, reason: "local-draft" }
+
+      const result = await reloadConfluencePage(pageId, { repository, env: options.env, fetch: options.fetch, now })
+      return { status: "reloaded", pageTitle: result.page.title }
+    },
     savePageDraft: (pageId, draftMarkdown) => saveTuiPageDraft(repository, pageId, draftMarkdown, now),
     searchPagesInSpace: (spaceKey, query, view = "current") => searchPagesWithCreates(repository, spaceKey, query, 20, view),
     searchSpaces: (query) => searchSpaces(repository.listSpaces(), query),
@@ -308,6 +322,7 @@ export function createMockTuiDataSource(): TuiDataSource {
     listStagedDraftChanges: () => [],
     listStagedChanges: () => [],
     listSpaces: () => mockSpaces,
+    reloadPage: async (pageId) => ({ status: "blocked", pageTitle: mockPageTitle(pageId), reason: "demo-mode" }),
     savePageDraft: (pageId) => ({ status: "unchanged", pageTitle: mockPageTitle(pageId) }),
     searchPagesInSpace: (spaceKey, query, view = "current") => view === "archived" ? [] : searchMockPagesInSpace(spaceKey, query),
     searchSpaces: (query) => searchMockSpaces(query),

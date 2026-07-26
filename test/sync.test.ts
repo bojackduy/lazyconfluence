@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test"
 import { createLocalConfig, saveLocalAuth } from "../src/config"
 import type { FetchLike } from "../src/confluence/client"
 import { openIndexRepository } from "../src/index/repository"
-import { syncConfluence, SyncServiceError } from "../src/sync"
+import { reloadConfluencePage, syncConfluence, SyncServiceError } from "../src/sync"
 
 describe("sync service", () => {
   test("refuses to sync without local config and does not call the network", async () => {
@@ -134,6 +134,65 @@ describe("sync service", () => {
         repository.close()
       }
     } finally {
+      await setup.cleanup()
+    }
+  })
+
+  test("reloads one indexed page without syncing or pruning its space", async () => {
+    const setup = await createSyncTestSetup()
+    const calls: string[] = []
+    const repository = openIndexRepository({ path: setup.dbPath })
+
+    try {
+      repository.upsertSpace({ key: "ENG", name: "Engineering", lastSyncedAt: "2026-07-20T10:00:00Z", pageCount: 2, syncState: "fresh" })
+      repository.upsertPages([
+        {
+          pageId: "100",
+          spaceKey: "ENG",
+          title: "Engineering Home",
+          url: "https://example.atlassian.net/wiki/spaces/ENG/pages/100/Engineering+Home",
+          parentId: null,
+          path: ["Engineering Home"],
+          owner: "owner",
+          updatedAt: "2026-07-20T10:00:00Z",
+          contentMarkdown: "# Engineering Home",
+          snippet: "Home",
+        },
+        {
+          pageId: "101",
+          spaceKey: "ENG",
+          title: "Project Architecture",
+          url: "https://example.atlassian.net/wiki/spaces/ENG/pages/101/Project+Architecture",
+          parentId: "100",
+          path: ["Engineering Home", "Project Architecture"],
+          owner: "owner",
+          updatedAt: "2026-07-20T10:00:00Z",
+          contentMarkdown: "# Old Architecture",
+          snippet: "Old",
+        },
+      ])
+      repository.upsertLink({ fromPageId: "101", targetUrl: "https://example.atlassian.net/wiki/spaces/ENG/pages/100/Engineering+Home", targetPageId: "100", title: "Old link", kind: "internal" })
+
+      const result = await reloadConfluencePage("101", {
+        repository,
+        env: setup.env,
+        now: fixedClock(),
+        fetch: jsonFetch(calls, {
+          "/wiki/api/v2/spaces?keys=ENG&limit=250": { results: [{ id: "10", key: "ENG", name: "Engineering", homepageId: "100" }] },
+          "/wiki/api/v2/pages/101?body-format=storage": pagePayload("101", "Project Architecture", "100", "<p>Fresh body.</p>"),
+        }),
+      })
+
+      expect(result.page.contentMarkdown).toContain("Fresh body.")
+      expect(repository.getPage("101")?.contentMarkdown).toContain("Fresh body.")
+      expect(repository.getPage("100")).not.toBeNull()
+      expect(repository.getOutgoingLinks("101")).toEqual([])
+      expect(calls).toEqual([
+        "https://example.atlassian.net/wiki/api/v2/spaces?keys=ENG&limit=250",
+        "https://example.atlassian.net/wiki/api/v2/pages/101?body-format=storage",
+      ])
+    } finally {
+      repository.close()
       await setup.cleanup()
     }
   })

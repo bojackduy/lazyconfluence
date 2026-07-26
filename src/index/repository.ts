@@ -282,6 +282,13 @@ export class IndexRepository {
     })
   }
 
+  replaceOutgoingLinks(pageId: string, links: PageLink[]) {
+    if (links.some((link) => link.fromPageId !== pageId)) throw new Error(`All replacement links must originate from ${pageId}.`)
+
+    this.database.query("DELETE FROM links WHERE from_page_id = ?").run(pageId)
+    return this.upsertLinks(links)
+  }
+
   upsertPageBody(body: PageBodyArtifact) {
     return this.upsertPageBodies([body])
   }

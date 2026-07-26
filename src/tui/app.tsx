@@ -2627,6 +2627,7 @@ function statusBarHints(focusPane: string, editorOpen: boolean): StatusHintItem[
     { key: "s", label: "spaces" },
     { key: "c", label: "overview" },
     { key: "i", label: "image" },
+    { key: "r", label: "reload" },
     { key: "e", label: "edit" },
     { key: "D", label: "delete" },
     { key: "Tab", label: "panes" },
@@ -2640,6 +2641,7 @@ function statusBarHints(focusPane: string, editorOpen: boolean): StatusHintItem[
     { key: "h/l", label: "panels" },
     { key: "Enter", label: "open" },
     { key: "b", label: "back" },
+    { key: "r", label: "reload" },
   ]
 
   return [

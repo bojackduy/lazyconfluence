@@ -33,7 +33,7 @@ describe("TUI command registry", () => {
     expect(commandForId("open-command-palette")).toMatchObject({ available: true })
     expect(commandForId("open-browser")).toMatchObject({ available: true })
     expect(commandForId("go-back")).toMatchObject({ available: true })
-    expect(commandForId("refresh")).toMatchObject({ available: false, unavailableReason: expect.stringContaining("CLI") })
+    expect(commandForId("refresh")).toMatchObject({ available: true, label: "Reload current page" })
   })
 })
 

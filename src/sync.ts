@@ -19,6 +19,19 @@ export interface SyncConfluenceOptions {
   onProgress?: (event: SyncProgressEvent) => void
 }
 
+export interface ReloadConfluencePageOptions {
+  env?: NodeJS.ProcessEnv
+  fetch?: FetchLike
+  repository?: IndexRepository
+  now?: () => Date
+}
+
+export interface ReloadConfluencePageResult {
+  page: IndexedPage
+  linksIndexed: number
+  mediaAssetsPersisted: number
+}
+
 export type SyncProgressEventType =
   | "loading-config"
   | "opening-database"
@@ -66,6 +79,69 @@ export interface SyncReport {
 }
 
 export class SyncServiceError extends Error {}
+
+export async function reloadConfluencePage(pageId: string, options: ReloadConfluencePageOptions = {}): Promise<ReloadConfluencePageResult> {
+  const env = options.env ?? process.env
+  const now = options.now ?? (() => new Date())
+  const auth = await loadAtlassianAuth(env)
+
+  if (!auth) throw new SyncServiceError("No lazyconfluence config found. Run `lazyconfluence init` first.")
+  if (!auth.apiToken) throw new SyncServiceError(`Atlassian API token missing. Set ${auth.config.atlassian.apiTokenEnv} or run \`lazyconfluence init\`.`)
+
+  const repository = options.repository ?? openIndexRepository({ env })
+  const shouldCloseRepository = !options.repository
+
+  try {
+    const existing = repository.getPage(pageId)
+    if (!existing) throw new SyncServiceError(`Page ${pageId} is not in the local index.`)
+
+    const client = new ConfluenceClient({
+      siteUrl: auth.config.atlassian.siteUrl,
+      email: auth.config.atlassian.email,
+      apiToken: auth.apiToken,
+      fetch: options.fetch,
+    })
+    const [space] = await client.resolveSpaces([existing.spaceKey])
+    if (!space) throw new SyncServiceError(`Confluence space ${existing.spaceKey} was not found.`)
+
+    const page = await client.fetchPageBody(pageId)
+    if (!canSyncPageBody(page)) throw new SyncServiceError(`Page ${pageId} cannot be refreshed because its Confluence content type is unsupported.`)
+
+    const syncedAt = now().toISOString()
+    const mapped = mapConfluencePage({
+      page,
+      space,
+      baseUrl: client.baseUrl,
+      ancestors: localAncestorsForPage(repository, page.parentId),
+      syncedAt,
+      treeOrder: existing.treeOrder,
+    })
+    const mediaAssets = await cacheMediaAssetsForPage({ client, repository, pageId: mapped.indexedPage.pageId, images: documentImages(mapped.document), syncedAt })
+    const currentSpace = repository.getSpace(space.key)
+
+    repository.upsertSpace(mapConfluenceSpace(space, { lastSyncedAt: syncedAt, pageCount: currentSpace?.pageCount ?? 0 }))
+    repository.upsertPage(mapped.indexedPage)
+    repository.deleteMediaAssetsFromPage(mapped.indexedPage.pageId)
+    repository.upsertMediaAssets(mediaAssets)
+    repository.upsertPageBody({
+      pageId: mapped.indexedPage.pageId,
+      remoteVersion: mapped.remoteVersion,
+      sourceRepresentation: mapped.sourceRepresentation,
+      sourceBody: mapped.sourceBody,
+      sourceHash: mapped.sidecar.sourceHash,
+      canonicalDocument: mapped.document,
+      sidecar: mapped.sidecar,
+      editableMarkdown: mapped.renderedMarkdown,
+      renderedMarkdown: mapped.renderedMarkdown,
+      updatedAt: syncedAt,
+    })
+    repository.replaceOutgoingLinks(mapped.indexedPage.pageId, mapped.links)
+
+    return { page: mapped.indexedPage, linksIndexed: mapped.links.length, mediaAssetsPersisted: mediaAssets.length }
+  } finally {
+    if (shouldCloseRepository) repository.close()
+  }
+}
 
 export async function syncConfluence(options: SyncConfluenceOptions = {}): Promise<SyncReport> {
   const env = options.env ?? process.env
@@ -143,6 +219,20 @@ export function formatSyncReport(report: SyncReport) {
   for (const failure of report.failures) lines.push(`${failure.scope} ${failure.key}: ${failure.message}`)
 
   return lines.join("\n")
+}
+
+function localAncestorsForPage(repository: IndexRepository, parentId: string | null | undefined) {
+  const ancestors: Array<{ id: string; title: string }> = []
+  let currentId = parentId ?? null
+
+  while (currentId) {
+    const page = repository.getPage(currentId)
+    if (!page) break
+    ancestors.unshift({ id: page.pageId, title: page.title })
+    currentId = page.parentId
+  }
+
+  return ancestors
 }
 
 async function syncSpace(input: {

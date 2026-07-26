@@ -11,6 +11,26 @@ import type { IndexedPage, SpaceSummary } from "../src/model"
 import { createRepositoryTuiDataSource } from "../src/tui/data"
 
 describe("apply page draft", () => {
+  test("blocks page reload while a local draft exists", async () => {
+    const setup = await createApplySetup()
+    const repository = openIndexRepository({ path: setup.dbPath })
+
+    try {
+      seedApplyPage(repository, baseStorage)
+      seedDraft(repository, baseBodyArtifact("100", "Project Architecture", baseStorage), "# Project Architecture\n\nLocal draft.")
+      const dataSource = createRepositoryTuiDataSource(repository, { env: setup.env })
+
+      await expect(dataSource.reloadPage("100")).resolves.toEqual({
+        status: "blocked",
+        pageTitle: "Project Architecture",
+        reason: "local-draft",
+      })
+    } finally {
+      repository.close()
+      await setup.cleanup()
+    }
+  })
+
   test("preflights and applies a staged draft to Confluence", async () => {
     const setup = await createApplySetup()
     const repository = openIndexRepository({ path: setup.dbPath })

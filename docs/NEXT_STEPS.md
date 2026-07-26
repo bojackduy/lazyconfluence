@@ -48,13 +48,13 @@ git diff --check
 
 Work in this order unless product priorities change. Complete one slice and update this file plus `docs/TASK_TRACKER.md` before starting the next.
 
-### 2. Command Palette (`p`)
+### 2. Command Palette (`p`) - Complete
 
-- [ ] Reuse `src/tui/commands.ts`; do not create a second command list.
-- [ ] Filter command label, key, and description.
-- [ ] Run available commands through a single app action dispatcher.
-- [ ] Show unavailable commands with their reason, but do not run them.
-- [ ] Preserve text-input behavior and `Esc` close behavior.
+- [x] Reuse `src/tui/commands.ts`; do not create a second command list.
+- [x] Filter command label, key, and description.
+- [x] Run available commands through a single app action dispatcher.
+- [x] Show unavailable commands with their reason, but do not run them.
+- [x] Preserve text-input behavior and `Esc` close behavior.
 
 ### 3. Browser Open and Navigation History (`o`, `b`)
 
@@ -113,4 +113,5 @@ YYYY-MM-DD  Slice  Result  Verification  Next
 2026-07-26  Document Find  Local Markdown find overlay with case-insensitive matches, wraparound selection, and document scrolling implemented.  bun run typecheck; bun test (143 pass, 0 fail, 690 assertions); git diff --check.  Command palette.
 2026-07-26  Search input polish  Replaced fake search-field text and underscore cursors with focused native OpenTUI inputs for page search, document find, and space switching. Placeholders use muted text and the renderer owns the blinking cursor.  bun run typecheck; bun test test/tui-keymap.test.ts test/tui-layout.test.tsx (46 pass, 0 fail, 278 assertions).  Command palette.
 2026-07-26  Search opener focus  Deferred native search-input focus by one tick so `/` and `f` open their overlays without leaking into the query.  bun run typecheck; bun test (143 pass, 0 fail, 690 assertions); git diff --check.  Command palette.
+2026-07-26  Command Palette  Added `p` command discovery using the shared registry, native input filtering, available-action dispatch, and unavailable-command reasons.  bun run typecheck; bun test (145 pass, 0 fail, 700 assertions); git diff --check.  Browser open and navigation history.
 ```

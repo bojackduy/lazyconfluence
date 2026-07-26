@@ -4,7 +4,7 @@ import { dirname, join } from "node:path"
 import { Writable } from "node:stream"
 import { describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
-import { App, DocumentFindOverlay, HelpOverlay, ImageViewerOverlay, NewPageOverlay, StagedChangesOverlay, documentHorizontalScrollDeltaForKey, findDocumentMatches, imageRenderModeForCapabilities, nearestImageIndexForViewport, nextDocumentFindIndex, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, parseTerminalCellPixels, type SearchKeyLike } from "../src/tui/app"
+import { App, CommandPaletteOverlay, DocumentFindOverlay, HelpOverlay, ImageViewerOverlay, NewPageOverlay, StagedChangesOverlay, documentHorizontalScrollDeltaForKey, findDocumentMatches, imageRenderModeForCapabilities, nearestImageIndexForViewport, nextDocumentFindIndex, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, parseTerminalCellPixels, searchPaletteCommands, type SearchKeyLike } from "../src/tui/app"
 import { commandsForContext } from "../src/tui/commands"
 import { createLocalConfig } from "../src/config"
 import type { CredentialStatus } from "../src/config"
@@ -844,7 +844,7 @@ describe("main TUI layout", () => {
       expect(rendered.captureCharFrame()).toContain("KEYBOARD HELP")
       expect(rendered.captureCharFrame()).toContain("Command palette")
       expect(rendered.captureCharFrame()).toContain("Find in document")
-      expect(rendered.captureCharFrame()).toContain("Command palette is not implemented yet")
+      expect(rendered.captureCharFrame()).toContain("Search and run actions")
     } finally {
       rendered.renderer.destroy()
     }
@@ -876,6 +876,26 @@ describe("main TUI layout", () => {
       expect(frame).toContain("2/2 matches")
       expect(frame).toContain("line 3, column 1")
       expect(frame).toContain("Start here")
+    } finally {
+      rendered.renderer.destroy()
+    }
+  })
+
+  test("filters and renders command palette results", async () => {
+    const commands = searchPaletteCommands(commandsForContext(["main"]), "switch space")
+    expect(commands.map((command) => command.id)).toEqual(["open-space-switcher"])
+
+    const rendered = await testRender(() => (
+      <CommandPaletteOverlay visible query="switch space" commands={commands} selectedIndex={0} left={2} width={90} height={14} onQueryChange={() => {}} onKeyDown={() => false} />
+    ), { width: 100, height: 18 })
+
+    try {
+      await rendered.renderOnce()
+      const frame = rendered.captureCharFrame()
+
+      expect(frame).toContain("COMMAND PALETTE")
+      expect(frame).toContain("Switch space")
+      expect(frame).toContain("Choose another locally indexed space")
     } finally {
       rendered.renderer.destroy()
     }

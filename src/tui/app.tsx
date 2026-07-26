@@ -116,6 +116,9 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const [spaceSwitcherOpen, setSpaceSwitcherOpen] = createSignal(false)
   const [spaceSwitcherQuery, setSpaceSwitcherQuery] = createSignal("")
   const [spaceSwitcherSelectedIndex, setSpaceSwitcherSelectedIndex] = createSignal(0)
+  const [commandPaletteOpen, setCommandPaletteOpen] = createSignal(false)
+  const [commandPaletteQuery, setCommandPaletteQuery] = createSignal("")
+  const [commandPaletteSelectedIndex, setCommandPaletteSelectedIndex] = createSignal(0)
   const [draftRevision, setDraftRevision] = createSignal(0)
   const [editorOpen, setEditorOpen] = createSignal(false)
   const [editorPageId, setEditorPageId] = createSignal<string | null>(null)
@@ -177,6 +180,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   })
   const documentFindMatches = createMemo(() => findDocumentMatches(readerPage().contentMarkdown, documentFindQuery()))
   const spaceSwitcherResults = createMemo(() => dataSource.searchSpaces(spaceSwitcherQuery()))
+  const commandPaletteResults = createMemo(() => searchPaletteCommands(commandsForContext(["main"]), commandPaletteQuery()))
   const stagedChanges = createMemo(() => {
     draftRevision()
     return dataSource.listStagedChanges(activeSpaceKey())
@@ -384,6 +388,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const openPageSearch = () => {
     setDocumentFindOpen(false)
     setSpaceSwitcherOpen(false)
+    setCommandPaletteOpen(false)
     setChangesOpen(false)
     setNewPageOpen(false)
     setPageSearchOpen(true)
@@ -394,6 +399,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
   const openDocumentFind = () => {
     setPageSearchOpen(false)
     setSpaceSwitcherOpen(false)
+    setCommandPaletteOpen(false)
     setChangesOpen(false)
     setNewPageOpen(false)
     setDocumentFindQuery("")
@@ -467,6 +473,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     setPageSearchOpen(false)
     setChangesOpen(false)
     setNewPageOpen(false)
+    setCommandPaletteOpen(false)
     setSpaceSwitcherOpen(true)
     setSpaceSwitcherQuery("")
     setSpaceSwitcherSelectedIndex(Math.max(0, dataSource.searchSpaces("").findIndex((result) => result.space.key === activeSpaceKey())))
@@ -476,6 +483,70 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     setSpaceSwitcherOpen(false)
     setSpaceSwitcherQuery("")
     setSpaceSwitcherSelectedIndex(0)
+  }
+
+  const openCommandPalette = () => {
+    setPageSearchOpen(false)
+    setDocumentFindOpen(false)
+    setSpaceSwitcherOpen(false)
+    setChangesOpen(false)
+    setNewPageOpen(false)
+    setCommandPaletteQuery("")
+    setCommandPaletteSelectedIndex(0)
+    setCommandPaletteOpen(true)
+  }
+
+  const closeCommandPalette = () => {
+    setCommandPaletteOpen(false)
+    setCommandPaletteQuery("")
+    setCommandPaletteSelectedIndex(0)
+  }
+
+  const moveCommandPaletteSelection = (direction: number) => {
+    const results = commandPaletteResults()
+    if (!results.length) {
+      setCommandPaletteSelectedIndex(0)
+      return
+    }
+
+    setCommandPaletteSelectedIndex((current) => Math.max(0, Math.min(results.length - 1, current + direction)))
+  }
+
+  const runSelectedPaletteCommand = () => {
+    const command = commandPaletteResults()[commandPaletteSelectedIndex()]
+    if (!command) return
+    if (!command.available) {
+      setEditStatusMessage(command.unavailableReason ?? `${command.label} is not available yet.`)
+      return
+    }
+
+    closeCommandPalette()
+
+    if (command.id === "quit") renderer.destroy()
+    else if (command.id === "show-help") setHelpOpen(true)
+    else if (command.id === "open-command-palette") openCommandPalette()
+    else if (command.id === "open-page-search") openPageSearch()
+    else if (command.id === "open-document-find") openDocumentFind()
+    else if (command.id === "open-space-switcher") openSpaceSwitcher()
+    else if (command.id === "open-overview") openChanges()
+    else if (command.id === "toggle-page-view") togglePageView()
+    else if (command.id === "edit-page") openEditorForSelectedPage()
+    else if (command.id === "open-image-viewer") openImageViewer()
+    else if (command.id === "stage-delete") stageDeleteSelectedPage()
+    else if (command.id === "focus-next-pane" || command.id === "focus-previous-pane") setFocusPane((current) => current === "navigator" ? "document" : "navigator")
+    else if (command.id === "page-down") scrollDocumentBy(halfPageScrollAmount())
+    else if (command.id === "page-up") scrollDocumentBy(-halfPageScrollAmount())
+  }
+
+  const handleCommandPaletteInputKey = (key: SearchKeyLike) => {
+    const command = resolveKeyCommand(key, "command-palette")
+
+    if (command === "close-overlay") closeCommandPalette()
+    else if (command === "search-submit") runSelectedPaletteCommand()
+    else if (command === "search-next") moveCommandPaletteSelection(1)
+    else if (command === "search-previous") moveCommandPaletteSelection(-1)
+
+    return command === "close-overlay" || command === "search-submit" || command === "search-next" || command === "search-previous"
   }
 
   const handleSpaceSwitcherInputKey = (key: SearchKeyLike) => {
@@ -815,6 +886,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     pageSearchOpen: pageSearchOpen(),
     documentFindOpen: documentFindOpen(),
     spaceSwitcherOpen: spaceSwitcherOpen(),
+    commandPaletteOpen: commandPaletteOpen(),
   })
 
   const keyRouteForDebug = (key: SearchKeyLike) => {
@@ -827,6 +899,7 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     if (documentFindOpen()) return "document-find"
     if (pageSearchOpen()) return "page-search"
     if (spaceSwitcherOpen()) return "space-switcher"
+    if (commandPaletteOpen()) return "command-palette"
     if (resolveKeyCommand(key, focusPane())) return "command"
     return "main"
   }
@@ -1005,6 +1078,11 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
       return
     }
 
+    if (commandPaletteOpen()) {
+      handleCommandPaletteInputKey(key)
+      return
+    }
+
     const command = resolveKeyCommand(key, focusPane())
 
     if (command === "quit") {
@@ -1015,6 +1093,11 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
     if (command === "show-help") {
       helpScrollbox?.scrollTo(0)
       setHelpOpen(true)
+      return
+    }
+
+    if (command === "open-command-palette") {
+      openCommandPalette()
       return
     }
 
@@ -1194,6 +1277,20 @@ export function App(props: { credentialStatus?: CredentialStatus; dataSource?: T
         height={Math.min(16, Math.max(10, dimensions().height - 8))}
         onQueryChange={setSpaceSwitcherQuery}
         onKeyDown={handleSpaceSwitcherInputKey}
+      />
+      <CommandPaletteOverlay
+        visible={commandPaletteOpen()}
+        query={commandPaletteQuery()}
+        commands={commandPaletteResults()}
+        selectedIndex={commandPaletteSelectedIndex()}
+        left={dimensions().width < 72 ? 2 : 8}
+        width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 4 : 16))}
+        height={Math.min(20, Math.max(10, dimensions().height - 8))}
+        onQueryChange={(query) => {
+          setCommandPaletteQuery(query)
+          setCommandPaletteSelectedIndex(0)
+        }}
+        onKeyDown={handleCommandPaletteInputKey}
       />
       <HelpOverlay
         visible={helpOpen()}
@@ -2767,6 +2864,66 @@ function SpaceSwitcherOverlay(props: { visible: boolean; query: string; results:
   )
 }
 
+export function CommandPaletteOverlay(props: { visible: boolean; query: string; commands: TuiCommand[]; selectedIndex: number; left: number; width: number; height: number; onQueryChange: (query: string) => void; onKeyDown: (key: SearchKeyLike) => boolean }) {
+  return (
+    <box
+      visible={props.visible}
+      position="absolute"
+      left={props.left}
+      top={5}
+      width={props.width}
+      height={props.height}
+      border
+      borderStyle="rounded"
+      borderColor={theme.borderActive}
+      backgroundColor="#08111f"
+      paddingX={2}
+      paddingY={1}
+      flexDirection="column"
+      zIndex={35}
+    >
+      <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
+        <text height={1} fg={theme.accent} attributes={1}>COMMAND PALETTE</text>
+        <text height={1} fg={theme.muted}>p actions</text>
+      </box>
+      <SearchInput visible={props.visible} prefix="p" value={props.query} placeholder="type an action, key, or description" onInput={props.onQueryChange} onKeyDown={props.onKeyDown} />
+      <text height={1} fg={theme.subtle}>{props.commands.length} command{props.commands.length === 1 ? "" : "s"}  type to filter  up/down move  enter run  esc close</text>
+      <box height={1} />
+      <Show when={props.commands.length > 0} fallback={<EmptyCommandPaletteState query={props.query} />}>
+        <scrollbox flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
+          <box flexDirection="column" width="100%">
+            <For each={props.commands}>{(command, index) => <CommandPaletteRow command={command} selected={index() === props.selectedIndex} />}</For>
+          </box>
+        </scrollbox>
+      </Show>
+    </box>
+  )
+}
+
+function CommandPaletteRow(props: { command: TuiCommand; selected: boolean }) {
+  const color = () => props.command.available ? theme.text : theme.muted
+  const detail = () => props.command.available ? props.command.description : props.command.unavailableReason ?? props.command.description
+
+  return (
+    <box height={3} width="100%" backgroundColor={props.selected ? theme.accentSoft : undefined} paddingX={1} flexDirection="column">
+      <box height={1} flexDirection="row">
+        <text height={1} width={24} fg={props.command.available ? theme.good : theme.subtle}>{props.command.keys}</text>
+        <text height={1} fg={color()} attributes={props.command.available ? 1 : 0}>{props.command.label}</text>
+      </box>
+      <text height={1} fg={props.command.available ? theme.subtle : theme.muted}>  {detail()}</text>
+      <text height={1} fg={theme.muted}>  {props.command.group}</text>
+    </box>
+  )
+}
+
+function EmptyCommandPaletteState(props: { query: string }) {
+  return (
+    <box flexGrow={1} alignItems="center" justifyContent="center">
+      <text fg={theme.muted}>No commands match "{props.query}".</text>
+    </box>
+  )
+}
+
 export function HelpOverlay(props: { visible: boolean; commands: readonly TuiCommand[]; left: number; top: number; width: number; height: number; setScrollbox?: (scrollbox: ScrollBoxRenderable) => void }) {
   const groups = ["Global", "Navigation", "Reader", "Editing", "Images"] as const
 
@@ -3050,6 +3207,13 @@ export function findDocumentMatches(markdown: string, query: string): DocumentFi
 export function nextDocumentFindIndex(current: number, direction: number, matchCount: number) {
   if (matchCount <= 0) return 0
   return (current + direction + matchCount) % matchCount
+}
+
+export function searchPaletteCommands(commands: readonly TuiCommand[], query: string): TuiCommand[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  if (!normalizedQuery) return [...commands]
+
+  return commands.filter((command) => `${command.label} ${command.keys} ${command.description} ${command.group}`.toLocaleLowerCase().includes(normalizedQuery))
 }
 
 function readerImagePartsForPage(page: ReaderPage): ReaderImagePart[] {

@@ -30,6 +30,7 @@ describe("TUI command registry", () => {
 
   test("keeps future commands visible but explicitly unavailable", () => {
     expect(commandForId("open-document-find")).toMatchObject({ available: true })
+    expect(commandForId("open-command-palette")).toMatchObject({ available: true })
     expect(commandForId("open-browser")).toMatchObject({ available: false, unavailableReason: expect.stringContaining("not implemented") })
   })
 })
@@ -71,6 +72,14 @@ describe("context-aware key resolution", () => {
     expect(resolveKeyCommand(key("n"), "document-find")).toBeNull()
     expect(resolveKeyCommand(key("n", "n", { ctrl: true }), "document-find")).toBe("search-next")
     expect(resolveKeyCommand(key("p", "p", { ctrl: true }), "document-find")).toBe("search-previous")
+  })
+
+  test("routes command palette controls without reserving printable text", () => {
+    expect(resolveKeyCommand(key("return", "\r"), "command-palette")).toBe("search-submit")
+    expect(resolveKeyCommand(key("down", "\u001b[B"), "command-palette")).toBe("search-next")
+    expect(resolveKeyCommand(key("p"), "command-palette")).toBeNull()
+    expect(resolveKeyCommand(key("p", "p", { ctrl: true }), "command-palette")).toBe("search-previous")
+    expect(resolveKeyCommand(key("escape", "\u001b"), "command-palette")).toBe("close-overlay")
   })
 
   test("gives each overlay predictable close and movement commands", () => {

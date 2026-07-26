@@ -31,6 +31,8 @@ Status values: `Not started`, `In progress`, `Blocked`, `Partial`, `Done`.
 
 ## Current Reality
 
+Current execution checklist: `docs/NEXT_STEPS.md`.
+
 - Foundation shell is done: Bun, TypeScript, CLI entrypoint, TUI launch, `init`, and local `doctor` exist.
 - Domain and demo data are done for the mock-backed product slice.
 - Reader UI and document detail are partial: the TUI renders the main reader, navigator, Current/Archived navigator tabs, archived read-only banners, outline, related panel, scroll behavior, safe document-kind symbols, richer markdown/code/table styling, cached PNG image previews with placeholders for missing/unsupported media, orphaned local pages, draft previews, and local-first staged creates; it now reads pages from the local SQLite index, edits synced current pages and staged creates in a transient in-app Markdown editor, stages new child pages from the navigator with `n` including under local-only creates, stages root pages with `N`, stages synced current-page deletes with `D`, and reviews/applies or discards current-space staged changes from a normal-view Overview popup after explicit approval. Browser-open hooks and broader polish remain.

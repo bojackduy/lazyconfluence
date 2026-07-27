@@ -140,6 +140,8 @@ YYYY-MM-DD  ID  Result  Verification  Follow-up
 2026-07-27  all-space-search  Added `S` all-space page search using only the local index. Results show space/path, follow Current/Archived scope, and switch spaces through history-aware local navigation.  bun run typecheck; bun test (162 pass, 0 fail, 746 assertions); git diff --check.  Next: media and image polish.
 2026-07-27  adaptive-footer-hints  Made reader footer shortcuts width-aware: narrow terminals prioritize all-space search, back, panes, and help; wide terminals add reload and pane-local controls.  bun run typecheck; bun test (163 pass, 0 fail, 749 assertions); git diff --check.  Next: media and image polish.
 2026-07-27  footer-action-budget  Footer hints now reserve space for the current status message and add pane edit/delete controls before secondary actions when width permits.  bun run typecheck; bun test (163 pass, 0 fail, 751 assertions); git diff --check.  Next: media and image polish.
+2026-07-27  command-palette-vim-keys  Expanded the Command Palette to the near-full-screen viewer layout and added `;` and `:` aliases alongside `p`.  bun run typecheck; bun test (163 pass, 0 fail, 753 assertions); git diff --check.  Next: media and image polish.
+2026-07-27  staged-overview-guidance  Made staged create, delete, and edit confirmations transient; after they clear, the footer exposes `c overview` whenever the active space has staged changes.  bun run typecheck; bun test (163 pass, 0 fail, 754 assertions); git diff --check.  Next: media and image polish.
 ```
 
 ## Contract Changes

@@ -162,6 +162,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
   let helpScrollbox: ScrollBoxRenderable | undefined
   let editorFocusTimer: ReturnType<typeof setTimeout> | undefined
   let historyRestoreTimer: ReturnType<typeof setTimeout> | undefined
+  let transientStatusTimer: ReturnType<typeof setTimeout> | undefined
 
   const spaces = createMemo(() => dataSource.listSpaces())
   const space = createMemo(() => spaces().find((candidate) => candidate.key === activeSpaceKey()) ?? emptySpaceSummary(activeSpaceKey()))
@@ -330,6 +331,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
   onCleanup(() => {
     clearEditorFocusTimer()
     clearHistoryRestoreTimer()
+    clearTransientStatusTimer()
     if (!props.dataSource) dataSource.close?.()
   })
 
@@ -344,6 +346,22 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     if (!historyRestoreTimer) return
     clearTimeout(historyRestoreTimer)
     historyRestoreTimer = undefined
+  }
+
+  const clearTransientStatusTimer = () => {
+    if (!transientStatusTimer) return
+
+    clearTimeout(transientStatusTimer)
+    transientStatusTimer = undefined
+  }
+
+  const setTransientStatusMessage = (message: string, duration = 4_000) => {
+    clearTransientStatusTimer()
+    setEditStatusMessage(message)
+    transientStatusTimer = setTimeout(() => {
+      transientStatusTimer = undefined
+      if (editStatusMessage() === message) setEditStatusMessage("")
+    }, duration)
   }
 
   const focusEditorInputAfterOpen = (pageId: string) => {
@@ -851,7 +869,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     try {
       const change = dataSource.stagePageDelete(pageId)
       setDraftRevision((revision) => revision + 1)
-      setEditStatusMessage(`Staged delete for ${change.title}. Open Overview to apply/discard.`)
+      setTransientStatusMessage(`Staged delete for ${change.title}. Open Overview to apply/discard.`)
     } catch (error) {
       setEditStatusMessage(errorMessage(error))
     }
@@ -944,7 +962,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
       setSelectedPageId(change.changeKey)
       if (parentPageId) setExpandedPageIds((current) => new Set(current).add(parentPageId))
       documentScrollbox?.scrollTo(0)
-      setEditStatusMessage(`Created local page ${change.title}. Press e to edit or c Overview to apply/discard.`)
+      setTransientStatusMessage(`Created local page ${change.title}. Press e to edit or c Overview to apply/discard.`)
     } catch (error) {
       setEditStatusMessage(errorMessage(error))
     }
@@ -1180,7 +1198,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     try {
       const result = dataSource.stagePageBuffer(pageId, editorMarkdown())
       setDraftRevision((revision) => revision + 1)
-      closeEditorImmediately(result === "staged" ? `Staged changes for ${editorPageTitle()}. Open Overview to review/apply/discard.` : `No buffer changes staged for ${editorPageTitle()}.`)
+      closeEditorImmediately(result === "staged" ? `Staged changes for ${editorPageTitle()}. Open Overview to review/apply/discard.` : `No buffer changes staged for ${editorPageTitle()}.`, result === "staged")
     } catch (error) {
       setEditStatusMessage(errorMessage(error))
     }
@@ -1190,7 +1208,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     closeEditorImmediately(`Closed editor for ${editorPageTitle()}; staged changes were not changed.`)
   }
 
-  const closeEditorImmediately = (message: string) => {
+  const closeEditorImmediately = (message: string, transient = false) => {
     clearEditorFocusTimer()
     setEditorOpen(false)
     setEditorInputFocused(false)
@@ -1199,7 +1217,8 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     setEditorInitialMarkdown("")
     setEditorOriginalMarkdown("")
     setEditorMarkdown("")
-    setEditStatusMessage(message)
+    if (transient) setTransientStatusMessage(message)
+    else setEditStatusMessage(message)
   }
 
   const setEditorMarkdownFromTextarea = (markdown: string) => {
@@ -1469,7 +1488,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
         <Navigator rows={treeRows()} selectedPageId={selectedPageId()} focused={focusPane() === "navigator"} viewMode={pageViewMode()} onSetViewMode={switchPageView} />
         <Reader page={readerPage()} focused={focusPane() === "document"} focusedSideRailPanel={focusPane() === "outline" ? "outline" : focusPane() === "related" ? "related" : null} sideRailSelectedIndex={sideRailSelectedIndex()} outlineItems={outlineNavigationItems()} relatedItems={relatedNavigationItems()} narrow={isNarrow()} treeSitterClient={treeSitterClient()} imageRenderMode={inlineImageRenderMode()} setDocumentScrollbox={(scrollbox) => { documentScrollbox = scrollbox }} setImageRenderable={setReaderImageRenderable} />
       </box>
-      <StatusBar focusPane={focusPane()} editorOpen={editorOpen()} editorDirty={editorDirty()} editMessage={editStatusMessage()} reloading={pageReloading()} width={dimensions().width} />
+      <StatusBar focusPane={focusPane()} editorOpen={editorOpen()} editorDirty={editorDirty()} editMessage={editStatusMessage()} reloading={pageReloading()} hasStagedChanges={stagedChanges().length > 0} width={dimensions().width} />
       <Show when={editorOpen()} fallback={<box height={0} />}>
         <EditorOverlay
           pageTitle={editorPageTitle()}
@@ -1567,9 +1586,10 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
         query={commandPaletteQuery()}
         commands={commandPaletteResults()}
         selectedIndex={commandPaletteSelectedIndex()}
-        left={dimensions().width < 72 ? 2 : 8}
-        width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 4 : 16))}
-        height={Math.min(20, Math.max(10, dimensions().height - 8))}
+        left={dimensions().width < 72 ? 1 : 4}
+        top={2}
+        width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 2 : 8))}
+        height={Math.max(10, dimensions().height - 4)}
         onQueryChange={(query) => {
           setCommandPaletteQuery(query)
           setCommandPaletteSelectedIndex(0)
@@ -2727,13 +2747,13 @@ function sideRailRowId(panel: SideRailPanel, index: number) {
   return `side-rail-${panel}-${index}`
 }
 
-export function StatusBar(props: { focusPane: string; editorOpen: boolean; editorDirty: boolean; editMessage: string; reloading: boolean; width: number }) {
+export function StatusBar(props: { focusPane: string; editorOpen: boolean; editorDirty: boolean; editMessage: string; reloading: boolean; hasStagedChanges: boolean; width: number }) {
   const status = () => {
     if (props.editorOpen) return props.editMessage || `editing transient buffer: ${props.editorDirty ? "modified" : "unchanged"}`
     if (props.reloading) return props.editMessage || "Reloading current page from Confluence..."
     return props.editMessage ? props.editMessage : `focus: ${props.focusPane}`
   }
-  const hints = () => statusBarHints(props.focusPane, props.editorOpen, props.width, status().length)
+  const hints = () => statusBarHints(props.focusPane, props.editorOpen, props.width, status().length, props.hasStagedChanges && !props.editMessage && !props.reloading)
 
   return (
     <box height={1} backgroundColor={theme.accentSoft} paddingX={1} flexDirection="row" justifyContent="space-between">
@@ -2747,19 +2767,21 @@ export function StatusBar(props: { focusPane: string; editorOpen: boolean; edito
 
 type StatusHintItem = { key: string; label: string }
 
-export function statusBarHints(focusPane: string, editorOpen: boolean, width: number, statusWidth = 0): StatusHintItem[] {
+export function statusBarHints(focusPane: string, editorOpen: boolean, width: number, statusWidth = 0, hasStagedChanges = false): StatusHintItem[] {
   if (editorOpen) return [{ key: "Ctrl+T", label: "stage" }, { key: "Esc", label: "close" }]
   if (width < 80) return [
     { key: "S", label: "all spaces" },
     { key: "b", label: "back" },
+    ...(hasStagedChanges ? [{ key: "c", label: "overview" }] : []),
     { key: "Tab", label: "panes" },
-    { key: "?", label: "help" },
+    ...(hasStagedChanges ? [] : [{ key: "?", label: "help" }]),
   ]
 
   const globalHints: StatusHintItem[] = [
     { key: "/", label: "search" },
     { key: "S", label: "all spaces" },
     { key: "b", label: "back" },
+    ...(hasStagedChanges ? [{ key: "c", label: "overview" }] : []),
     { key: "Tab", label: "panes" },
   ]
   if (width < 110) return globalHints
@@ -3191,7 +3213,7 @@ function SpaceSwitcherOverlay(props: { visible: boolean; query: string; results:
   )
 }
 
-export function CommandPaletteOverlay(props: { visible: boolean; query: string; commands: TuiCommand[]; selectedIndex: number; left: number; width: number; height: number; onQueryChange: (query: string) => void; onKeyDown: (key: SearchKeyLike) => boolean }) {
+export function CommandPaletteOverlay(props: { visible: boolean; query: string; commands: TuiCommand[]; selectedIndex: number; left: number; top: number; width: number; height: number; onQueryChange: (query: string) => void; onKeyDown: (key: SearchKeyLike) => boolean }) {
   const [scrollbox, setScrollbox] = createSignal<ScrollBoxRenderable>()
 
   createEffect(() => {
@@ -3205,7 +3227,7 @@ export function CommandPaletteOverlay(props: { visible: boolean; query: string; 
       visible={props.visible}
       position="absolute"
       left={props.left}
-      top={5}
+      top={props.top}
       width={props.width}
       height={props.height}
       border
@@ -3219,7 +3241,7 @@ export function CommandPaletteOverlay(props: { visible: boolean; query: string; 
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
         <text height={1} fg={theme.accent}><b>COMMAND PALETTE</b></text>
-        <text height={1} fg={theme.muted}>p actions</text>
+        <text height={1} fg={theme.muted}>p · ; · : actions</text>
       </box>
       <SearchInput visible={props.visible} prefix="p" value={props.query} placeholder="type an action, key, or description" onInput={props.onQueryChange} onKeyDown={props.onKeyDown} />
       <text height={1} fg={theme.subtle}>{props.commands.length} command{props.commands.length === 1 ? "" : "s"}  type to filter  up/down move  enter run  esc close</text>

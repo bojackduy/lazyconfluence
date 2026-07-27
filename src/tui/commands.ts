@@ -55,7 +55,7 @@ export type TuiCommand = {
 export const tuiCommands: readonly TuiCommand[] = [
   command("quit", "Quit", "Exit lazyconfluence.", "q · Esc", "Global", ["main"], true),
   command("show-help", "Help", "Show available keyboard commands.", "?", "Global", ["main", "help"], true),
-  command("open-command-palette", "Command palette", "Search and run actions.", "p", "Global", ["main"], true),
+  command("open-command-palette", "Command palette", "Search and run actions.", "p · ; · :", "Global", ["main"], true),
   command("open-page-search", "Page search", "Search pages in the active space.", "/", "Global", ["main"], true),
   command("open-all-space-search", "All-space page search", "Search locally indexed pages across every space.", "S", "Global", ["main"], true),
   command("open-document-find", "Find in document", "Find text in the current document.", "f", "Global", ["main"], true),

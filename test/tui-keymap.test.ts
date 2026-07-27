@@ -45,6 +45,8 @@ describe("context-aware key resolution", () => {
     expect(resolveKeyCommand(key("S"), "document")).toBe("open-all-space-search")
     expect(resolveKeyCommand(key("s"), "navigator")).toBe("open-space-switcher")
     expect(resolveKeyCommand(key("p"), "document")).toBe("open-command-palette")
+    expect(resolveKeyCommand(key(";"), "document")).toBe("open-command-palette")
+    expect(resolveKeyCommand(key(":"), "document")).toBe("open-command-palette")
     expect(resolveKeyCommand(key("f"), "document")).toBe("open-document-find")
     expect(resolveKeyCommand(key("o"), "navigator")).toBe("open-browser")
     expect(resolveKeyCommand(key("r"), "navigator")).toBe("refresh")

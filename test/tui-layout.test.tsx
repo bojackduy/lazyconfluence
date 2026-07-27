@@ -61,7 +61,7 @@ describe("main TUI layout", () => {
     const rendered = await testRender(() => (
       <box width="100%" height="100%" flexDirection="column">
         <Header page={page} spaceName="Local Engineering" syncState="fresh" draftStatus={null} stagedCount={0} runtimeLabel="PROD local" reloading onOpenOverview={() => {}} />
-        <StatusBar focusPane="navigator" editorOpen={false} editorDirty={false} editMessage="Reloading Local Engineering Home from Confluence..." reloading width={120} />
+        <StatusBar focusPane="navigator" editorOpen={false} editorDirty={false} editMessage="Reloading Local Engineering Home from Confluence..." reloading hasStagedChanges={false} width={120} />
       </box>
     ), { width: 120, height: 10 })
 
@@ -89,6 +89,7 @@ describe("main TUI layout", () => {
     expect(statusBarHints("navigator", false, 140, 16).map((hint) => hint.key)).toEqual(["/", "S", "r", "b", "Tab", "j/k", "h/l", "e", "D", "n", "N"])
     expect(statusBarHints("document", false, 140, 15).map((hint) => hint.key)).toEqual(["/", "S", "r", "b", "Tab", "j/k", "e", "D", "d/u", "i"])
     expect(statusBarHints("document", false, 120, 40).map((hint) => hint.key)).toEqual(["/", "S", "r", "b", "Tab", "j/k"])
+    expect(statusBarHints("navigator", false, 100, 16, true).map((hint) => hint.key)).toEqual(["/", "S", "b", "c", "Tab"])
   })
 
   test("renders all-space search with each result's space and path", async () => {
@@ -948,7 +949,7 @@ describe("main TUI layout", () => {
     expect(commands.map((command) => command.id)).toEqual(["open-space-switcher"])
 
     const rendered = await testRender(() => (
-      <CommandPaletteOverlay visible query="switch space" commands={commands} selectedIndex={0} left={2} width={90} height={14} onQueryChange={() => {}} onKeyDown={() => false} />
+      <CommandPaletteOverlay visible query="switch space" commands={commands} selectedIndex={0} left={2} top={2} width={90} height={14} onQueryChange={() => {}} onKeyDown={() => false} />
     ), { width: 100, height: 18 })
 
     try {

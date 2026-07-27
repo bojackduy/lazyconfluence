@@ -61,6 +61,7 @@ export function resolveKeyCommand(key: TuiKey, context: CommandContext): Command
   if (key.name === "q" || key.name === "escape") return "quit"
   if (isPlainKey(key, "?")) return "show-help"
   if (isPlainKey(key, "p")) return "open-command-palette"
+  if (key.name === ";" || key.name === ":") return "open-command-palette"
   if (key.name === "/") return "open-page-search"
   if (isPlainKey(key, "S")) return "open-all-space-search"
   if (isPlainKey(key, "f")) return "open-document-find"

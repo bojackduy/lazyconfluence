@@ -1537,9 +1537,10 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
         scope="active"
         activeSpaceName={space().name}
         viewMode={pageViewMode()}
-        left={dimensions().width < 72 ? 2 : 8}
-        width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 4 : 16))}
-        height={Math.min(18, Math.max(10, dimensions().height - 8))}
+        left={dimensions().width < 72 ? 1 : 4}
+        top={2}
+        width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 2 : 8))}
+        height={Math.max(10, dimensions().height - 4)}
         onQueryChange={setPageSearchQuery}
         onKeyDown={handlePageSearchInputKey}
       />
@@ -1551,9 +1552,10 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
         scope="all"
         activeSpaceName={space().name}
         viewMode={pageViewMode()}
-        left={dimensions().width < 72 ? 2 : 8}
-        width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 4 : 16))}
-        height={Math.min(18, Math.max(10, dimensions().height - 8))}
+        left={dimensions().width < 72 ? 1 : 4}
+        top={2}
+        width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 2 : 8))}
+        height={Math.max(10, dimensions().height - 4)}
         onQueryChange={setAllSpaceSearchQuery}
         onKeyDown={handleAllSpaceSearchInputKey}
       />
@@ -1575,9 +1577,10 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
         results={spaceSwitcherResults()}
         selectedIndex={spaceSwitcherSelectedIndex()}
         activeSpaceKey={activeSpaceKey()}
-        left={dimensions().width < 72 ? 2 : 8}
-        width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 4 : 16))}
-        height={Math.min(16, Math.max(10, dimensions().height - 8))}
+        left={dimensions().width < 72 ? 1 : 4}
+        top={2}
+        width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 2 : 8))}
+        height={Math.max(10, dimensions().height - 4)}
         onQueryChange={setSpaceSwitcherQuery}
         onKeyDown={handleSpaceSwitcherInputKey}
       />
@@ -3047,13 +3050,15 @@ export function NewPageOverlay(props: { visible: boolean; title: string; parentP
   )
 }
 
-export function PageSearchOverlay(props: { visible: boolean; query: string; results: SearchResult[]; selectedIndex: number; scope: "active" | "all"; activeSpaceName: string; viewMode: PageViewMode; left: number; width: number; height: number; onQueryChange: (query: string) => void; onKeyDown: (key: SearchKeyLike) => boolean }) {
+export function PageSearchOverlay(props: { visible: boolean; query: string; results: SearchResult[]; selectedIndex: number; scope: "active" | "all"; activeSpaceName: string; viewMode: PageViewMode; left: number; top: number; width: number; height: number; onQueryChange: (query: string) => void; onKeyDown: (key: SearchKeyLike) => boolean }) {
+  const resultWindow = createMemo(() => searchResultWindow(props.results, props.selectedIndex, props.height))
+
   return (
     <box
       visible={props.visible}
       position="absolute"
       left={props.left}
-      top={5}
+      top={props.top}
       width={props.width}
       height={props.height}
       border
@@ -3075,8 +3080,11 @@ export function PageSearchOverlay(props: { visible: boolean; query: string; resu
       <Show when={props.results.length > 0} fallback={<EmptySearchState query={props.query} />}>
         <scrollbox flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
           <box flexDirection="column" width="100%">
-            <For each={props.results.slice(0, 8)}>
-              {(result, index) => <SearchResultRow result={result} selected={index() === props.selectedIndex} showSpace={props.scope === "all"} />}
+            <For each={resultWindow()}>
+              {(result, index) => {
+                const resultIndex = () => searchResultWindowStart(props.results.length, props.selectedIndex, props.height) + index()
+                return <SearchResultRow id={pageSearchRowId(props.scope, resultIndex())} result={result} selected={resultIndex() === props.selectedIndex} showSpace={props.scope === "all"} />
+              }}
             </For>
           </box>
         </scrollbox>
@@ -3175,13 +3183,15 @@ function EmptyDocumentFindState(props: { query: string }) {
   )
 }
 
-function SpaceSwitcherOverlay(props: { visible: boolean; query: string; results: SpaceSearchResult[]; selectedIndex: number; activeSpaceKey: string; left: number; width: number; height: number; onQueryChange: (query: string) => void; onKeyDown: (key: SearchKeyLike) => boolean }) {
+function SpaceSwitcherOverlay(props: { visible: boolean; query: string; results: SpaceSearchResult[]; selectedIndex: number; activeSpaceKey: string; left: number; top: number; width: number; height: number; onQueryChange: (query: string) => void; onKeyDown: (key: SearchKeyLike) => boolean }) {
+  const resultWindow = createMemo(() => searchResultWindow(props.results, props.selectedIndex, props.height))
+
   return (
     <box
       visible={props.visible}
       position="absolute"
       left={props.left}
-      top={5}
+      top={props.top}
       width={props.width}
       height={props.height}
       border
@@ -3203,8 +3213,11 @@ function SpaceSwitcherOverlay(props: { visible: boolean; query: string; results:
       <Show when={props.results.length > 0} fallback={<EmptySpaceState query={props.query} />}>
         <scrollbox flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
           <box flexDirection="column" width="100%">
-            <For each={props.results.slice(0, 8)}>
-              {(result, index) => <SpaceResultRow result={result} selected={index() === props.selectedIndex} active={result.space.key === props.activeSpaceKey} />}
+            <For each={resultWindow()}>
+              {(result, index) => {
+                const resultIndex = () => searchResultWindowStart(props.results.length, props.selectedIndex, props.height) + index()
+                return <SpaceResultRow id={spaceSwitcherRowId(resultIndex())} result={result} selected={resultIndex() === props.selectedIndex} active={result.space.key === props.activeSpaceKey} />
+              }}
             </For>
           </box>
         </scrollbox>
@@ -3345,16 +3358,34 @@ function HelpCommandRow(props: { command: TuiCommand }) {
   )
 }
 
-function SearchResultRow(props: { result: SearchResult; selected: boolean; showSpace?: boolean }) {
+function SearchResultRow(props: { id: string; result: SearchResult; selected: boolean; showSpace?: boolean }) {
   const marker = () => (props.selected ? "▶" : " ")
 
   return (
-    <box height={3} width="100%" backgroundColor={props.selected ? theme.accentSoft : undefined} paddingX={1} flexDirection="column">
+    <box id={props.id} height={3} width="100%" backgroundColor={props.selected ? theme.accentSoft : undefined} paddingX={1} flexDirection="column">
       <text height={1} fg={props.selected ? theme.text : theme.muted}>{marker() + " " + props.result.page.title + "  ·  " + props.result.matchedIn}</text>
       <text height={1} fg={theme.subtle}>{"  " + (props.showSpace ? `[${props.result.page.spaceKey}] ` : "") + props.result.page.path.join(" / ")}</text>
       <text height={1} fg={theme.muted}>{"  " + props.result.page.snippet}</text>
     </box>
   )
+}
+
+function pageSearchRowId(scope: "active" | "all", index: number) {
+  return `page-search-${scope}-${index}`
+}
+
+function searchResultWindow<T>(results: readonly T[], selectedIndex: number, height: number) {
+  const start = searchResultWindowStart(results.length, selectedIndex, height)
+  return results.slice(start, start + searchResultWindowSize(height))
+}
+
+function searchResultWindowStart(resultCount: number, selectedIndex: number, height: number) {
+  const windowSize = searchResultWindowSize(height)
+  return Math.min(Math.max(0, selectedIndex - windowSize + 1), Math.max(0, resultCount - windowSize))
+}
+
+function searchResultWindowSize(height: number) {
+  return Math.max(1, Math.floor((height - 8) / 3))
 }
 
 function EmptySearchState(props: { query: string }) {
@@ -3365,17 +3396,21 @@ function EmptySearchState(props: { query: string }) {
   )
 }
 
-function SpaceResultRow(props: { result: SpaceSearchResult; selected: boolean; active: boolean }) {
+function SpaceResultRow(props: { id: string; result: SpaceSearchResult; selected: boolean; active: boolean }) {
   const marker = () => (props.selected ? "▶" : props.active ? "●" : " ")
   const syncColor = () => (props.result.space.syncState === "fresh" ? theme.good : props.result.space.syncState === "stale" ? theme.warn : theme.danger)
 
   return (
-    <box height={3} width="100%" backgroundColor={props.selected ? theme.accentSoft : undefined} paddingX={1} flexDirection="column">
+    <box id={props.id} height={3} width="100%" backgroundColor={props.selected ? theme.accentSoft : undefined} paddingX={1} flexDirection="column">
       <text height={1} fg={props.selected ? theme.text : theme.muted}>{marker() + " " + props.result.space.key + "  ·  " + props.result.space.name}</text>
       <text height={1} fg={syncColor()}>{"  " + props.result.space.syncState + "  ·  " + props.result.space.pageCount + " pages  ·  matched " + props.result.matchedIn}</text>
       <text height={1} fg={theme.subtle}>{"  last synced " + formatOptionalDate(props.result.space.lastSyncedAt)}</text>
     </box>
   )
+}
+
+function spaceSwitcherRowId(index: number) {
+  return `space-switcher-${index}`
 }
 
 function EmptySpaceState(props: { query: string }) {

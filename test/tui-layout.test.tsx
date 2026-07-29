@@ -67,6 +67,7 @@ describe("main TUI layout", () => {
 
     try {
       await rendered.renderOnce()
+      await rendered.waitForVisualIdle({ quietFrames: 2, maxFrames: 8 })
       const frame = rendered.captureCharFrame()
 
       expect(frame).toContain("RELOADING")
@@ -103,6 +104,7 @@ describe("main TUI layout", () => {
         activeSpaceName="Local Engineering"
         viewMode="current"
         left={2}
+        top={2}
         width={90}
         height={14}
         onQueryChange={() => {}}
@@ -117,6 +119,42 @@ describe("main TUI layout", () => {
       expect(frame).toContain("ALL-SPACE SEARCH")
       expect(frame).toContain("local index · current")
       expect(frame).toContain("[OPS] Ops Home")
+    } finally {
+      rendered.renderer.destroy()
+    }
+  })
+
+  test("scrolls all-space search to the selected result beyond the initial viewport", async () => {
+    const results = Array.from({ length: 9 }, (_, index) => ({
+      page: { ...otherPage, pageId: `ops-${index}`, title: `Ops Result ${index + 1}` },
+      score: 100 - index,
+      matchedIn: "title" as const,
+    }))
+    const rendered = await testRender(() => (
+      <PageSearchOverlay
+        visible
+        query="ops"
+        results={results}
+        selectedIndex={8}
+        scope="all"
+        activeSpaceName="Local Engineering"
+        viewMode="current"
+        left={2}
+        top={2}
+        width={90}
+        height={12}
+        onQueryChange={() => {}}
+        onKeyDown={() => false}
+      />
+    ), { width: 100, height: 16 })
+
+    try {
+      await rendered.renderOnce()
+      await rendered.waitForVisualIdle({ quietFrames: 2, maxFrames: 8 })
+      const frame = rendered.captureCharFrame()
+
+      expect(frame).toContain("Ops Result 9")
+      expect(frame).toContain("▶ Ops Result 9")
     } finally {
       rendered.renderer.destroy()
     }

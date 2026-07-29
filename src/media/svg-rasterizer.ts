@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { Resvg } from "@resvg/resvg-js"
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core"
 
 const maxSvgInputBytes = 2 * 1024 * 1024
@@ -38,6 +39,22 @@ export function chromiumExecutablePath(env: NodeJS.ProcessEnv = process.env) {
   return null
 }
 
+export function rasterizeSvgWithResvg(source: Uint8Array) {
+  const svg = svgSource(source)
+
+  try {
+    const probe = new Resvg(svg, svgRenderOptions())
+    validateSvgDimensions(probe.width, probe.height)
+    const scale = Math.min(1, maxSvgRasterDimension / Math.max(probe.width, probe.height), Math.sqrt(maxSvgRasterPixels / (probe.width * probe.height)))
+    const rendered = new Resvg(svg, svgRenderOptions(Math.max(1, Math.floor(probe.width * scale)))).render()
+
+    return new Uint8Array(rendered.asPng())
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    throw new Error(`Invalid SVG: ${message}`)
+  }
+}
+
 async function rasterizeSvg(page: Page, source: Uint8Array) {
   const svg = svgSource(source)
   const dataUrl = `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`
@@ -69,8 +86,28 @@ function svgSource(source: Uint8Array) {
 
   if (!/<svg\b/i.test(text)) throw new Error("SVG preview rejected: missing SVG root element.")
   if (/<!doctype\b|<!entity\b/i.test(text)) throw new Error("SVG preview rejected: DOCTYPE and ENTITY declarations are not allowed.")
+  if (/<\s*(?:script|iframe|object|embed)\b/i.test(text)) throw new Error("SVG preview rejected: executable or embedded document elements are not allowed.")
+  if (/(?:xlink:)?href\s*=\s*(?:(["'])\s*(?!#)[\s\S]*?\1|(?!["'#\s])[^>\s]+)/i.test(text)) throw new Error("SVG preview rejected: external or embedded resource references are not allowed.")
+  if (/@import\b/i.test(text) || hasExternalSvgCssResource(text)) throw new Error("SVG preview rejected: CSS resource references are not allowed.")
 
   return text
+}
+
+function svgRenderOptions(width?: number) {
+  return {
+    ...(width ? { fitTo: { mode: "width" as const, value: width } } : {}),
+    font: { loadSystemFonts: true, defaultFontFamily: "sans-serif" },
+    background: "rgba(0, 0, 0, 0)",
+  }
+}
+
+function hasExternalSvgCssResource(source: string) {
+  for (const match of source.matchAll(/url\s*\(\s*([^)]*?)\s*\)/gi)) {
+    const reference = match[1].trim().replace(/^['"]|['"]$/g, "")
+    if (!reference.startsWith("#")) return true
+  }
+
+  return false
 }
 
 function validateSvgDimensions(width: number, height: number) {

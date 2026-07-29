@@ -21,7 +21,7 @@ The demo above uses synthetic data from `lazyconfluence demo`, not real company 
 - Local-first Confluence browsing after explicit sync.
 - Fast space, page tree, link, backlink, and document search workflows.
 - Readable terminal rendering for headings, lists, tables, links, and code blocks.
-- Terminal image previews for cached Confluence PNG and JPEG attachments plus SVGs rasterized during sync with local Chromium, without requiring Kitty, Sixel, or iTerm image protocols.
+- Terminal image previews for cached Confluence PNG and JPEG attachments plus SVGs rasterized during sync, without requiring Kitty, Sixel, iTerm image protocols, or Chromium.
 - Progressive image handling keeps terminals without image preview support and unsupported media readable through labeled placeholders.
 - Local drafts and staged changes keep remote Confluence write-back explicit.
 
@@ -117,7 +117,7 @@ After syncing, open the terminal UI:
 lazyconfluence
 ```
 
-Normal browsing reads from the local index. Remote Confluence requests happen only when you explicitly run `sync`. During sync, `lazyconfluence` best-effort caches Confluence attachment images and rasterizes SVGs with local Chromium so the terminal reader can show local PNG/JPEG previews without fetching media while you browse. Set `LAZYCONFLUENCE_CHROMIUM_PATH` if executable discovery cannot find Chromium.
+Normal browsing reads from the local index. Remote Confluence requests happen only when you explicitly run `sync`. During sync, `lazyconfluence` best-effort caches Confluence attachment images and rasterizes SVGs into local PNG previews without fetching media while you browse. When available, local Chromium preserves browser-only SVG features such as `foreignObject`; otherwise the portable resvg renderer is used. Set `LAZYCONFLUENCE_CHROMIUM_PATH` to select a Chromium executable.
 
 ## Common Commands
 

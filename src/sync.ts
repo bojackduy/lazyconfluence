@@ -7,7 +7,7 @@ import { documentImages } from "./document/projection"
 import type { ImageBlock } from "./document/model"
 import { loadAtlassianAuth } from "./config"
 import { openIndexRepository, type IndexRepository, type PageBodyArtifact } from "./index/repository"
-import { createSvgRasterizer, type SvgRasterizer } from "./media/svg-rasterizer"
+import { createSvgRasterizer, rasterizeSvgWithResvg, type SvgRasterizer } from "./media/svg-rasterizer"
 import type { IndexedPage, MediaAsset, PageLink } from "./model"
 
 export interface SyncConfluenceOptions {
@@ -396,9 +396,14 @@ function isSvgAttachment(filename: string, contentType: string | null) {
 async function rasterizeSvgAttachment(bytes: Uint8Array, getSvgRasterizer: () => Promise<SvgRasterizer | null>) {
   try {
     const rasterizer = await getSvgRasterizer()
-    return rasterizer ? await rasterizer.rasterize(bytes) : null
+    if (rasterizer) return await rasterizer.rasterize(bytes)
   } catch {
-    // Preserve the source attachment when Chromium cannot render it.
+    // Try the portable renderer when Chromium is unavailable or rejects the SVG.
+  }
+
+  try {
+    return rasterizeSvgWithResvg(bytes)
+  } catch {
     return null
   }
 }

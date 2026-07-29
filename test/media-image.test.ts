@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
 import { encode as encodeJpeg } from "jpeg-js"
 import { decodeImageFile } from "../src/media/image"
+import { rasterizeSvgWithResvg } from "../src/media/svg-rasterizer"
 
 describe("cached image decoding", () => {
   test("keeps decoding supported PNG previews", async () => {
@@ -32,10 +33,17 @@ describe("cached image decoding", () => {
     })
   })
 
-  test("leaves SVG previews for sync-time Chromium rasterization", async () => {
+  test("leaves SVG decoding to the sync-time rasterizers", async () => {
     await withBytes("diagram.svg", Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10" />'), (path) => {
       expect(() => decodeImageFile(path)).toThrow("PNG and JPEG are supported")
     })
+  })
+
+  test("uses resvg when Chromium is unavailable", () => {
+    const png = rasterizeSvgWithResvg(Buffer.from(safeSvg))
+
+    expect([...png.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    expect(decodePngDimensions(png)).toEqual({ width: 20, height: 10 })
   })
 
   test("reports malformed JPEG data clearly", async () => {
@@ -72,3 +80,9 @@ function tinyJpegBytes() {
 }
 
 const tinyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+const safeSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10" viewBox="0 0 20 10"><defs><linearGradient id="blue"><stop stop-color="#38bdf8" /></linearGradient></defs><rect width="20" height="10" fill="url(#blue)" /></svg>'
+
+function decodePngDimensions(bytes: Uint8Array) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  return { width: view.getUint32(16), height: view.getUint32(20) }
+}

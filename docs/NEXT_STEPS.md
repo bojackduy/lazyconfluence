@@ -91,7 +91,7 @@ Work in this order unless product priorities change. Complete one slice and upda
 ### 6. Media and Image Polish
 
 - [x] Add JPEG decoding.
-- [x] Rasterize SVG attachments to cached PNG during explicit sync/reload with local Chromium, preserving `foreignObject` labels without blocking reader rendering; keep the source SVG and show a placeholder if Chromium is unavailable.
+- [x] Rasterize SVG attachments to cached PNG during explicit sync/reload, preferring local Chromium to preserve `foreignObject` labels without blocking reader rendering and falling back to resvg when Chromium is unavailable.
 - [ ] Add media-cache failure diagnostics and an optional cache-maintenance command.
 - [ ] Keep Sixel a fallback/debug path; do not regress Kitty/Ghostty/WezTerm defaults.
 - [ ] Perform real-terminal smoke checks only when changing native protocols.
@@ -129,5 +129,5 @@ YYYY-MM-DD  Slice  Result  Verification  Next
 2026-07-27  Related links and outline  Added a selectable Related/Outline side rail with a third focus pane. Internal targets navigate locally with history, external links use the explicit browser launcher, and headings scroll to their source line.  bun run typecheck; bun test (156 pass, 0 fail, 727 assertions); git diff --check.  All-space page search.
 2026-07-27  Current-page reload  Added `r` to explicitly fetch and reindex only the selected Confluence page. Reload preserves other local pages, blocks local drafts, and leaves full-space sync in the CLI.  bun run typecheck; bun test (159 pass, 0 fail, 737 assertions); git diff --check.  All-space page search.
 2026-07-27  All-space page search  Added `S` for a separate local-only cross-space search lens. Results show space and path, preserve Current/Archived scope, and open through history-aware local navigation.  bun run typecheck; bun test (162 pass, 0 fail, 746 assertions); git diff --check.  Media and image polish.
-2026-07-29  JPEG and Chromium SVG previews  Added JPEG decoding and sync-time local Chromium SVG rasterization through `playwright-core`. SVG input is bounded; Chromium has JavaScript disabled and network requests blocked; generated PNG files are cached for the reader and native viewers. If Chromium is unavailable, the original SVG remains cached with an actionable placeholder.  bun run typecheck; bun run test (166 pass, 0 fail, 764 assertions); bun run build; git diff --check.  Media-cache diagnostics.
+2026-07-29  JPEG and SVG previews  Added JPEG decoding and sync-time SVG rasterization. Local Chromium through `playwright-core` is preferred for browser-compatible `foreignObject` rendering; bounded resvg rasterization is the portable fallback. Generated PNG files are cached for the reader and native viewers.  bun run typecheck; bun run test; bun run build; git diff --check.  Media-cache diagnostics.
 ```

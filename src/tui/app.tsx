@@ -2194,7 +2194,7 @@ function loadImagePreview(asset: MediaAsset | null): ImageLoadResult {
   }
 
   if (asset.contentType === "image/svg+xml") {
-    return { status: "error", message: "SVG preview needs local Chromium. Install Chromium or set LAZYCONFLUENCE_CHROMIUM_PATH, then sync or reload this page." }
+    return { status: "error", message: "SVG preview could not be rasterized. Set LAZYCONFLUENCE_CHROMIUM_PATH for browser-compatible rendering, then sync or reload this page." }
   }
 
   const cached = imagePreviewCache.get(asset.cachePath)

@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs"
 import { inflateSync } from "node:zlib"
-import { Resvg } from "@resvg/resvg-js"
 import { decode as decodeJpegBytes } from "jpeg-js"
 
 export interface DecodedImage {
@@ -8,25 +7,18 @@ export interface DecodedImage {
   height: number
   rgba: Uint8Array
   grayscale: Float32Array
-  format: "png" | "jpeg" | "svg"
-  rasterPng?: Uint8Array
+  format: "png" | "jpeg"
 }
 
 const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
-const maxSvgInputBytes = 2 * 1024 * 1024
-const maxSvgSourceDimension = 4096
-const maxSvgSourcePixels = 16 * 1024 * 1024
-const maxSvgRasterDimension = 1024
-const maxSvgRasterPixels = 1024 * 1024
 
 export function decodeImageFile(filePath: string): DecodedImage {
   const bytes = readFileSync(filePath)
 
   if (isPng(bytes)) return decodePng(bytes)
   if (isJpeg(bytes)) return decodeJpeg(bytes)
-  if (isSvg(bytes)) return decodeSvg(bytes)
 
-  throw new Error("Unsupported cached image format. PNG, JPEG, and SVG are supported in this preview renderer.")
+  throw new Error("Unsupported cached image format. PNG and JPEG are supported in this preview renderer.")
 }
 
 function isPng(bytes: Uint8Array) {
@@ -35,10 +27,6 @@ function isPng(bytes: Uint8Array) {
 
 function isJpeg(bytes: Uint8Array) {
   return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
-}
-
-function isSvg(bytes: Uint8Array) {
-  return /<svg\b/i.test(new TextDecoder().decode(bytes.subarray(0, Math.min(bytes.length, 4096))))
 }
 
 function decodePng(bytes: Uint8Array): DecodedImage {
@@ -119,172 +107,6 @@ function decodeJpeg(bytes: Uint8Array): DecodedImage {
 
     throw new Error(`Invalid JPEG: ${message}`)
   }
-}
-
-function decodeSvg(bytes: Uint8Array): DecodedImage {
-  if (bytes.length > maxSvgInputBytes) throw new Error(`SVG preview rejected: source exceeds the ${maxSvgInputBytes / 1024 / 1024} MiB limit.`)
-
-  let source: string
-  try {
-    source = new TextDecoder("utf-8", { fatal: true }).decode(bytes)
-  } catch {
-    throw new Error("Invalid SVG: source is not valid UTF-8.")
-  }
-
-  const rasterSource = convertSvgForeignObjectsToText(source)
-  validateSvgSource(rasterSource)
-
-  try {
-    const probe = new Resvg(rasterSource, svgRenderOptions())
-    validateSvgDimensions(probe.width, probe.height)
-
-    const targetWidth = svgRasterWidth(probe.width, probe.height)
-    const rendered = new Resvg(rasterSource, svgRenderOptions(targetWidth)).render()
-    const rgba = new Uint8Array(rendered.pixels)
-
-    if (!rendered.width || !rendered.height || rgba.length !== rendered.width * rendered.height * 4) {
-      throw new Error("rasterized pixel data is invalid")
-    }
-
-    return {
-      width: rendered.width,
-      height: rendered.height,
-      rgba,
-      grayscale: grayscaleFromRgba(rgba),
-      format: "svg",
-      rasterPng: new Uint8Array(rendered.asPng()),
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    if (message.startsWith("SVG preview rejected:")) throw error
-
-    throw new Error(`Invalid SVG: ${message}`)
-  }
-}
-
-function svgRenderOptions(width?: number) {
-  return {
-    ...(width ? { fitTo: { mode: "width" as const, value: width } } : {}),
-    font: { loadSystemFonts: true, defaultFontFamily: "sans-serif" },
-    background: "rgba(0, 0, 0, 0)",
-  }
-}
-
-function validateSvgSource(source: string) {
-  if (!/<svg\b/i.test(source)) throw new Error("SVG preview rejected: missing SVG root element.")
-  if (/<!doctype\b|<!entity\b/i.test(source)) throw new Error("SVG preview rejected: DOCTYPE and ENTITY declarations are not allowed.")
-  if (/<\s*(?:script|iframe|object|embed)\b/i.test(source)) throw new Error("SVG preview rejected: executable or embedded document elements are not allowed.")
-  if (/(?:xlink:)?href\s*=\s*(?:(["'])\s*(?!#)[\s\S]*?\1|(?!["'#\s])[^>\s]+)/i.test(source)) throw new Error("SVG preview rejected: external or embedded resource references are not allowed.")
-  if (/@import\b/i.test(source) || hasExternalSvgCssResource(source)) throw new Error("SVG preview rejected: CSS resource references are not allowed.")
-}
-
-function convertSvgForeignObjectsToText(source: string) {
-  return source
-    .replace(/<foreignobject\b([^>]*)\/\s*>/gi, "")
-    .replace(/<foreignobject\b([^>]*)>([\s\S]*?)<\/foreignobject\s*>/gi, (_match, attributes: string, html: string) => foreignObjectTextElement(attributes, html))
-}
-
-function foreignObjectTextElement(attributes: string, html: string) {
-  const x = numericAttribute(attributes, "x")
-  const y = numericAttribute(attributes, "y")
-  const width = numericAttribute(attributes, "width")
-  const height = numericAttribute(attributes, "height")
-  const lines = foreignObjectLines(html)
-
-  if (x === null || y === null || width === null || height === null || !lines.length) return ""
-
-  const styles = [attributeValue(attributes, "style") ?? "", ...[...html.matchAll(/\bstyle\s*=\s*(["'])([\s\S]*?)\1/gi)].map((match) => match[2])].join(";")
-  const fontSize = numericStyle(styles, "font-size") ?? 12
-  const lineHeight = numericStyle(styles, "line-height") ?? fontSize * 1.2
-  const fill = styleValue(styles, "color") ?? "#111827"
-  const family = styleValue(styles, "font-family") ?? "sans-serif"
-  const weight = styleValue(styles, "font-weight")
-  const alignment = styleValue(styles, "text-align")
-  const anchor = alignment === "left" ? "start" : alignment === "right" ? "end" : "middle"
-  const textX = anchor === "start" ? x : anchor === "end" ? x + width : x + width / 2
-  const textY = y + height / 2 - ((lines.length - 1) * lineHeight) / 2
-  const fontWeight = weight && /^(?:bold|[5-9]\d\d)$/i.test(weight) ? ` font-weight="${escapeXml(weight)}"` : ""
-  const lineElements = lines.map((line, index) => `<tspan x="${textX}" dy="${index ? lineHeight : 0}">${escapeXml(line)}</tspan>`).join("")
-
-  return `<text x="${textX}" y="${textY}" text-anchor="${anchor}" dominant-baseline="middle" fill="${escapeXml(fill)}" font-family="${escapeXml(family)}" font-size="${fontSize}"${fontWeight}>${lineElements}</text>`
-}
-
-function foreignObjectLines(html: string) {
-  const text = html
-    .replace(/<(?:script|style)\b[^>]*>[\s\S]*?<\/(?:script|style)\s*>/gi, "")
-    .replace(/<\s*br\b[^>]*\/?>/gi, "\n")
-    .replace(/<\s*\/(?:div|p|li|tr|h[1-6])\s*>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-
-  return decodeHtmlEntities(text)
-    .split("\n")
-    .map((line) => line.replace(/\s+/g, " ").trim())
-    .filter(Boolean)
-}
-
-function numericAttribute(attributes: string, name: string) {
-  const value = attributeValue(attributes, name)
-  if (!value || value.includes("%")) return null
-
-  const number = Number.parseFloat(value)
-
-  return Number.isFinite(number) ? number : null
-}
-
-function attributeValue(attributes: string, name: string) {
-  const match = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(["'])(.*?)\\1`, "i").exec(attributes)
-
-  return match?.[2] ?? null
-}
-
-function styleValue(styles: string, name: string) {
-  const matches = [...styles.matchAll(new RegExp(`${name}\\s*:\\s*([^;]+)`, "gi"))]
-
-  return matches.at(-1)?.[1].trim() ?? null
-}
-
-function numericStyle(styles: string, name: string) {
-  const value = styleValue(styles, name)
-  if (!value) return null
-
-  const number = Number.parseFloat(value)
-
-  return Number.isFinite(number) ? number : null
-}
-
-function decodeHtmlEntities(value: string) {
-  return value
-    .replace(/&#x([\da-f]+);/gi, (_match, code: string) => String.fromCodePoint(Number.parseInt(code, 16)))
-    .replace(/&#(\d+);/g, (_match, code: string) => String.fromCodePoint(Number.parseInt(code, 10)))
-    .replace(/&(amp|lt|gt|quot|apos|nbsp);/gi, (_match, name: string) => ({ amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " " })[name.toLowerCase()] ?? _match)
-}
-
-function escapeXml(value: string) {
-  return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&apos;" })[character] ?? character)
-}
-
-function hasExternalSvgCssResource(source: string) {
-  for (const match of source.matchAll(/url\s*\(\s*([^)]*?)\s*\)/gi)) {
-    const reference = match[1].trim().replace(/^['"]|['"]$/g, "")
-    if (!reference.startsWith("#")) return true
-  }
-
-  return false
-}
-
-function validateSvgDimensions(width: number, height: number) {
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
-    throw new Error("SVG preview rejected: dimensions are invalid.")
-  }
-  if (width > maxSvgSourceDimension || height > maxSvgSourceDimension || width * height > maxSvgSourcePixels) {
-    throw new Error("SVG preview rejected: source dimensions exceed the preview limit.")
-  }
-}
-
-function svgRasterWidth(width: number, height: number) {
-  const scale = Math.min(1, maxSvgRasterDimension / Math.max(width, height), Math.sqrt(maxSvgRasterPixels / (width * height)))
-
-  return Math.max(1, Math.floor(width * scale))
 }
 
 function pngBytesPerPixel(colorType: number) {

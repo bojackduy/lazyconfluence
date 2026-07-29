@@ -7,6 +7,7 @@ import { documentImages } from "./document/projection"
 import type { ImageBlock } from "./document/model"
 import { loadAtlassianAuth } from "./config"
 import { openIndexRepository, type IndexRepository, type PageBodyArtifact } from "./index/repository"
+import { createSvgRasterizer, type SvgRasterizer } from "./media/svg-rasterizer"
 import type { IndexedPage, MediaAsset, PageLink } from "./model"
 
 export interface SyncConfluenceOptions {
@@ -90,6 +91,7 @@ export async function reloadConfluencePage(pageId: string, options: ReloadConflu
 
   const repository = options.repository ?? openIndexRepository({ env })
   const shouldCloseRepository = !options.repository
+  const svgRasterizer = lazySvgRasterizer(env)
 
   try {
     const existing = repository.getPage(pageId)
@@ -116,7 +118,7 @@ export async function reloadConfluencePage(pageId: string, options: ReloadConflu
       syncedAt,
       treeOrder: existing.treeOrder,
     })
-    const mediaAssets = await cacheMediaAssetsForPage({ client, repository, pageId: mapped.indexedPage.pageId, images: documentImages(mapped.document), syncedAt })
+    const mediaAssets = await cacheMediaAssetsForPage({ client, repository, pageId: mapped.indexedPage.pageId, images: documentImages(mapped.document), syncedAt, getSvgRasterizer: svgRasterizer.get })
     const currentSpace = repository.getSpace(space.key)
 
     repository.upsertSpace(mapConfluenceSpace(space, { lastSyncedAt: syncedAt, pageCount: currentSpace?.pageCount ?? 0 }))
@@ -139,6 +141,7 @@ export async function reloadConfluencePage(pageId: string, options: ReloadConflu
 
     return { page: mapped.indexedPage, linksIndexed: mapped.links.length, mediaAssetsPersisted: mediaAssets.length }
   } finally {
+    await svgRasterizer.close()
     if (shouldCloseRepository) repository.close()
   }
 }
@@ -155,6 +158,7 @@ export async function syncConfluence(options: SyncConfluenceOptions = {}): Promi
 
   const repository = options.repository ?? openIndexRepository({ env })
   const shouldCloseRepository = !options.repository
+  const svgRasterizer = lazySvgRasterizer(env)
   emitProgress(options.onProgress, { type: "opening-database", message: `Opening local database${repository.path ? `: ${repository.path}` : "."}`, databasePath: repository.path ?? null })
 
   try {
@@ -183,7 +187,7 @@ export async function syncConfluence(options: SyncConfluenceOptions = {}): Promi
 
     for (const space of spaces) {
       try {
-        const result = await syncSpace({ client, repository, space, baseUrl: client.baseUrl, syncedAt: startedAt, pageLimit: options.pageLimit, onProgress: options.onProgress })
+        const result = await syncSpace({ client, repository, space, baseUrl: client.baseUrl, syncedAt: startedAt, pageLimit: options.pageLimit, onProgress: options.onProgress, getSvgRasterizer: svgRasterizer.get })
         report.spacesSynced += 1
         report.pagesIndexed += result.pagesIndexed
         report.linksIndexed += result.linksIndexed
@@ -202,6 +206,7 @@ export async function syncConfluence(options: SyncConfluenceOptions = {}): Promi
 
     return report
   } finally {
+    await svgRasterizer.close()
     if (shouldCloseRepository) repository.close()
   }
 }
@@ -243,6 +248,7 @@ async function syncSpace(input: {
   syncedAt: string
   pageLimit?: number
   onProgress?: (event: SyncProgressEvent) => void
+  getSvgRasterizer: () => Promise<SvgRasterizer | null>
 }) {
   emitProgress(input.onProgress, { type: "fetching-space-pages", message: `Fetching pages for ${input.space.key}.`, spaceKey: input.space.key, spaceName: input.space.name })
   const [currentPages, archivedPages] = await Promise.all([
@@ -290,7 +296,7 @@ async function syncSpace(input: {
 
       pages.push(mapped.indexedPage)
       links.push(...mapped.links)
-      mediaAssets.push(...await cacheMediaAssetsForPage({ client: input.client, repository: input.repository, pageId: mapped.indexedPage.pageId, images: documentImages(mapped.document), syncedAt: input.syncedAt }))
+      mediaAssets.push(...await cacheMediaAssetsForPage({ client: input.client, repository: input.repository, pageId: mapped.indexedPage.pageId, images: documentImages(mapped.document), syncedAt: input.syncedAt, getSvgRasterizer: input.getSvgRasterizer }))
       bodyArtifacts.push({
         pageId: mapped.indexedPage.pageId,
         remoteVersion: mapped.remoteVersion,
@@ -324,7 +330,7 @@ async function syncSpace(input: {
   return { pagesIndexed: pages.length, linksIndexed: links.length, bodyArtifactsPersisted: bodyArtifacts.length, failures: pageFailures }
 }
 
-async function cacheMediaAssetsForPage(input: { client: ConfluenceClient; repository: IndexRepository; pageId: string; images: ImageBlock[]; syncedAt: string }): Promise<MediaAsset[]> {
+async function cacheMediaAssetsForPage(input: { client: ConfluenceClient; repository: IndexRepository; pageId: string; images: ImageBlock[]; syncedAt: string; getSvgRasterizer: () => Promise<SvgRasterizer | null> }): Promise<MediaAsset[]> {
   const assets: MediaAsset[] = []
 
   for (const image of input.images) {
@@ -335,11 +341,17 @@ async function cacheMediaAssetsForPage(input: { client: ConfluenceClient; reposi
     if (image.filename && input.repository.path && input.repository.path !== ":memory:") {
       try {
         const downloaded = await input.client.fetchAttachmentImage(input.pageId, image.filename)
-        const targetPath = mediaCachePath(input.repository.path, input.pageId, image.nodeId, image.filename, downloaded.contentType)
+        const svgAttachment = isSvgAttachment(image.filename, downloaded.contentType)
+        const rasterized = svgAttachment
+          ? await rasterizeSvgAttachment(downloaded.bytes, input.getSvgRasterizer)
+          : null
+        const bytes = rasterized ?? downloaded.bytes
+        const contentTypeForCache = rasterized ? "image/png" : svgAttachment ? "image/svg+xml" : downloaded.contentType
+        const targetPath = mediaCachePath(input.repository.path, input.pageId, image.nodeId, image.filename, contentTypeForCache)
         await mkdir(dirname(targetPath), { recursive: true, mode: 0o700 })
-        await writeFile(targetPath, downloaded.bytes)
+        await writeFile(targetPath, bytes)
         cachePath = targetPath
-        contentType = downloaded.contentType
+        contentType = contentTypeForCache
       } catch {
         // Keep sync local tree/body successful; the TUI will show the image placeholder.
       }
@@ -359,6 +371,36 @@ async function cacheMediaAssetsForPage(input: { client: ConfluenceClient; reposi
   }
 
   return assets
+}
+
+function lazySvgRasterizer(env: NodeJS.ProcessEnv) {
+  let pending: Promise<SvgRasterizer | null> | null = null
+
+  return {
+    get: () => (pending ??= createSvgRasterizer(env)),
+    close: async () => {
+      try {
+        const rasterizer = pending ? await pending : null
+        await rasterizer?.close()
+      } catch {
+        // Rasterizer launch failures are already handled per attachment.
+      }
+    },
+  }
+}
+
+function isSvgAttachment(filename: string, contentType: string | null) {
+  return contentType === "image/svg+xml" || filename.toLowerCase().split(/[?#]/, 1)[0]?.endsWith(".svg")
+}
+
+async function rasterizeSvgAttachment(bytes: Uint8Array, getSvgRasterizer: () => Promise<SvgRasterizer | null>) {
+  try {
+    const rasterizer = await getSvgRasterizer()
+    return rasterizer ? await rasterizer.rasterize(bytes) : null
+  } catch {
+    // Preserve the source attachment when Chromium cannot render it.
+    return null
+  }
 }
 
 function mediaCachePath(databasePath: string, pageId: string, nodeId: string, filename: string, contentType: string | null) {

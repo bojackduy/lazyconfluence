@@ -2193,6 +2193,10 @@ function loadImagePreview(asset: MediaAsset | null): ImageLoadResult {
     return { status: "error", message: "No cached image file is available yet." }
   }
 
+  if (asset.contentType === "image/svg+xml") {
+    return { status: "error", message: "SVG preview needs local Chromium. Install Chromium or set LAZYCONFLUENCE_CHROMIUM_PATH, then sync or reload this page." }
+  }
+
   const cached = imagePreviewCache.get(asset.cachePath)
   if (cached) {
     imagePreviewCache.delete(asset.cachePath)
@@ -2407,12 +2411,6 @@ function nativeEraseArea(mode: NativeImageRenderMode, row: number, column: numbe
 }
 
 function kittyNativeCommandForImage(input: NativeViewerImage): NativeImageCommandResult {
-  if (input.image.rasterPng) {
-    const command = kittyGraphicsPngCommand({ id: input.id, bytes: input.image.rasterPng, columns: input.columns, rows: input.rows })
-
-    return { command, width: input.image.width, height: input.image.height, chunks: kittyCommandChunkCount(command), cached: false, transfer: "raster-png" }
-  }
-
   if (input.asset?.cachePath && input.image.format === "png") {
     const bytes = readFileSync(input.asset.cachePath)
     const command = kittyGraphicsPngCommand({ id: input.id, bytes, columns: input.columns, rows: input.rows })
@@ -2424,13 +2422,13 @@ function kittyNativeCommandForImage(input: NativeViewerImage): NativeImageComman
 }
 
 function iterm2NativeCommandForImage(input: NativeViewerImage): NativeImageCommandResult {
-  const bytes = input.image.rasterPng ?? (input.asset?.cachePath ? readFileSync(input.asset.cachePath) : null)
+  const bytes = input.asset?.cachePath ? readFileSync(input.asset.cachePath) : null
   if (!bytes) return sixelNativeCommandForImage(input)
 
-  const name = input.image.rasterPng ? `${input.asset?.title || "image"}.png` : input.asset?.title || input.asset?.cachePath || "image"
+  const name = input.asset?.title || input.asset?.cachePath || "image"
   const command = iterm2ImageCommand({ bytes, name, columns: input.columns, rows: input.rows })
 
-  return { command, width: input.image.width, height: input.image.height, chunks: 1, cached: false, transfer: input.image.rasterPng ? "raster-png" : "direct-file" }
+  return { command, width: input.image.width, height: input.image.height, chunks: 1, cached: false, transfer: "direct-file" }
 }
 
 function sixelNativeCommandForImage(input: NativeViewerImage): NativeImageCommandResult {

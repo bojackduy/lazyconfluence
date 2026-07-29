@@ -10,11 +10,10 @@ Inline document images are safe but not native terminal images.
 - Rendered Markdown includes visible image placeholders plus `confluence-opaque` markers so edit/write-back does not silently drop images.
 - Explicit sync caches Confluence attachment bytes through the authenticated attachments API and REST download links.
 - `media_assets` rows connect image placeholder node ids to cached files.
-- The TUI decodes cached PNG and JPEG files, and safely rasterizes accepted SVG files locally.
-- Inline TUI previews render cached PNG, JPEG, and SVG raster output as truecolor half-block cells.
-- SVG input is limited to 2 MiB, 4096px per source dimension, 16 megapixels of source area, and a 1024px/1 megapixel raster output budget.
-- Simple positioned `foreignObject` labels are converted into plain SVG text before rasterization because resvg does not render XHTML. SVGs with DOCTYPE or ENTITY declarations, executable or embedded-document elements, external/embedded resource references, or CSS resource references are rejected before rendering.
-- Missing cache files, URL images, rejected SVGs, and other unsupported formats still show placeholders.
+- The TUI decodes cached PNG and JPEG files only.
+- During explicit sync or reload, SVG attachments are rasterized to PNG with local Chromium so `foreignObject` labels match browser rendering without delaying the reader.
+- SVG input is limited to 2 MiB, 4096px per source dimension, 16 megapixels of source area, and a 1024px/1 megapixel raster output budget. Chromium runs with JavaScript disabled and all network requests blocked.
+- `LAZYCONFLUENCE_CHROMIUM_PATH` overrides executable discovery. If Chromium is unavailable or rasterization fails, the source SVG remains cached and the TUI shows an actionable placeholder.
 - The explicit `i` image viewer can use native terminal protocols when the direct terminal reports support.
 - Inline document images remain cell-based even when native protocols are available.
 
@@ -23,10 +22,10 @@ Inline document images are safe but not native terminal images.
 - `src/confluence/html.ts` parses `ac:image` and extracts attachment filenames or URL references.
 - `src/document/model.ts` defines `ImageBlock`.
 - `src/document/projection.ts` renders visible image placeholders and exposes `documentImages(...)` for sync.
-- `src/sync.ts` caches attachment images during explicit sync and records `MediaAsset` rows.
+- `src/sync.ts` caches attachment images during explicit sync, rasterizes SVGs through Chromium when available, and records `MediaAsset` rows.
 - `src/index/schema.ts` contains schema v9 `media_assets`.
 - `src/index/repository.ts` persists and reads media assets.
-- `src/media/image.ts` decodes cached PNG/JPEG files and uses `@resvg/resvg-js` to rasterize validated SVG files into bounded RGBA/grayscale buffers plus PNG bytes for native viewers.
+- `src/media/svg-rasterizer.ts` validates and rasterizes SVG files with local Chromium; `src/media/image.ts` decodes cached PNG/JPEG files.
 - `src/tui/media.ts` splits rendered Markdown into text and image parts by `confluence-opaque` node id.
 - `src/tui/app.tsx` renders image cards, chooses an `ImageRenderMode`, draws cell previews, and manages the native image viewer lifecycle.
 - `src/tui/kitty.ts` contains Kitty graphics helpers. The viewer prefers direct cached-PNG payloads (`f=100`) and keeps raw RGBA plus file-transfer helpers for fallback/experiments.
@@ -96,7 +95,7 @@ Inline document rendering should remain cell-based by default.
 
 Recommended fallback order for inline previews:
 
-1. Cached PNG/JPEG decoded successfully, or SVG rasterized successfully: render color half-block cells.
+1. Cached PNG/JPEG decoded successfully, including sync-rasterized SVG previews: render color half-block cells.
 2. Terminal lacks RGB: render mono cell approximation.
 3. Missing cache or unsupported file type: render placeholder.
 
@@ -104,8 +103,8 @@ Native protocols must not be auto-enabled inside the scrolling document view unt
 
 Recommended viewer protocol order:
 
-1. `kitty_graphics` with direct terminal or existing tmux passthrough session and no `WT_SESSION`: Kitty graphics using a cached or generated PNG payload transfer.
-2. Known WezTerm/iTerm2 terminal name: OSC 1337 iTerm2 inline image transfer; SVGs use their generated PNG, never raw SVG bytes.
+1. `kitty_graphics` with direct terminal or existing tmux passthrough session and no `WT_SESSION`: Kitty graphics using a cached PNG payload transfer.
+2. Known WezTerm/iTerm2 terminal name: OSC 1337 iTerm2 inline image transfer from the cached file.
 3. `sixel` capability: indexed-color Sixel.
 4. RGB terminal: color half-block cells.
 5. Non-RGB terminal: mono cell approximation.

@@ -584,9 +584,9 @@ describe("main TUI layout", () => {
     }
   })
 
-  test("image viewer rasterizes SVG before iTerm2 transfer", async () => {
+  test("image viewer transfers sync-rasterized SVG PNG previews through iTerm2", async () => {
     const dir = await mkdtemp(join(tmpdir(), "lazyconfluence-iterm2-svg-viewer-"))
-    const imagePath = join(dir, "architecture.svg")
+    const imagePath = join(dir, "architecture.png")
     const logPath = join(dir, "image-debug.jsonl")
     const writes: string[] = []
     const stdout = createCaptureStdout(120, 36, writes)
@@ -598,14 +598,14 @@ describe("main TUI layout", () => {
       title: "Architecture diagram",
       sourceUrl: null,
       cachePath: imagePath,
-      contentType: "image/svg+xml",
+      contentType: "image/png",
       width: 20,
       height: 10,
       updatedAt: "2026-07-29T12:00:00Z",
     }
 
     try {
-      await writeFile(imagePath, safeSvg)
+      await writeFile(imagePath, Buffer.from(tinyPngBase64, "base64"))
       process.env.LAZYCONFLUENCE_IMAGE_DEBUG = "1"
       process.env.LAZYCONFLUENCE_IMAGE_DEBUG_LOG = logPath
 
@@ -632,10 +632,10 @@ describe("main TUI layout", () => {
         const rawOutput = writes.join("")
         expect(rawOutput).toContain("\x1b]1337;File=")
         expect(rawOutput).toContain("iVBORw0KGgo")
-        expect(rawOutput).not.toContain(Buffer.from(safeSvg).toString("base64"))
+        expect(rawOutput).toContain(tinyPngBase64)
 
         const events = await readImageDebugEvents(logPath)
-        expect(events.find((event) => event.event === "iterm2_write")).toMatchObject({ transfer: "raster-png" })
+        expect(events.find((event) => event.event === "iterm2_write")).toMatchObject({ transfer: "direct-file" })
       } finally {
         rendered.renderer.destroy()
       }
@@ -1595,7 +1595,6 @@ const imageMarkdown = [
 ].join("\n")
 
 const tinyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
-const safeSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10" viewBox="0 0 20 10"><defs><linearGradient id="blue"><stop stop-color="#38bdf8" /></linearGradient></defs><rect width="20" height="10" fill="url(#blue)" /></svg>'
 
 const otherPage: IndexedPage = {
   pageId: "ops-home",

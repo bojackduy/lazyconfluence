@@ -1822,7 +1822,7 @@ function ImagePreviewCard(props: { part: Extract<ReaderContentPart, { kind: "ima
       <Show when={image()} fallback={<ImagePreviewFallback part={props.part} message={fallbackMessage()} />}>
         {(decoded) => (
           <box flexDirection="column" width="100%">
-            <text height={1} fg={theme.subtle}>cached PNG {decoded().width}x{decoded().height} · {imageRenderModeLabel(props.renderMode)}</text>
+            <text height={1} fg={theme.subtle}>cached {decoded().format.toUpperCase()} {decoded().width}x{decoded().height} · {imageRenderModeLabel(props.renderMode)}</text>
             <box width="100%" height={size().height} backgroundColor={theme.bg} buffered renderAfter={(buffer: OptimizedBuffer) => renderPreview(buffer, decoded())} />
           </box>
         )}
@@ -2407,6 +2407,12 @@ function nativeEraseArea(mode: NativeImageRenderMode, row: number, column: numbe
 }
 
 function kittyNativeCommandForImage(input: NativeViewerImage): NativeImageCommandResult {
+  if (input.image.rasterPng) {
+    const command = kittyGraphicsPngCommand({ id: input.id, bytes: input.image.rasterPng, columns: input.columns, rows: input.rows })
+
+    return { command, width: input.image.width, height: input.image.height, chunks: kittyCommandChunkCount(command), cached: false, transfer: "raster-png" }
+  }
+
   if (input.asset?.cachePath && input.image.format === "png") {
     const bytes = readFileSync(input.asset.cachePath)
     const command = kittyGraphicsPngCommand({ id: input.id, bytes, columns: input.columns, rows: input.rows })
@@ -2418,12 +2424,13 @@ function kittyNativeCommandForImage(input: NativeViewerImage): NativeImageComman
 }
 
 function iterm2NativeCommandForImage(input: NativeViewerImage): NativeImageCommandResult {
-  if (!input.asset?.cachePath) return sixelNativeCommandForImage(input)
+  const bytes = input.image.rasterPng ?? (input.asset?.cachePath ? readFileSync(input.asset.cachePath) : null)
+  if (!bytes) return sixelNativeCommandForImage(input)
 
-  const bytes = readFileSync(input.asset.cachePath)
-  const command = iterm2ImageCommand({ bytes, name: input.asset.title || input.asset.cachePath, columns: input.columns, rows: input.rows })
+  const name = input.image.rasterPng ? `${input.asset?.title || "image"}.png` : input.asset?.title || input.asset?.cachePath || "image"
+  const command = iterm2ImageCommand({ bytes, name, columns: input.columns, rows: input.rows })
 
-  return { command, width: input.image.width, height: input.image.height, chunks: 1, cached: false, transfer: "direct-png" }
+  return { command, width: input.image.width, height: input.image.height, chunks: 1, cached: false, transfer: input.image.rasterPng ? "raster-png" : "direct-file" }
 }
 
 function sixelNativeCommandForImage(input: NativeViewerImage): NativeImageCommandResult {

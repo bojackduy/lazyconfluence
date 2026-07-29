@@ -573,7 +573,69 @@ describe("main TUI layout", () => {
 
         const events = await readImageDebugEvents(logPath)
         expect(events.map((event) => event.event)).toContain("iterm2_write")
-        expect(events.find((event) => event.event === "iterm2_write")).toMatchObject({ transfer: "direct-png" })
+        expect(events.find((event) => event.event === "iterm2_write")).toMatchObject({ transfer: "direct-file" })
+      } finally {
+        rendered.renderer.destroy()
+      }
+    } finally {
+      restoreEnv("LAZYCONFLUENCE_IMAGE_DEBUG", previousImageDebug)
+      restoreEnv("LAZYCONFLUENCE_IMAGE_DEBUG_LOG", previousImageDebugLog)
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("image viewer rasterizes SVG before iTerm2 transfer", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lazyconfluence-iterm2-svg-viewer-"))
+    const imagePath = join(dir, "architecture.svg")
+    const logPath = join(dir, "image-debug.jsonl")
+    const writes: string[] = []
+    const stdout = createCaptureStdout(120, 36, writes)
+    const previousImageDebug = process.env.LAZYCONFLUENCE_IMAGE_DEBUG
+    const previousImageDebugLog = process.env.LAZYCONFLUENCE_IMAGE_DEBUG_LOG
+    const imageAsset: MediaAsset = {
+      pageId: "local-home",
+      nodeId: "svg-image-node",
+      title: "Architecture diagram",
+      sourceUrl: null,
+      cachePath: imagePath,
+      contentType: "image/svg+xml",
+      width: 20,
+      height: 10,
+      updatedAt: "2026-07-29T12:00:00Z",
+    }
+
+    try {
+      await writeFile(imagePath, safeSvg)
+      process.env.LAZYCONFLUENCE_IMAGE_DEBUG = "1"
+      process.env.LAZYCONFLUENCE_IMAGE_DEBUG_LOG = logPath
+
+      const rendered = await testRender(() => (
+        <ImageViewerOverlay
+          visible
+          pageTitle="Local Engineering Home"
+          images={[{ kind: "image", nodeId: "svg-image-node", label: "Architecture diagram", details: "Attachment on this Confluence page.", asset: imageAsset }]}
+          selectedIndex={0}
+          renderMode="iterm2"
+          left={2}
+          top={2}
+          width={80}
+          height={24}
+          onClose={() => {}}
+        />
+      ), { width: 120, height: 36, stdout })
+
+      try {
+        await rendered.renderOnce()
+        await rendered.flush()
+        await waitForTimers()
+
+        const rawOutput = writes.join("")
+        expect(rawOutput).toContain("\x1b]1337;File=")
+        expect(rawOutput).toContain("iVBORw0KGgo")
+        expect(rawOutput).not.toContain(Buffer.from(safeSvg).toString("base64"))
+
+        const events = await readImageDebugEvents(logPath)
+        expect(events.find((event) => event.event === "iterm2_write")).toMatchObject({ transfer: "raster-png" })
       } finally {
         rendered.renderer.destroy()
       }
@@ -1533,6 +1595,7 @@ const imageMarkdown = [
 ].join("\n")
 
 const tinyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+const safeSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10" viewBox="0 0 20 10"><defs><linearGradient id="blue"><stop stop-color="#38bdf8" /></linearGradient></defs><rect width="20" height="10" fill="url(#blue)" /></svg>'
 
 const otherPage: IndexedPage = {
   pageId: "ops-home",

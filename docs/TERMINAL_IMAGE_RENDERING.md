@@ -10,9 +10,11 @@ Inline document images are safe but not native terminal images.
 - Rendered Markdown includes visible image placeholders plus `confluence-opaque` markers so edit/write-back does not silently drop images.
 - Explicit sync caches Confluence attachment bytes through the authenticated attachments API and REST download links.
 - `media_assets` rows connect image placeholder node ids to cached files.
-- The TUI currently decodes cached PNG files only.
-- Inline TUI previews render cached PNGs as truecolor half-block cells.
-- Missing cache files, URL images, JPEG, SVG, and other unsupported formats still show placeholders.
+- The TUI decodes cached PNG and JPEG files, and safely rasterizes accepted SVG files locally.
+- Inline TUI previews render cached PNG, JPEG, and SVG raster output as truecolor half-block cells.
+- SVG input is limited to 2 MiB, 4096px per source dimension, 16 megapixels of source area, and a 1024px/1 megapixel raster output budget.
+- `foreignObject` HTML is stripped before rasterization because resvg does not render it. SVGs with DOCTYPE or ENTITY declarations, executable or embedded-document elements, external/embedded resource references, or CSS resource references are rejected before rendering.
+- Missing cache files, URL images, rejected SVGs, and other unsupported formats still show placeholders.
 - The explicit `i` image viewer can use native terminal protocols when the direct terminal reports support.
 - Inline document images remain cell-based even when native protocols are available.
 
@@ -24,7 +26,7 @@ Inline document images are safe but not native terminal images.
 - `src/sync.ts` caches attachment images during explicit sync and records `MediaAsset` rows.
 - `src/index/schema.ts` contains schema v9 `media_assets`.
 - `src/index/repository.ts` persists and reads media assets.
-- `src/media/image.ts` decodes cached PNG files into RGBA/grayscale buffers.
+- `src/media/image.ts` decodes cached PNG/JPEG files and uses `@resvg/resvg-js` to rasterize validated SVG files into bounded RGBA/grayscale buffers plus PNG bytes for native viewers.
 - `src/tui/media.ts` splits rendered Markdown into text and image parts by `confluence-opaque` node id.
 - `src/tui/app.tsx` renders image cards, chooses an `ImageRenderMode`, draws cell previews, and manages the native image viewer lifecycle.
 - `src/tui/kitty.ts` contains Kitty graphics helpers. The viewer prefers direct cached-PNG payloads (`f=100`) and keeps raw RGBA plus file-transfer helpers for fallback/experiments.
@@ -94,7 +96,7 @@ Inline document rendering should remain cell-based by default.
 
 Recommended fallback order for inline previews:
 
-1. Cached PNG decoded successfully: render color half-block cells.
+1. Cached PNG/JPEG decoded successfully, or SVG rasterized successfully: render color half-block cells.
 2. Terminal lacks RGB: render mono cell approximation.
 3. Missing cache or unsupported file type: render placeholder.
 
@@ -102,8 +104,8 @@ Native protocols must not be auto-enabled inside the scrolling document view unt
 
 Recommended viewer protocol order:
 
-1. `kitty_graphics` with direct terminal or existing tmux passthrough session and no `WT_SESSION`: Kitty graphics using direct cached PNG payload transfer.
-2. Known WezTerm/iTerm2 terminal name: OSC 1337 iTerm2 inline image transfer.
+1. `kitty_graphics` with direct terminal or existing tmux passthrough session and no `WT_SESSION`: Kitty graphics using a cached or generated PNG payload transfer.
+2. Known WezTerm/iTerm2 terminal name: OSC 1337 iTerm2 inline image transfer; SVGs use their generated PNG, never raw SVG bytes.
 3. `sixel` capability: indexed-color Sixel.
 4. RGB terminal: color half-block cells.
 5. Non-RGB terminal: mono cell approximation.
@@ -133,7 +135,7 @@ Remaining future work:
 - Treat Kitty file transfer (`t=f`) as a later optimization only after terminal-specific smoke tests prove the emulator can access and display local file paths reliably.
 - Tune Sixel quality/performance after testing in real Sixel-capable terminals.
 - Keep Zellij blocked until confirming its required wrapping/config.
-- Add JPEG/SVG decoding if cached media expands beyond PNG.
+- Add media-cache diagnostics and an optional cache-maintenance command.
 
 ## Open Questions
 

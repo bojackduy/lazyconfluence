@@ -58,7 +58,8 @@ export function resolveKeyCommand(key: TuiKey, context: CommandContext): Command
   }
   if (context === "page-search" || context === "space-switcher" || context === "new-page") return textInputCommand(key)
 
-  if (key.name === "q" || key.name === "escape") return "quit"
+  if (key.name === "escape") return "go-back"
+  if (key.name === "q") return "quit"
   if (isPlainKey(key, "?")) return "show-help"
   if (isPlainKey(key, "p")) return "open-command-palette"
   if (key.name === ";" || key.name === ":") return "open-command-palette"
@@ -68,7 +69,6 @@ export function resolveKeyCommand(key: TuiKey, context: CommandContext): Command
   if (isPlainKey(key, "s")) return "open-space-switcher"
   if (isPlainKey(key, "o")) return "open-browser"
   if (isPlainKey(key, "r")) return "refresh"
-  if (isPlainKey(key, "b")) return "go-back"
   if (isPlainKey(key, "c")) return "open-overview"
   if (isPlainKey(key, "a")) return "toggle-page-view"
   if (isPlainKey(key, "e")) return "edit-page"

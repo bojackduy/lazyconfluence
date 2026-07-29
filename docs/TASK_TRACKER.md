@@ -143,6 +143,7 @@ YYYY-MM-DD  ID  Result  Verification  Follow-up
 2026-07-27  command-palette-vim-keys  Expanded the Command Palette to the near-full-screen viewer layout and added `;` and `:` aliases alongside `p`.  bun run typecheck; bun test (163 pass, 0 fail, 753 assertions); git diff --check.  Next: media and image polish.
 2026-07-27  staged-overview-guidance  Made staged create, delete, and edit confirmations transient; after they clear, the footer exposes `c overview` whenever the active space has staged changes.  bun run typecheck; bun test (163 pass, 0 fail, 754 assertions); git diff --check.  Next: media and image polish.
 2026-07-29  search-overlay-window  Expanded page-search and space-switcher overlays to viewer-sized layouts. Their result windows now follow the selected row, including results beyond the initial viewport.  bun run typecheck; bun test (164 pass, 0 fail, 756 assertions); git diff --check.  Next: media and image polish.
+2026-07-29  escape-history-back  Normal reader `Esc` now returns to the previous history location; `q` remains the quit key, and overlays including the image viewer retain `Esc` close behavior.  bun run typecheck; bun test (164 pass, 0 fail, 759 assertions); git diff --check.  Next: media and image polish.
 ```
 
 ## Contract Changes

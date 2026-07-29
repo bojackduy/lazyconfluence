@@ -50,7 +50,9 @@ describe("context-aware key resolution", () => {
     expect(resolveKeyCommand(key("f"), "document")).toBe("open-document-find")
     expect(resolveKeyCommand(key("o"), "navigator")).toBe("open-browser")
     expect(resolveKeyCommand(key("r"), "navigator")).toBe("refresh")
-    expect(resolveKeyCommand(key("b"), "document")).toBe("go-back")
+    expect(resolveKeyCommand(key("escape", "\u001b"), "document")).toBe("go-back")
+    expect(resolveKeyCommand(key("b"), "document")).toBeNull()
+    expect(resolveKeyCommand(key("q"), "document")).toBe("quit")
   })
 
   test("maps pane-specific lazy navigation and aliases", () => {
@@ -96,6 +98,7 @@ describe("context-aware key resolution", () => {
     expect(resolveKeyCommand(key("u"), "help")).toBe("page-up")
     expect(resolveKeyCommand(key("right", "\u001b[C"), "image-viewer")).toBe("next-image")
     expect(resolveKeyCommand(key("h"), "image-viewer")).toBe("previous-image")
+    expect(resolveKeyCommand(key("escape", "\u001b"), "image-viewer")).toBe("close-overlay")
     expect(resolveKeyCommand(key(" ", " "), "changes")).toBe("toggle-change")
     expect(resolveKeyCommand(key("t", "t", { ctrl: true }), "editor")).toBe("stage-editor")
   })

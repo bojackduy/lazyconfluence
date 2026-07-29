@@ -2774,7 +2774,7 @@ export function statusBarHints(focusPane: string, editorOpen: boolean, width: nu
   if (editorOpen) return [{ key: "Ctrl+T", label: "stage" }, { key: "Esc", label: "close" }]
   if (width < 80) return [
     { key: "S", label: "all spaces" },
-    { key: "b", label: "back" },
+    { key: "Esc", label: "back" },
     ...(hasStagedChanges ? [{ key: "c", label: "overview" }] : []),
     { key: "Tab", label: "panes" },
     ...(hasStagedChanges ? [] : [{ key: "?", label: "help" }]),
@@ -2783,7 +2783,7 @@ export function statusBarHints(focusPane: string, editorOpen: boolean, width: nu
   const globalHints: StatusHintItem[] = [
     { key: "/", label: "search" },
     { key: "S", label: "all spaces" },
-    { key: "b", label: "back" },
+    { key: "Esc", label: "back" },
     ...(hasStagedChanges ? [{ key: "c", label: "overview" }] : []),
     { key: "Tab", label: "panes" },
   ]

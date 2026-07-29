@@ -53,7 +53,7 @@ export type TuiCommand = {
 }
 
 export const tuiCommands: readonly TuiCommand[] = [
-  command("quit", "Quit", "Exit lazyconfluence.", "q · Esc", "Global", ["main"], true),
+  command("quit", "Quit", "Exit lazyconfluence.", "q", "Global", ["main"], true),
   command("show-help", "Help", "Show available keyboard commands.", "?", "Global", ["main", "help"], true),
   command("open-command-palette", "Command palette", "Search and run actions.", "p · ; · :", "Global", ["main"], true),
   command("open-page-search", "Page search", "Search pages in the active space.", "/", "Global", ["main"], true),
@@ -62,7 +62,7 @@ export const tuiCommands: readonly TuiCommand[] = [
   command("open-space-switcher", "Switch space", "Choose another locally indexed space.", "s", "Global", ["main"], true),
   command("open-browser", "Open in browser", "Open the selected Confluence page in your browser.", "o", "Global", ["main"], true),
   command("refresh", "Reload current page", "Fetch the selected page from Confluence without syncing other pages.", "r", "Reader", ["main", "navigator", "document", "outline", "related"], true),
-  command("go-back", "Go back", "Return to the previous page in navigation history.", "b", "Navigation", ["main"], true),
+  command("go-back", "Go back", "Return to the previous page in navigation history.", "Esc", "Navigation", ["main"], true),
   command("focus-next-pane", "Next pane", "Move focus between navigator, document, outline, and related links.", "Tab", "Navigation", ["main", "navigator", "document", "outline", "related"], true),
   command("focus-previous-pane", "Previous pane", "Move focus to the previous pane.", "Shift+Tab", "Navigation", ["main", "navigator", "document", "outline", "related"], true),
   command("move-down", "Move down", "Move selection or scroll down.", "j · Down", "Navigation", ["navigator", "document", "outline", "related", "changes", "image-viewer", "help"], true),

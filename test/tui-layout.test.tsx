@@ -38,7 +38,7 @@ describe("main TUI layout", () => {
       expect(output).toContain("·")
       expect(output).toContain("Overview 0")
       expect(output).toContain("r reload")
-      expect(output).toContain("b back")
+      expect(output).toContain("Esc back")
       expect(output).toContain("Tab panes")
       expect(output).not.toContain("i.image")
       expect(output).toContain("▾ ▣ Local Engineering Home")
@@ -73,7 +73,7 @@ describe("main TUI layout", () => {
       expect(frame).toContain("RELOADING")
       expect(frame).toContain("Reloading Local Engineering Home from Confluence...")
       expect(frame).toContain("r reload")
-      expect(frame).toContain("b back")
+      expect(frame).toContain("Esc back")
     } finally {
       rendered.renderer.destroy()
     }
@@ -82,15 +82,15 @@ describe("main TUI layout", () => {
   test("prioritizes all-space search and pane actions within the footer budget", () => {
     expect(statusBarHints("navigator", false, 70)).toEqual([
       { key: "S", label: "all spaces" },
-      { key: "b", label: "back" },
+      { key: "Esc", label: "back" },
       { key: "Tab", label: "panes" },
       { key: "?", label: "help" },
     ])
-    expect(statusBarHints("document", false, 100).map((hint) => hint.key)).toEqual(["/", "S", "b", "Tab"])
-    expect(statusBarHints("navigator", false, 140, 16).map((hint) => hint.key)).toEqual(["/", "S", "r", "b", "Tab", "j/k", "h/l", "e", "D", "n", "N"])
-    expect(statusBarHints("document", false, 140, 15).map((hint) => hint.key)).toEqual(["/", "S", "r", "b", "Tab", "j/k", "e", "D", "d/u", "i"])
-    expect(statusBarHints("document", false, 120, 40).map((hint) => hint.key)).toEqual(["/", "S", "r", "b", "Tab", "j/k"])
-    expect(statusBarHints("navigator", false, 100, 16, true).map((hint) => hint.key)).toEqual(["/", "S", "b", "c", "Tab"])
+    expect(statusBarHints("document", false, 100).map((hint) => hint.key)).toEqual(["/", "S", "Esc", "Tab"])
+    expect(statusBarHints("navigator", false, 140, 16).map((hint) => hint.key)).toEqual(["/", "S", "r", "Esc", "Tab", "j/k", "h/l", "e", "D", "n", "N"])
+    expect(statusBarHints("document", false, 140, 15).map((hint) => hint.key)).toEqual(["/", "S", "r", "Esc", "Tab", "j/k", "e", "D", "d/u", "i"])
+    expect(statusBarHints("document", false, 120, 40).map((hint) => hint.key)).toEqual(["/", "S", "r", "Esc", "Tab", "j/k"])
+    expect(statusBarHints("navigator", false, 100, 16, true).map((hint) => hint.key)).toEqual(["/", "S", "Esc", "c", "Tab"])
   })
 
   test("renders all-space search with each result's space and path", async () => {

@@ -131,7 +131,7 @@ function decodeSvg(bytes: Uint8Array): DecodedImage {
     throw new Error("Invalid SVG: source is not valid UTF-8.")
   }
 
-  const rasterSource = stripSvgForeignObjects(source)
+  const rasterSource = convertSvgForeignObjectsToText(source)
   validateSvgSource(rasterSource)
 
   try {
@@ -165,7 +165,7 @@ function decodeSvg(bytes: Uint8Array): DecodedImage {
 function svgRenderOptions(width?: number) {
   return {
     ...(width ? { fitTo: { mode: "width" as const, value: width } } : {}),
-    font: { loadSystemFonts: false },
+    font: { loadSystemFonts: true, defaultFontFamily: "sans-serif" },
     background: "rgba(0, 0, 0, 0)",
   }
 }
@@ -178,11 +178,89 @@ function validateSvgSource(source: string) {
   if (/@import\b/i.test(source) || hasExternalSvgCssResource(source)) throw new Error("SVG preview rejected: CSS resource references are not allowed.")
 }
 
-function stripSvgForeignObjects(source: string) {
-  // resvg does not render XHTML foreignObject content; removing it preserves safe vector geometry.
+function convertSvgForeignObjectsToText(source: string) {
   return source
-    .replace(/<foreignobject\b[^>]*\/\s*>/gi, "")
-    .replace(/<foreignobject\b[^>]*>[\s\S]*?<\/foreignobject\s*>/gi, "")
+    .replace(/<foreignobject\b([^>]*)\/\s*>/gi, "")
+    .replace(/<foreignobject\b([^>]*)>([\s\S]*?)<\/foreignobject\s*>/gi, (_match, attributes: string, html: string) => foreignObjectTextElement(attributes, html))
+}
+
+function foreignObjectTextElement(attributes: string, html: string) {
+  const x = numericAttribute(attributes, "x")
+  const y = numericAttribute(attributes, "y")
+  const width = numericAttribute(attributes, "width")
+  const height = numericAttribute(attributes, "height")
+  const lines = foreignObjectLines(html)
+
+  if (x === null || y === null || width === null || height === null || !lines.length) return ""
+
+  const styles = [attributeValue(attributes, "style") ?? "", ...[...html.matchAll(/\bstyle\s*=\s*(["'])([\s\S]*?)\1/gi)].map((match) => match[2])].join(";")
+  const fontSize = numericStyle(styles, "font-size") ?? 12
+  const lineHeight = numericStyle(styles, "line-height") ?? fontSize * 1.2
+  const fill = styleValue(styles, "color") ?? "#111827"
+  const family = styleValue(styles, "font-family") ?? "sans-serif"
+  const weight = styleValue(styles, "font-weight")
+  const alignment = styleValue(styles, "text-align")
+  const anchor = alignment === "left" ? "start" : alignment === "right" ? "end" : "middle"
+  const textX = anchor === "start" ? x : anchor === "end" ? x + width : x + width / 2
+  const textY = y + height / 2 - ((lines.length - 1) * lineHeight) / 2
+  const fontWeight = weight && /^(?:bold|[5-9]\d\d)$/i.test(weight) ? ` font-weight="${escapeXml(weight)}"` : ""
+  const lineElements = lines.map((line, index) => `<tspan x="${textX}" dy="${index ? lineHeight : 0}">${escapeXml(line)}</tspan>`).join("")
+
+  return `<text x="${textX}" y="${textY}" text-anchor="${anchor}" dominant-baseline="middle" fill="${escapeXml(fill)}" font-family="${escapeXml(family)}" font-size="${fontSize}"${fontWeight}>${lineElements}</text>`
+}
+
+function foreignObjectLines(html: string) {
+  const text = html
+    .replace(/<(?:script|style)\b[^>]*>[\s\S]*?<\/(?:script|style)\s*>/gi, "")
+    .replace(/<\s*br\b[^>]*\/?>/gi, "\n")
+    .replace(/<\s*\/(?:div|p|li|tr|h[1-6])\s*>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+
+  return decodeHtmlEntities(text)
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+}
+
+function numericAttribute(attributes: string, name: string) {
+  const value = attributeValue(attributes, name)
+  if (!value || value.includes("%")) return null
+
+  const number = Number.parseFloat(value)
+
+  return Number.isFinite(number) ? number : null
+}
+
+function attributeValue(attributes: string, name: string) {
+  const match = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(["'])(.*?)\\1`, "i").exec(attributes)
+
+  return match?.[2] ?? null
+}
+
+function styleValue(styles: string, name: string) {
+  const matches = [...styles.matchAll(new RegExp(`${name}\\s*:\\s*([^;]+)`, "gi"))]
+
+  return matches.at(-1)?.[1].trim() ?? null
+}
+
+function numericStyle(styles: string, name: string) {
+  const value = styleValue(styles, name)
+  if (!value) return null
+
+  const number = Number.parseFloat(value)
+
+  return Number.isFinite(number) ? number : null
+}
+
+function decodeHtmlEntities(value: string) {
+  return value
+    .replace(/&#x([\da-f]+);/gi, (_match, code: string) => String.fromCodePoint(Number.parseInt(code, 16)))
+    .replace(/&#(\d+);/g, (_match, code: string) => String.fromCodePoint(Number.parseInt(code, 10)))
+    .replace(/&(amp|lt|gt|quot|apos|nbsp);/gi, (_match, name: string) => ({ amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " " })[name.toLowerCase()] ?? _match)
+}
+
+function escapeXml(value: string) {
+  return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&apos;" })[character] ?? character)
 }
 
 function hasExternalSvgCssResource(source: string) {

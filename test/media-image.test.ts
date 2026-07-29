@@ -60,14 +60,15 @@ describe("cached image decoding", () => {
     }
   })
 
-  test("strips foreignObject content before rasterizing SVG geometry", async () => {
-    const source = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10" fill="#38bdf8" /><foreignObject><div>HTML label</div></foreignObject></svg>'
+  test("converts foreignObject labels into rasterized SVG text", async () => {
+    const source = '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="30"><rect width="80" height="30" fill="#ffffff" /><foreignObject x="0" y="0" width="80" height="30" style="font-size: 16px; color: #000000; text-align: center"><div>HTML label</div></foreignObject></svg>'
 
     await withBytes("foreign-object.svg", Buffer.from(source), (path) => {
       const image = decodeImageFile(path)
 
-      expect(image).toMatchObject({ format: "svg", width: 20, height: 10 })
+      expect(image).toMatchObject({ format: "svg", width: 80, height: 30 })
       expect(image.rasterPng).toBeDefined()
+      expect(hasDarkPixel(image.rgba)).toBe(true)
     })
   })
 
@@ -124,6 +125,14 @@ async function withBytes(filename: string, bytes: Uint8Array, callback: (path: s
 
 function tinyJpegBytes() {
   return encodeJpeg({ data: Buffer.from([255, 0, 0, 255, 0, 0, 255, 255]), width: 2, height: 1 }, 90).data
+}
+
+function hasDarkPixel(rgba: Uint8Array) {
+  for (let index = 0; index < rgba.length; index += 4) {
+    if (rgba[index] < 60 && rgba[index + 1] < 60 && rgba[index + 2] < 60 && rgba[index + 3] > 0) return true
+  }
+
+  return false
 }
 
 const tinyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"

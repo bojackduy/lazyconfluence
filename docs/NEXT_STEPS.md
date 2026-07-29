@@ -91,7 +91,7 @@ Work in this order unless product priorities change. Complete one slice and upda
 ### 6. Media and Image Polish
 
 - [x] Add JPEG decoding.
-- [x] Safely rasterize SVG attachments locally with input, dimension, executable-content, and external-resource limits; strip unsupported `foreignObject` HTML and use the generated PNG for native terminal transfers.
+- [x] Safely rasterize SVG attachments locally with input, dimension, executable-content, and external-resource limits; convert simple `foreignObject` labels to SVG text and use the generated PNG for native terminal transfers.
 - [ ] Add media-cache failure diagnostics and an optional cache-maintenance command.
 - [ ] Keep Sixel a fallback/debug path; do not regress Kitty/Ghostty/WezTerm defaults.
 - [ ] Perform real-terminal smoke checks only when changing native protocols.
@@ -129,5 +129,5 @@ YYYY-MM-DD  Slice  Result  Verification  Next
 2026-07-27  Related links and outline  Added a selectable Related/Outline side rail with a third focus pane. Internal targets navigate locally with history, external links use the explicit browser launcher, and headings scroll to their source line.  bun run typecheck; bun test (156 pass, 0 fail, 727 assertions); git diff --check.  All-space page search.
 2026-07-27  Current-page reload  Added `r` to explicitly fetch and reindex only the selected Confluence page. Reload preserves other local pages, blocks local drafts, and leaves full-space sync in the CLI.  bun run typecheck; bun test (159 pass, 0 fail, 737 assertions); git diff --check.  All-space page search.
 2026-07-27  All-space page search  Added `S` for a separate local-only cross-space search lens. Results show space and path, preserve Current/Archived scope, and open through history-aware local navigation.  bun run typecheck; bun test (162 pass, 0 fail, 746 assertions); git diff --check.  Media and image polish.
-2026-07-29  JPEG and safe SVG previews  Added JPEG decoding and local SVG rasterization through resvg. SVG input is bounded, strips unsupported `foreignObject` HTML, rejects DOCTYPE/ENTITY declarations, executable or embedded-document elements, and external or embedded resource references; native viewers receive generated PNG bytes.  bun run typecheck; bun run test (170 pass, 0 fail, 777 assertions); bun run build; npm pack --dry-run; git diff --check.  Media-cache diagnostics.
+2026-07-29  JPEG and safe SVG previews  Added JPEG decoding and local SVG rasterization through resvg. SVG input is bounded, converts simple `foreignObject` labels to SVG text, rejects DOCTYPE/ENTITY declarations, executable or embedded-document elements, and external or embedded resource references; native viewers receive generated PNG bytes.  bun run typecheck; bun run test (171 pass, 0 fail, 779 assertions); bun run build; npm pack --dry-run; git diff --check.  Media-cache diagnostics.
 ```

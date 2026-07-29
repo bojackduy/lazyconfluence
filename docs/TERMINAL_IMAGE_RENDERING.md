@@ -13,7 +13,7 @@ Inline document images are safe but not native terminal images.
 - The TUI decodes cached PNG and JPEG files, and safely rasterizes accepted SVG files locally.
 - Inline TUI previews render cached PNG, JPEG, and SVG raster output as truecolor half-block cells.
 - SVG input is limited to 2 MiB, 4096px per source dimension, 16 megapixels of source area, and a 1024px/1 megapixel raster output budget.
-- `foreignObject` HTML is stripped before rasterization because resvg does not render it. SVGs with DOCTYPE or ENTITY declarations, executable or embedded-document elements, external/embedded resource references, or CSS resource references are rejected before rendering.
+- Simple positioned `foreignObject` labels are converted into plain SVG text before rasterization because resvg does not render XHTML. SVGs with DOCTYPE or ENTITY declarations, executable or embedded-document elements, external/embedded resource references, or CSS resource references are rejected before rendering.
 - Missing cache files, URL images, rejected SVGs, and other unsupported formats still show placeholders.
 - The explicit `i` image viewer can use native terminal protocols when the direct terminal reports support.
 - Inline document images remain cell-based even when native protocols are available.

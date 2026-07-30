@@ -1530,8 +1530,14 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     if (focusPane() === "navigator") {
       if (command === "move-down") moveSelection(1, treeRows(), selectedIndex(), setSelectedPageId)
       if (command === "move-up") moveSelection(-1, treeRows(), selectedIndex(), setSelectedPageId)
-      if (command === "move-right") expandSelectedPage()
-      if (command === "move-left") collapseSelectedPage()
+      if (command === "move-right") {
+        if (isPlainKey(key, "l")) setFocusPane(nextFocusPaneForKey(focusPane(), key))
+        else expandSelectedPage()
+      }
+      if (command === "move-left") {
+        if (isPlainKey(key, "h")) setFocusPane(nextFocusPaneForKey(focusPane(), key))
+        else collapseSelectedPage()
+      }
       if (command === "activate") {
         if (navigatorEnterAction(selectedRow())) toggleSelectedPageExpansion()
         else setFocusPane(nextFocusPaneForKey(focusPane(), key))
@@ -1793,7 +1799,7 @@ function Navigator(props: { rows: TreeRow[]; selectedPageId: string; focused: bo
         <NavigatorTab label="Current" active={props.viewMode === "current"} onPress={() => props.onSetViewMode("current")} />
         <NavigatorTab label="Archived" active={props.viewMode === "archived"} onPress={() => props.onSetViewMode("archived")} />
       </box>
-      <text height={1} fg={theme.subtle}>j/k move  h/l fold  Enter tree  Tab panes</text>
+      <text height={1} fg={theme.subtle}>j/k move  h/l panes  Enter tree  Tab panes</text>
       <box height={1} />
       <scrollbox flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
         <box flexDirection="column" width="100%">
@@ -2932,7 +2938,7 @@ export function statusBarHints(focusPane: string, editorOpen: boolean, width: nu
       ? [{ key: "j/k", label: "select" }, { key: "h/l", label: "related" }, { key: "e", label: "edit" }, { key: "D", label: "delete" }, { key: "Enter", label: "jump" }]
       : focusPane === "related"
         ? [{ key: "j/k", label: "select" }, { key: "h/l", label: "outline" }, { key: "e", label: "edit" }, { key: "D", label: "delete" }, { key: "Enter", label: "open" }]
-        : [{ key: "j/k", label: "move" }, { key: "h/l", label: "fold" }, { key: "e", label: "edit" }, { key: "D", label: "delete" }, { key: "n", label: "child" }, { key: "N", label: "root" }]
+        : [{ key: "j/k", label: "move" }, { key: "h/l", label: "pane" }, { key: "e", label: "edit" }, { key: "D", label: "delete" }, { key: "n", label: "child" }, { key: "N", label: "root" }]
 
   return hintsWithinWidth([...globalHints.slice(0, 2), { key: "r", label: "reload" }, ...globalHints.slice(2), ...paneHints], width - statusWidth - 3)
 }
@@ -3640,6 +3646,8 @@ export function pageSearchKeyAction(key: SearchKeyLike): PageSearchKeyAction {
 export function nextFocusPaneForKey(current: FocusPane, key: SearchKeyLike): FocusPane {
   if (isShiftTabKey(key)) return current === "navigator" ? "related" : current === "related" ? "outline" : current === "outline" ? "document" : "navigator"
   if (isTabKey(key)) return current === "navigator" ? "document" : current === "document" ? "outline" : current === "outline" ? "related" : "navigator"
+  if (current === "navigator" && isPlainKey(key, "h")) return "related"
+  if (current === "navigator" && isPlainKey(key, "l")) return "document"
   if (current === "navigator" && key.name === "return") return "document"
   return current
 }

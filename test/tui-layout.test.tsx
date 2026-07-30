@@ -33,7 +33,7 @@ describe("main TUI layout", () => {
       expect(output).toContain("NAVIGATOR")
       expect(output).toContain("DOCUMENT")
       expect(output).toContain("j/k move")
-      expect(output).toContain("h/l fold")
+      expect(output).toContain("h/l panes")
       expect(output).toContain("Enter tree")
       expect(output).toContain("S all spaces")
       expect(output).toContain("·")
@@ -1075,7 +1075,8 @@ describe("main TUI layout", () => {
     expect(nextFocusPaneForKey("navigator", key("tab", "\x1B[Z", { shift: true }))).toBe("related")
     expect(nextFocusPaneForKey("document", key("h", "h"))).toBe("document")
     expect(nextFocusPaneForKey("document", key("left", "\x1B[D"))).toBe("document")
-    expect(nextFocusPaneForKey("navigator", key("l", "l"))).toBe("navigator")
+    expect(nextFocusPaneForKey("navigator", key("h", "h"))).toBe("related")
+    expect(nextFocusPaneForKey("navigator", key("l", "l"))).toBe("document")
     expect(nextFocusPaneForKey("navigator", key("return", "\r"))).toBe("document")
   })
 

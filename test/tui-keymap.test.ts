@@ -58,8 +58,8 @@ describe("context-aware key resolution", () => {
   test("maps pane-specific lazy navigation and aliases", () => {
     expect(resolveKeyCommand(key("j"), "navigator")).toBe("move-down")
     expect(resolveKeyCommand(key("up", "\u001b[A"), "document")).toBe("move-up")
-    expect(resolveKeyCommand(key("h"), "navigator")).toBe("focus-next-pane")
-    expect(resolveKeyCommand(key("l"), "navigator")).toBe("focus-previous-pane")
+    expect(resolveKeyCommand(key("l"), "navigator")).toBe("focus-next-pane")
+    expect(resolveKeyCommand(key("h"), "navigator")).toBe("focus-previous-pane")
     expect(resolveKeyCommand(key("right", "\u001b[C"), "document")).toBe("move-right")
     expect(resolveKeyCommand(key("return", "\r"), "navigator")).toBe("activate")
     expect(resolveKeyCommand(key("tab", "\t"), "document")).toBe("focus-next-pane")

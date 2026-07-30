@@ -3646,8 +3646,8 @@ export function pageSearchKeyAction(key: SearchKeyLike): PageSearchKeyAction {
 export function nextFocusPaneForKey(current: FocusPane, key: SearchKeyLike): FocusPane {
   if (isShiftTabKey(key)) return current === "navigator" ? "related" : current === "related" ? "outline" : current === "outline" ? "document" : "navigator"
   if (isTabKey(key)) return current === "navigator" ? "document" : current === "document" ? "outline" : current === "outline" ? "related" : "navigator"
-  if (isPlainKey(key, "h")) return current === "navigator" ? "document" : current === "document" ? "outline" : current === "outline" ? "related" : "navigator"
-  if (isPlainKey(key, "l")) return current === "navigator" ? "related" : current === "related" ? "outline" : current === "outline" ? "document" : "navigator"
+  if (isPlainKey(key, "l")) return current === "navigator" ? "document" : current === "document" ? "outline" : current === "outline" ? "related" : "navigator"
+  if (isPlainKey(key, "h")) return current === "navigator" ? "related" : current === "related" ? "outline" : current === "outline" ? "document" : "navigator"
   if (current === "navigator" && key.name === "return") return "document"
   return current
 }

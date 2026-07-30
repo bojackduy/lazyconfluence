@@ -76,8 +76,8 @@ export function resolveKeyCommand(key: TuiKey, context: CommandContext): Command
   if (isPlainKey(key, "D")) return "stage-delete"
   if (isShiftTabKey(key)) return "focus-previous-pane"
   if (isTabKey(key)) return "focus-next-pane"
-  if (isPlainKey(key, "h")) return "focus-next-pane"
-  if (isPlainKey(key, "l")) return "focus-previous-pane"
+  if (isPlainKey(key, "l")) return "focus-next-pane"
+  if (isPlainKey(key, "h")) return "focus-previous-pane"
   if (key.name === "d") return "page-down"
   if (key.name === "u") return "page-up"
 

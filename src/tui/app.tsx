@@ -1,5 +1,5 @@
 import { readFileSync, statSync } from "node:fs"
-import { render, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
+import { render, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import {
   BoxRenderable,
   CliRenderEvents,
@@ -94,8 +94,6 @@ export async function renderTui(options: RenderTuiOptions = {}) {
     exitOnCtrlC: true,
     backgroundColor: theme.bg,
     consoleMode: "disabled",
-    // Standard terminal key sequences are more reliable across multiplexers and npm-installed Bun runtimes.
-    useKittyKeyboard: null,
   })
 }
 
@@ -1485,7 +1483,8 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     }
   }
 
-  useKeyboard(handleKeyPress)
+  renderer.keyInput.on("keypress", handleKeyPress)
+  onCleanup(() => renderer.keyInput.off("keypress", handleKeyPress))
 
   return (
     <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.bg}>

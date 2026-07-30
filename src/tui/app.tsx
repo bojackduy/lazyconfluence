@@ -94,6 +94,8 @@ export async function renderTui(options: RenderTuiOptions = {}) {
     exitOnCtrlC: true,
     backgroundColor: theme.bg,
     consoleMode: "disabled",
+    // Standard terminal key sequences are more reliable across multiplexers and npm-installed Bun runtimes.
+    useKittyKeyboard: null,
   })
 }
 
@@ -105,6 +107,11 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
   if (!dataSource) throw new Error("App requires a TUI data source.")
   const runtimeLabel = props.runtimeLabel ?? ownedRuntime?.label ?? "custom source"
   const browserOpener = props.browserOpener ?? openBrowserUrl
+  const commandPaletteWidth = createMemo(() => {
+    const terminalWidth = dimensions().width
+    return Math.max(32, Math.min(84, terminalWidth - (terminalWidth < 72 ? 2 : 8)))
+  })
+  const commandPaletteLeft = createMemo(() => Math.max(1, Math.floor((dimensions().width - commandPaletteWidth()) / 2)))
   const initialSpaceKey = dataSource.getDefaultSpaceKey() ?? "LOCAL"
   const initialPageId = dataSource.getDefaultPageId(initialSpaceKey) ?? emptyPageId
   const [credentialStatus, setCredentialStatus] = createSignal<CredentialStatus | null>(props.credentialStatus ?? ownedRuntime?.credentialStatus ?? null)
@@ -1589,9 +1596,9 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
         query={commandPaletteQuery()}
         commands={commandPaletteResults()}
         selectedIndex={commandPaletteSelectedIndex()}
-        left={dimensions().width < 72 ? 1 : 4}
+        left={commandPaletteLeft()}
         top={2}
-        width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 2 : 8))}
+        width={commandPaletteWidth()}
         height={Math.max(10, dimensions().height - 4)}
         onQueryChange={(query) => {
           setCommandPaletteQuery(query)

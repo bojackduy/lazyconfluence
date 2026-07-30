@@ -134,6 +134,16 @@ lazyconfluence search runbook
 lazyconfluence search --all runbook
 ```
 
+## Input Diagnostics
+
+When keyboard input or popup actions do not respond, run the TUI with an explicit diagnostic log path:
+
+```bash
+LAZYCONFLUENCE_INPUT_DEBUG_LOG=/tmp/lazyconfluence-input.jsonl lazyconfluence demo
+```
+
+The JSONL log records raw terminal bytes, OpenTUI-parsed keys, lazyconfluence command routing, overlay state, and teardown. It is disabled unless `LAZYCONFLUENCE_INPUT_DEBUG_LOG` is set.
+
 Local draft commands are available, but remote Confluence write-back is still intentionally explicit:
 
 ```bash

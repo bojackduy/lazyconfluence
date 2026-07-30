@@ -34,6 +34,7 @@ import { commandForId, commandsForContext, type CommandContext, type TuiCommand 
 import { iterm2ImageCommand } from "./iterm2"
 import { kittyDeleteImageCommand, kittyGraphicsCommand, kittyGraphicsPngCommand, kittyImageId } from "./kitty"
 import { imageDebugEnabled, imageDebugLogPath, logImageDebug } from "./image-debug"
+import { inputDebugEnabled, inputDebugLogPath, logInputDebug } from "./input-debug"
 import { splitReaderImagePlaceholders, type ReaderContentPart } from "./media"
 import { createTuiRuntime, type TuiRuntime } from "./runtime"
 import { sixelImageCommand } from "./sixel"
@@ -100,6 +101,12 @@ export async function renderTui(options: RenderTuiOptions = {}) {
 export function App(props: { browserOpener?: (url: string) => BrowserOpenResult; credentialStatus?: CredentialStatus; dataSource?: TuiSource; disableTreeSitter?: boolean; initialPageViewMode?: PageViewMode; runtime?: TuiRuntime; runtimeLabel?: string } = {}) {
   const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
+  logInputDebug("tui_render_start", {
+    inputDebugLog: inputDebugLogPath() ?? undefined,
+    rendererScreenMode: renderer.screenMode,
+    rendererUseMouse: renderer.useMouse,
+    rendererUseKittyKeyboard: renderer.useKittyKeyboard,
+  })
   const ownedRuntime = props.runtime ?? (props.dataSource ? null : createTuiRuntime({ env: "prod" }))
   const dataSource = props.dataSource ?? ownedRuntime?.source
   if (!dataSource) throw new Error("App requires a TUI data source.")
@@ -1162,6 +1169,22 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     return "main"
   }
 
+  const inputDebugState = () => ({
+    focusPane: focusPane(),
+    selectedPageId: selectedPageId(),
+    pageSearchOpen: pageSearchOpen(),
+    allSpaceSearchOpen: allSpaceSearchOpen(),
+    documentFindOpen: documentFindOpen(),
+    spaceSwitcherOpen: spaceSwitcherOpen(),
+    commandPaletteOpen: commandPaletteOpen(),
+    imageViewerOpen: imageViewerOpen(),
+    changesOpen: changesOpen(),
+    editorOpen: editorOpen(),
+    helpOpen: helpOpen(),
+  })
+
+  let pendingInputFrame: ReturnType<typeof inputDebugState> | null = null
+
   const openEditorForSelectedPage = () => {
     if (editorOpen()) return
     const pageId = selectedPageId()
@@ -1256,6 +1279,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
 
   const handleKeyPress = (key: SearchKeyLike) => {
     const route = keyRouteForDebug(key)
+    logInputDebug("app_key_handler", { ...keyDebugData(key), route, ...inputDebugState() })
     logImageDebug("key_press", {
       ...keyDebugData(key),
       ...imageInputDebugState(),
@@ -1278,6 +1302,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
 
     if (helpOpen()) {
       const command = resolveKeyCommand(key, "help")
+      logInputDebug("command_resolved", { route, command: command ?? "unmatched" })
       if (command === "close-overlay") setHelpOpen(false)
       else if (command === "move-down") helpScrollbox?.scrollBy(1)
       else if (command === "move-up") helpScrollbox?.scrollBy(-1)
@@ -1288,6 +1313,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
 
     if (imageViewerOpen()) {
       const command = resolveKeyCommand(key, "image-viewer")
+      logInputDebug("command_resolved", { route, command: command ?? "unmatched" })
       if (command === "close-overlay") closeImageViewer()
       else if (command === "next-image") moveImageViewerSelection(1)
       else if (command === "previous-image") moveImageViewerSelection(-1)
@@ -1296,6 +1322,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
 
     if (changesOpen()) {
       const command = resolveKeyCommand(key, "changes")
+      logInputDebug("command_resolved", { route, command: command ?? "unmatched" })
       if (command === "close-overlay") closeChanges()
       else if (command === "move-down") moveChangesSelection(1)
       else if (command === "move-up") moveChangesSelection(-1)
@@ -1307,6 +1334,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
 
     if (newPageOpen()) {
       const action = pageSearchKeyAction(key)
+      logInputDebug("command_resolved", { route, command: action })
 
       if (action === "close") closeNewPage()
       else if (action === "submit") submitNewPage()
@@ -1317,37 +1345,44 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
 
     if (editorOpen()) {
       const command = resolveKeyCommand(key, "editor")
+      logInputDebug("command_resolved", { route, command: command ?? "unmatched" })
       if (command === "close-overlay") closeEditor()
       else if (command === "stage-editor") stageEditorBuffer()
       return
     }
 
     if (documentFindOpen()) {
+      logInputDebug("command_resolved", { route, command: textInputKeyAction(key) })
       handleDocumentFindInputKey(key)
       return
     }
 
     if (pageSearchOpen()) {
+      logInputDebug("command_resolved", { route, command: textInputKeyAction(key) })
       handlePageSearchInputKey(key)
       return
     }
 
     if (allSpaceSearchOpen()) {
+      logInputDebug("command_resolved", { route, command: textInputKeyAction(key) })
       handleAllSpaceSearchInputKey(key)
       return
     }
 
     if (spaceSwitcherOpen()) {
+      logInputDebug("command_resolved", { route, command: textInputKeyAction(key) })
       handleSpaceSwitcherInputKey(key)
       return
     }
 
     if (commandPaletteOpen()) {
+      logInputDebug("command_resolved", { route, command: textInputKeyAction(key) })
       handleCommandPaletteInputKey(key)
       return
     }
 
     const command = resolveKeyCommand(key, focusPane())
+    logInputDebug("command_resolved", { route, command: command ?? "unmatched" })
 
     if (command === "quit") {
       renderer.destroy()
@@ -1481,6 +1516,36 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
       if (command === "activate") activateSideRailItem()
       return
     }
+  }
+
+  if (inputDebugEnabled()) {
+    const logRawInput = (chunk: string | Buffer) => {
+      const sequence = typeof chunk === "string" ? chunk : chunk.toString("utf8")
+      logInputDebug("raw_stdin", {
+        byteLength: Buffer.byteLength(sequence),
+        sequence: readableKeySequence(sequence),
+        sequenceHex: keySequenceHex(sequence),
+      })
+    }
+    const logParsedKey = (key: SearchKeyLike) => {
+      pendingInputFrame = inputDebugState()
+      logInputDebug("renderer_keypress", { ...keyDebugData(key), ...pendingInputFrame })
+    }
+    const logInputFrame = () => {
+      if (!pendingInputFrame) return
+      logInputDebug("renderer_frame", { beforeFocusPane: pendingInputFrame.focusPane, ...inputDebugState() })
+      pendingInputFrame = null
+    }
+
+    renderer.stdin.prependListener("data", logRawInput)
+    renderer.keyInput.on("keypress", logParsedKey)
+    renderer.on(CliRenderEvents.FRAME, logInputFrame)
+    onCleanup(() => {
+      renderer.stdin.off("data", logRawInput)
+      renderer.keyInput.off("keypress", logParsedKey)
+      renderer.off(CliRenderEvents.FRAME, logInputFrame)
+      logInputDebug("tui_destroy", { ...inputDebugState(), rendererControlState: renderer.currentControlState })
+    })
   }
 
   useKeyboard(handleKeyPress)

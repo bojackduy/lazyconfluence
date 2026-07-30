@@ -5,6 +5,7 @@
     "moduleResolution": "Bundler",
     "jsx": "preserve",
     "jsxImportSource": "@opentui/solid",
+    "resolveJsonModule": true,
     "strict": true,
     "noEmit": true,
     "types": ["bun-types"],

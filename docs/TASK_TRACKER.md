@@ -146,6 +146,7 @@ YYYY-MM-DD  ID  Result  Verification  Follow-up
 2026-07-29  escape-history-back  Normal reader `Esc` now returns to the previous history location; `q` remains the quit key, and overlays including the image viewer retain `Esc` close behavior.  bun run typecheck; bun test (164 pass, 0 fail, 759 assertions); git diff --check.  Next: media and image polish.
 2026-07-29  command-palette-width  Centered the Command Palette and capped it at 84 columns on wide terminals; narrow terminals retain the near-full-width layout.  bun run typecheck; bun test (167 pass, 0 fail, 766 assertions); git diff --check.  Next: media and image polish.
 2026-07-30  direct-keyboard-listener  Replaced the lifecycle-based Solid keyboard hook with a direct renderer key listener. This keeps TUI input active in the bundled CLI as well as source runs.  bun run typecheck; bun test (167 pass, 0 fail, 766 assertions); git diff --check.  Next: media and image polish.
+2026-07-30  cli-version  Added `lazyconfluence --version`, `-v`, and `version`, reporting the version embedded in the installed package without opening the TUI.  bun run typecheck; bun test (168 pass, 0 fail, 768 assertions); git diff --check.  Next: media and image polish.
 ```
 
 ## Contract Changes

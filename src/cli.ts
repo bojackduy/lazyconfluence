@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises"
 import { createInterface } from "node:readline/promises"
 import { stdin as input, stdout as output } from "node:process"
+import packageJson from "../package.json" with { type: "json" }
 import { ATLASSIAN_API_TOKEN_URL, createLocalConfig, loadAtlassianAuth, parseSpaceKeys, saveLocalAuth } from "./config"
 import { editPageDraftInExternalEditor, formatMarkdownDiff, readEditableDraftInput, savePageDraft } from "./editing"
 import { openIndexRepository, type IndexRepository, type PageDraftStatus } from "./index/repository"
@@ -26,6 +27,11 @@ export async function runCli(args: string[]) {
       return
     case "prod":
       await renderTui({ env: "prod" })
+      return
+    case "version":
+    case "--version":
+    case "-v":
+      console.log(`lazyconfluence ${packageJson.version}`)
       return
     case "init":
       await runInit()
@@ -68,7 +74,7 @@ export async function runCli(args: string[]) {
       return
     default:
       console.error(`Unknown command: ${command}`)
-      console.error("Usage: lazyconfluence [tui|dev|prod|demo|init|doctor|sync|repair|search|edit|draft|drafts|stage|unstage|discard|diff|preview]")
+      console.error("Usage: lazyconfluence [tui|dev|prod|demo|init|doctor|sync|repair|search|edit|draft|drafts|stage|unstage|discard|diff|preview|version]")
       process.exitCode = 1
   }
 }

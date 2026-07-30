@@ -2,12 +2,20 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
+import packageJson from "../package.json" with { type: "json" }
 import { createLocalConfig, saveLocalAuth } from "../src/config"
 import { openIndexRepository, type PageBodyArtifact } from "../src/index/repository"
 import { runCli } from "../src/cli"
 import type { IndexedPage, SpaceSummary } from "../src/model"
 
 describe("local CLI integration", () => {
+  test("reports the packaged version without opening the TUI", async () => {
+    const output = await captureCli(() => runCli(["--version"]))
+
+    expect(output.exitCode).toBeUndefined()
+    expect(output.stdout).toBe(`lazyconfluence ${packageJson.version}`)
+  })
+
   test("doctor reports local config and SQLite index status without network", async () => {
     const setup = await createCliSetup()
 

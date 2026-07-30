@@ -7,8 +7,8 @@ import { chromium, type Browser, type BrowserContext, type Page } from "playwrig
 const maxSvgInputBytes = 2 * 1024 * 1024
 const maxSvgSourceDimension = 4096
 const maxSvgSourcePixels = 16 * 1024 * 1024
-const maxSvgRasterDimension = 1024
-const maxSvgRasterPixels = 1024 * 1024
+const maxSvgRasterDimension = 2048
+const maxSvgRasterPixels = 4 * 1024 * 1024
 const rasterTimeoutMs = 10_000
 
 export interface SvgRasterizer {
@@ -45,8 +45,7 @@ export function rasterizeSvgWithResvg(source: Uint8Array) {
   try {
     const probe = new Resvg(svg, svgRenderOptions())
     validateSvgDimensions(probe.width, probe.height)
-    const scale = Math.min(1, maxSvgRasterDimension / Math.max(probe.width, probe.height), Math.sqrt(maxSvgRasterPixels / (probe.width * probe.height)))
-    const rendered = new Resvg(svg, svgRenderOptions(Math.max(1, Math.floor(probe.width * scale)))).render()
+    const rendered = new Resvg(svg, svgRenderOptions(rasterWidth(probe.width, probe.height))).render()
 
     return new Uint8Array(rendered.asPng())
   } catch (error) {
@@ -66,8 +65,7 @@ async function rasterizeSvg(page: Page, source: Uint8Array) {
 
   const dimensions = await page.locator("#svg").evaluate((image: HTMLImageElement) => ({ width: image.naturalWidth, height: image.naturalHeight }))
   validateSvgDimensions(dimensions.width, dimensions.height)
-  const scale = Math.min(1, maxSvgRasterDimension / Math.max(dimensions.width, dimensions.height), Math.sqrt(maxSvgRasterPixels / (dimensions.width * dimensions.height)))
-  const width = Math.max(1, Math.floor(dimensions.width * scale))
+  const width = rasterWidth(dimensions.width, dimensions.height)
 
   await page.locator("#svg").evaluate((image: HTMLImageElement, targetWidth) => { image.style.width = `${targetWidth}px`; image.style.height = "auto" }, width)
 
@@ -115,6 +113,12 @@ function validateSvgDimensions(width: number, height: number) {
   if (width > maxSvgSourceDimension || height > maxSvgSourceDimension || width * height > maxSvgSourcePixels) {
     throw new Error("SVG preview rejected: source dimensions exceed the preview limit.")
   }
+}
+
+function rasterWidth(width: number, height: number) {
+  const scale = Math.min(maxSvgRasterDimension / Math.max(width, height), Math.sqrt(maxSvgRasterPixels / (width * height)))
+
+  return Math.max(1, Math.floor(width * scale))
 }
 
 async function closeBrowser(browser: Browser, context: BrowserContext) {

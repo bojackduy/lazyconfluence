@@ -12,7 +12,7 @@ Inline document images are safe but not native terminal images.
 - `media_assets` rows connect image placeholder node ids to cached files.
 - The TUI decodes cached PNG and JPEG files only.
 - During explicit sync or reload, SVG attachments are rasterized to PNG before the reader opens. Local Chromium is preferred to preserve `foreignObject` labels; the portable resvg renderer is the fallback.
-- SVG input is limited to 2 MiB, 4096px per source dimension, 16 megapixels of source area, and a 1024px/1 megapixel raster output budget. Chromium runs with JavaScript disabled and all network requests blocked.
+- SVG input is limited to 2 MiB, 4096px per source dimension, 16 megapixels of source area, and a 2048px/4 megapixel raster output budget. Small vector diagrams are intentionally upscaled within that budget so native viewers do not blur them. Chromium runs with JavaScript disabled and all network requests blocked.
 - `LAZYCONFLUENCE_CHROMIUM_PATH` overrides executable discovery. Chromium is optional; if it is unavailable or rejects an SVG, resvg produces the cached preview. If both renderers fail, the source SVG remains cached and the TUI shows an actionable placeholder.
 - The explicit `i` image viewer can use native terminal protocols when the direct terminal reports support.
 - Inline document images remain cell-based even when native protocols are available.

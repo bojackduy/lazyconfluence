@@ -2281,13 +2281,14 @@ function ImagePreviewFallback(props: { part: Extract<ReaderContentPart, { kind: 
 }
 
 type ImageLoadResult = { status: "ready"; image: DecodedImage } | { status: "error"; message: string }
+type ImagePreviewCacheEntry = { result: ImageLoadResult; version: string }
 type NativeImageRenderMode = Extract<ImageRenderMode, "kitty" | "iterm2" | "sixel">
 type NativeViewerImage = { mode: NativeImageRenderMode; key: string; id: number; image: DecodedImage; asset: MediaAsset | null; renderable: BoxRenderable; cellPixels: CellPixelSize | null; columns: number; rows: number }
 type NativeImageArea = { mode: NativeImageRenderMode; row: number; column: number; columns: number; rows: number }
 type KittyGraphicsCommandCacheEntry = { command: string; width: number; height: number; chunks: number }
 type NativeImageCommandResult = KittyGraphicsCommandCacheEntry & { cached: boolean; transfer: string }
 
-const imagePreviewCache = new Map<string, ImageLoadResult>()
+const imagePreviewCache = new Map<string, ImagePreviewCacheEntry>()
 const imagePreviewCacheLimit = 24
 const kittyGraphicsCommandCache = new WeakMap<DecodedImage, Map<string, KittyGraphicsCommandCacheEntry>>()
 
@@ -2311,26 +2312,27 @@ function loadImagePreview(asset: MediaAsset | null): ImageLoadResult {
     return { status: "error", message: "SVG preview could not be rasterized. Set LAZYCONFLUENCE_CHROMIUM_PATH for browser-compatible rendering, then sync or reload this page." }
   }
 
+  const stat = fileStat(asset.cachePath)
+  const version = imageCacheVersion(stat)
   const cached = imagePreviewCache.get(asset.cachePath)
-  if (cached) {
+  if (cached?.version === version) {
     imagePreviewCache.delete(asset.cachePath)
     imagePreviewCache.set(asset.cachePath, cached)
     logImageDebug("image_asset_load", {
       status: "cache-hit",
-      result: cached.status,
+      result: cached.result.status,
       pageId: asset.pageId,
       nodeId: asset.nodeId,
       title: asset.title,
       cachePath: asset.cachePath,
       contentType: asset.contentType,
     })
-    return cached
+    return cached.result
   }
 
   try {
-    const stat = fileStat(asset.cachePath)
     const result: ImageLoadResult = { status: "ready", image: decodeImageFile(asset.cachePath) }
-    rememberImagePreview(asset.cachePath, result)
+    rememberImagePreview(asset.cachePath, version, result)
     logImageDebug("image_asset_load", {
       status: "decoded",
       pageId: asset.pageId,
@@ -2347,8 +2349,7 @@ function loadImagePreview(asset: MediaAsset | null): ImageLoadResult {
     return result
   } catch (error) {
     const result: ImageLoadResult = { status: "error", message: errorMessage(error) }
-    rememberImagePreview(asset.cachePath, result)
-    const stat = fileStat(asset.cachePath)
+    rememberImagePreview(asset.cachePath, version, result)
     logImageDebug("image_asset_load", {
       status: "decode-error",
       pageId: asset.pageId,
@@ -2364,9 +2365,9 @@ function loadImagePreview(asset: MediaAsset | null): ImageLoadResult {
   }
 }
 
-function rememberImagePreview(path: string, result: ImageLoadResult) {
+function rememberImagePreview(path: string, version: string, result: ImageLoadResult) {
   imagePreviewCache.delete(path)
-  imagePreviewCache.set(path, result)
+  imagePreviewCache.set(path, { result, version })
   while (imagePreviewCache.size > imagePreviewCacheLimit) {
     const oldest = imagePreviewCache.keys().next().value
     if (!oldest) break
@@ -2379,10 +2380,14 @@ function fileStat(path: string) {
   try {
     const stat = statSync(path)
 
-    return { exists: true, size: stat.size }
+    return { exists: true, size: stat.size, mtimeMs: stat.mtimeMs }
   } catch {
-    return { exists: false, size: null }
+    return { exists: false, size: null, mtimeMs: null }
   }
+}
+
+function imageCacheVersion(stat: ReturnType<typeof fileStat>) {
+  return `${stat.exists}:${stat.size}:${stat.mtimeMs}`
 }
 
 function imageFromLoadResult(result: ImageLoadResult) {
@@ -2525,14 +2530,27 @@ function nativeEraseArea(mode: NativeImageRenderMode, row: number, column: numbe
 }
 
 function kittyNativeCommandForImage(input: NativeViewerImage): NativeImageCommandResult {
+  const cellBounds = containedNativeImageCells(input.image, input.columns, input.rows, input.cellPixels)
+
   if (input.asset?.cachePath && input.image.format === "png") {
     const bytes = readFileSync(input.asset.cachePath)
-    const command = kittyGraphicsPngCommand({ id: input.id, bytes, columns: input.columns, rows: input.rows })
+    const command = kittyGraphicsPngCommand({ id: input.id, bytes, columns: cellBounds.columns, rows: cellBounds.rows })
 
     return { command, width: input.image.width, height: input.image.height, chunks: kittyCommandChunkCount(command), cached: false, transfer: "direct-png" }
   }
 
-  return { ...kittyGraphicsCommandForImage(input.image, input.id, input.columns, input.rows), transfer: "rgba-fallback" }
+  return { ...kittyGraphicsCommandForImage(input.image, input.id, cellBounds.columns, cellBounds.rows), transfer: "rgba-fallback" }
+}
+
+function containedNativeImageCells(image: DecodedImage, columns: number, rows: number, cellPixels: CellPixelSize | null) {
+  const cellWidth = cellPixels?.width ?? 12
+  const cellHeight = cellPixels?.height ?? 24
+  const scale = Math.min(columns * cellWidth / image.width, rows * cellHeight / image.height)
+
+  return {
+    columns: Math.max(1, Math.floor(image.width * scale / cellWidth)),
+    rows: Math.max(1, Math.floor(image.height * scale / cellHeight)),
+  }
 }
 
 function iterm2NativeCommandForImage(input: NativeViewerImage): NativeImageCommandResult {

@@ -102,7 +102,7 @@ function svgRenderOptions(width?: number) {
 function hasExternalSvgCssResource(source: string) {
   for (const match of source.matchAll(/url\s*\(\s*([^)]*?)\s*\)/gi)) {
     const reference = match[1].trim().replace(/^['"]|['"]$/g, "")
-    if (!reference.startsWith("#")) return true
+    if (!reference.startsWith("#") && !reference.startsWith("data:")) return true
   }
 
   return false

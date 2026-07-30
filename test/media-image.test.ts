@@ -46,6 +46,12 @@ describe("cached image decoding", () => {
     expect(decodePngDimensions(png)).toEqual({ width: 2048, height: 1024 })
   })
 
+  test("allows embedded CSS data resources while rejecting network resources", () => {
+    const source = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><style>.unused { background: url(data:image/png;base64,AAAA); }</style><rect width="20" height="10" fill="#38bdf8" /></svg>'
+
+    expect(rasterizeSvgWithResvg(Buffer.from(source))).toBeInstanceOf(Uint8Array)
+  })
+
   test("reports malformed JPEG data clearly", async () => {
     await withBytes("broken.jpg", Buffer.from([0xff, 0xd8, 0xff, 0x00]), (path) => {
       expect(() => decodeImageFile(path)).toThrow("Invalid JPEG:")

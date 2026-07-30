@@ -4,7 +4,7 @@
 [![GitHub Pages](https://img.shields.io/badge/site-GitHub%20Pages-9dffcb)](https://bojackduy.github.io/lazyconfluence/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
 
-`lazyconfluence` is a terminal-first Confluence document browser. It syncs the Confluence spaces you choose into a local index, then lets you browse and read pages from the terminal without making remote calls during normal navigation. The reader renders headings, tables, code blocks, links, and cached Confluence image previews, with progressive placeholders when a terminal or media asset cannot show an image preview.
+`lazyconfluence` is a terminal-first Confluence document browser. It syncs the Confluence spaces you choose into a local index, then lets you browse and read pages from the terminal without making remote calls during normal navigation. The reader renders headings, tables, code blocks, links, and cached PNG, JPEG, and SVG previews, with progressive placeholders when a terminal or media asset cannot show an image preview.
 
 Website: <https://bojackduy.github.io/lazyconfluence/>
 
@@ -19,11 +19,14 @@ The demo above uses synthetic data from `lazyconfluence demo`, not real company 
 ## Features
 
 - Local-first Confluence browsing after explicit sync.
-- Fast space, page tree, link, backlink, and document search workflows.
+- Current and archived page views, an ordered page tree, outlines, related links, backlinks, and bounded navigation history.
+- Intent-specific search for the active space, all synced spaces, and text in the current rendered document.
 - Readable terminal rendering for headings, lists, tables, links, and code blocks.
-- Terminal image previews for cached Confluence PNG and JPEG attachments plus SVGs rasterized during sync, without requiring Kitty, Sixel, iTerm image protocols, or Chromium.
+- Cached PNG and JPEG attachment previews plus SVGs safely rasterized to PNG during sync or page reload.
+- Native image viewers for Kitty/Ghostty, WezTerm/iTerm2, and Sixel-capable terminals, with a readable color-cell fallback that needs no image protocol.
 - Progressive image handling keeps terminals without image preview support and unsupported media readable through labeled placeholders.
-- Local drafts and staged changes keep remote Confluence write-back explicit.
+- Local drafts, staged creates, updates, and deletes, plus a review/apply flow that keeps remote Confluence write-back explicit.
+- Explicit current-page reload, cross-platform browser open, a command palette, keyboard help, and safe synthetic demo mode.
 
 ## Install
 
@@ -133,7 +136,7 @@ After syncing, open the terminal UI:
 lazyconfluence
 ```
 
-Normal browsing reads from the local index. Remote Confluence requests happen only when you explicitly run `sync`. During sync, `lazyconfluence` best-effort caches Confluence attachment images and rasterizes SVGs into local PNG previews without fetching media while you browse. When available, local Chromium preserves browser-only SVG features such as `foreignObject`; otherwise the portable resvg renderer is used. Set `LAZYCONFLUENCE_CHROMIUM_PATH` to select a Chromium executable.
+Normal browsing reads from the local index. Remote Confluence requests happen only when you explicitly run `sync` or reload the selected page with `r`. During sync or reload, `lazyconfluence` best-effort caches Confluence attachment images and rasterizes SVGs into local PNG previews without fetching media while you browse. When available, local Chromium preserves browser-only SVG features such as `foreignObject`; otherwise the portable resvg renderer is used. Set `LAZYCONFLUENCE_CHROMIUM_PATH` to select a Chromium executable.
 
 ## Common Commands
 
@@ -150,6 +153,24 @@ lazyconfluence sync --space ENG
 lazyconfluence search runbook
 lazyconfluence search --all runbook
 ```
+
+## Reader Shortcuts
+
+- `/`: search pages in the active space.
+- `S`: search pages across all synced spaces.
+- `f`: find text in the current document.
+- `s`: switch spaces.
+- `p`, `;`, or `:`: open the command palette.
+- `r`: reload only the selected Confluence page.
+- `b` or `Esc`: return through local navigation history.
+- `o`: open the selected page in the browser.
+- `e`: edit the selected current page locally.
+- `n` / `N`: stage a child / root page create.
+- `D`: stage deletion of a synced leaf page.
+- `c`: review staged changes in the current space.
+- `?`: open keyboard help.
+
+Use `Tab` and `Shift+Tab` to move between reader panes. Archived pages are read-only.
 
 ## Input Diagnostics
 

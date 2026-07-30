@@ -1,5 +1,5 @@
 import { readFileSync, statSync } from "node:fs"
-import { render, useRenderer, useTerminalDimensions } from "@opentui/solid"
+import { render, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import {
   BoxRenderable,
   CliRenderEvents,
@@ -1483,8 +1483,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     }
   }
 
-  renderer.keyInput.on("keypress", handleKeyPress)
-  onCleanup(() => renderer.keyInput.off("keypress", handleKeyPress))
+  useKeyboard(handleKeyPress)
 
   return (
     <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.bg}>

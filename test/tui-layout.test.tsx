@@ -4,7 +4,7 @@ import { dirname, join } from "node:path"
 import { Writable } from "node:stream"
 import { describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
-import { App, CommandPaletteOverlay, DocumentFindOverlay, Header, HelpOverlay, ImageViewerOverlay, NewPageOverlay, PageSearchOverlay, StagedChangesOverlay, StatusBar, documentHorizontalScrollDeltaForKey, documentOutlineItems, findDocumentMatches, imageRenderModeForCapabilities, nearestImageIndexForViewport, nextDocumentFindIndex, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, parseTerminalCellPixels, relatedNavigationItemsForPage, searchPaletteCommands, statusBarHints, type SearchKeyLike } from "../src/tui/app"
+import { App, CommandPaletteOverlay, DocumentFindOverlay, Header, HelpOverlay, ImageViewerOverlay, NewPageOverlay, PageSearchOverlay, StagedChangesOverlay, StatusBar, documentHorizontalScrollDeltaForKey, documentOutlineItems, findDocumentMatches, imageRenderModeForCapabilities, navigatorEnterAction, nearestImageIndexForViewport, nextDocumentFindIndex, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, parseTerminalCellPixels, relatedNavigationItemsForPage, searchPaletteCommands, statusBarHints, type SearchKeyLike } from "../src/tui/app"
 import { commandsForContext } from "../src/tui/commands"
 import { createLocalConfig } from "../src/config"
 import type { CredentialStatus } from "../src/config"
@@ -34,6 +34,7 @@ describe("main TUI layout", () => {
       expect(output).toContain("DOCUMENT")
       expect(output).toContain("j/k move")
       expect(output).toContain("h/l fold")
+      expect(output).toContain("Enter tree")
       expect(output).toContain("S all spaces")
       expect(output).toContain("·")
       expect(output).toContain("Overview 0")
@@ -1185,6 +1186,12 @@ describe("main TUI layout", () => {
     expect(nextNavigatorSelectionForCollapse({ page: { parentId: "missing-parent" }, hasChildren: false, expanded: false }, knownPages)).toBeNull()
     expect(nextNavigatorSelectionForCollapse({ page: { parentId: null }, hasChildren: false, expanded: false }, knownPages)).toBeNull()
     expect(nextNavigatorSelectionForCollapse({ page: { parentId: "visible-parent" }, hasChildren: true, expanded: true }, knownPages)).toBeNull()
+  })
+
+  test("navigator Enter toggles tree rows and opens leaf documents", () => {
+    expect(navigatorEnterAction({ hasChildren: true })).toBe(true)
+    expect(navigatorEnterAction({ hasChildren: false })).toBe(false)
+    expect(navigatorEnterAction(undefined)).toBe(false)
   })
 
   test("TUI staged changes are scoped to the current space", async () => {

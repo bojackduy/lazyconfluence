@@ -1302,6 +1302,18 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     if (nextPageId) setSelectedPageId(nextPageId)
   }
 
+  const toggleSelectedPageExpansion = () => {
+    const row = selectedRow()
+    if (!row?.hasChildren) return
+
+    setExpandedPageIds((current) => {
+      const next = new Set(current)
+      if (row.expanded) next.delete(row.page.pageId)
+      else next.add(row.page.pageId)
+      return next
+    })
+  }
+
   const handleKeyPress = (key: SearchKeyLike) => {
     const route = keyRouteForDebug(key)
     logInputDebug("app_key_handler", { ...keyDebugData(key), route, ...inputDebugState() })
@@ -1520,7 +1532,10 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
       if (command === "move-up") moveSelection(-1, treeRows(), selectedIndex(), setSelectedPageId)
       if (command === "move-right") expandSelectedPage()
       if (command === "move-left") collapseSelectedPage()
-      if (command === "activate") setFocusPane(nextFocusPaneForKey(focusPane(), key))
+      if (command === "activate") {
+        if (navigatorEnterAction(selectedRow())) toggleSelectedPageExpansion()
+        else setFocusPane(nextFocusPaneForKey(focusPane(), key))
+      }
       return
     }
 
@@ -1778,7 +1793,7 @@ function Navigator(props: { rows: TreeRow[]; selectedPageId: string; focused: bo
         <NavigatorTab label="Current" active={props.viewMode === "current"} onPress={() => props.onSetViewMode("current")} />
         <NavigatorTab label="Archived" active={props.viewMode === "archived"} onPress={() => props.onSetViewMode("archived")} />
       </box>
-      <text height={1} fg={theme.subtle}>j/k move  h/l fold  a toggle  Tab panes</text>
+      <text height={1} fg={theme.subtle}>j/k move  h/l fold  Enter tree  Tab panes</text>
       <box height={1} />
       <scrollbox flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
         <box flexDirection="column" width="100%">
@@ -1795,6 +1810,10 @@ function NavigatorTab(props: { label: string; active: boolean; onPress: () => vo
       <text height={1} fg={props.active ? theme.accent : theme.subtle}>{props.active ? `[${props.label}]` : ` ${props.label} `}</text>
     </box>
   )
+}
+
+export function navigatorEnterAction(row: { hasChildren: boolean } | undefined) {
+  return Boolean(row?.hasChildren)
 }
 
 function NavigatorRow(props: { row: TreeRow; selected: boolean }) {

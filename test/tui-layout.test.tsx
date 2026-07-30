@@ -41,8 +41,8 @@ describe("main TUI layout", () => {
       expect(output).toContain("Esc back")
       expect(output).toContain("Tab panes")
       expect(output).not.toContain("i.image")
-      expect(output).toContain("▾ ▣ Local Engineering Home")
-      expect(output).toContain("• Real Synced Architecture")
+      expect(output).toContain("󰅀 󰉋 Local Engineering Home")
+      expect(output).toContain("󰈙 Real Synced Architecture")
       expect(output).toContain("Real Synced Architecture")
       expect(output).toContain("ID: local-home")
       expect(output).toContain("Space: ENG")
@@ -154,7 +154,7 @@ describe("main TUI layout", () => {
       const frame = rendered.captureCharFrame()
 
       expect(frame).toContain("Ops Result 9")
-      expect(frame).toContain("▶ Ops Result 9")
+      expect(frame).toContain("󰄬 Ops Result 9")
     } finally {
       rendered.renderer.destroy()
     }
@@ -228,7 +228,7 @@ describe("main TUI layout", () => {
       })
 
       expect(output).toContain("Orphaned Runbook")
-      expect(output).toContain("• Orphaned Runbook")
+      expect(output).toContain("󰈙 Orphaned Runbook")
     } finally {
       await setup.cleanup()
     }
@@ -1370,7 +1370,7 @@ describe("main TUI layout", () => {
       expect(output).toContain("OVERVIEW")
       expect(output).toContain("Local Engineering")
       expect(output).toContain("PAGES")
-      expect(output).toContain("[x] [update] Local")
+      expect(output).toContain("󰄬 󰄬 [update] Local")
       expect(output).toContain("Local Engineering Home")
       expect(output).toContain("ID: local-home")
       expect(output).toContain("Apply blocked: Cannot safely preserve opaque Confluence content.")

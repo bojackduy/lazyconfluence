@@ -82,6 +82,31 @@ export type ImageRenderMode = "kitty" | "iterm2" | "sixel" | "cell-color" | "cel
 
 type ImageTerminalCapabilities = Pick<TerminalCapabilities, "kitty_graphics" | "sixel" | "rgb"> & Partial<Pick<TerminalCapabilities, "multiplexer" | "terminal">>
 
+// The reader assumes a Nerd Font patched terminal for its visual vocabulary.
+const nerdIcons = {
+  navigator: "󰙅",
+  overview: "󰃀",
+  folder: "󰉋",
+  page: "󰈙",
+  live: "󰖟",
+  canvas: "󰏖",
+  unknown: "󰋗",
+  expanded: "󰅀",
+  collapsed: "󰅂",
+  outline: "󰘣",
+  related: "󰌹",
+  search: "󰍉",
+  find: "󰈙",
+  spaces: "󰆧",
+  palette: "󰏘",
+  keyboard: "󰌌",
+  editor: "󰏫",
+  newPage: "󰐕",
+  selected: "󰄬",
+  active: "󰄵",
+  unchecked: "󰄱",
+} as const
+
 export interface RenderTuiOptions {
   env?: RuntimeEnv
   demo?: boolean
@@ -1718,7 +1743,7 @@ export function Header(props: { page: ReaderPage; spaceName: string; syncState: 
         <text height={1} fg={theme.text}><b>{props.page.title}</b></text>
         <box height={1} flexDirection="row" gap={2}>
           <box height={1} width={Math.max(12, `Overview ${props.stagedCount}`.length + 2)} onMouseDown={props.onOpenOverview}>
-            <text height={1} fg={theme.accent}>Overview {props.stagedCount}</text>
+            <text height={1} fg={theme.accent}>{nerdIcons.overview} Overview {props.stagedCount}</text>
           </box>
           <Show when={props.reloading} fallback={<box height={0} />}>
             <text height={1} fg={theme.warn}><b>RELOADING</b></text>
@@ -1748,7 +1773,7 @@ function Navigator(props: { rows: TreeRow[]; selectedPageId: string; focused: bo
       paddingY={1}
       flexDirection="column"
     >
-      <text height={1} fg={props.focused ? theme.accent : theme.muted}><b>NAVIGATOR</b></text>
+      <text height={1} fg={props.focused ? theme.accent : theme.muted}><b>{nerdIcons.navigator} NAVIGATOR</b></text>
       <box height={1} flexDirection="row" gap={1}>
         <NavigatorTab label="Current" active={props.viewMode === "current"} onPress={() => props.onSetViewMode("current")} />
         <NavigatorTab label="Archived" active={props.viewMode === "archived"} onPress={() => props.onSetViewMode("archived")} />
@@ -1775,7 +1800,7 @@ function NavigatorTab(props: { label: string; active: boolean; onPress: () => vo
 function NavigatorRow(props: { row: TreeRow; selected: boolean }) {
   const indicator = () => {
     if (!props.row.hasChildren) return " "
-    return props.row.expanded ? "▾" : "▸"
+    return props.row.expanded ? nerdIcons.expanded : nerdIcons.collapsed
   }
 
   const prefix = () => `${"  ".repeat(props.row.depth)}${indicator()} `
@@ -1797,11 +1822,11 @@ function NavigatorRow(props: { row: TreeRow; selected: boolean }) {
 type NavigatorDocumentKind = "folder" | "page" | "live" | "canvas" | "unknown"
 
 const navigatorDocumentKindSymbols: Record<NavigatorDocumentKind, string> = {
-  folder: "▣",
-  page: "•",
-  live: "✦",
-  canvas: "□",
-  unknown: "?",
+  folder: nerdIcons.folder,
+  page: nerdIcons.page,
+  live: nerdIcons.live,
+  canvas: nerdIcons.canvas,
+  unknown: nerdIcons.unknown,
 }
 
 const navigatorDocumentKindColors: Record<NavigatorDocumentKind, string> = {
@@ -2782,8 +2807,8 @@ function readableCodeLanguage(language: string | undefined) {
 function SideRail(props: { narrow: boolean; focusedPanel: SideRailPanel | null; selectedIndex: number; outlineItems: OutlineNavigationItem[]; relatedItems: RelatedNavigationItem[] }) {
   return (
     <box width={props.narrow ? "100%" : 30} minWidth={props.narrow ? 0 : 24} marginLeft={props.narrow ? 0 : 1} height={props.narrow ? 10 : "100%"} flexDirection="column">
-      <SideRailPanelView panel="outline" title="OUTLINE" empty="No headings" active={props.focusedPanel === "outline"} selectedIndex={props.selectedIndex} items={props.outlineItems} />
-      <SideRailPanelView panel="related" title="RELATED" empty="No links yet" active={props.focusedPanel === "related"} selectedIndex={props.selectedIndex} items={props.relatedItems} />
+      <SideRailPanelView panel="outline" title={`${nerdIcons.outline} OUTLINE`} empty="No headings" active={props.focusedPanel === "outline"} selectedIndex={props.selectedIndex} items={props.outlineItems} />
+      <SideRailPanelView panel="related" title={`${nerdIcons.related} RELATED`} empty="No links yet" active={props.focusedPanel === "related"} selectedIndex={props.selectedIndex} items={props.relatedItems} />
     </box>
   )
 }
@@ -2816,7 +2841,7 @@ function SideRailRow(props: { id: string; item: OutlineNavigationItem | RelatedN
 
   return (
     <box id={props.id} height={1} width="100%" backgroundColor={props.selected ? theme.accentSoft : undefined} paddingX={1}>
-      <text height={1} fg={props.selected ? theme.text : theme.muted}>{props.selected ? "▶ " : "  "}{label()}</text>
+      <text height={1} fg={props.selected ? theme.text : theme.muted}>{props.selected ? `${nerdIcons.selected} ` : "  "}{label()}</text>
     </box>
   )
 }
@@ -2941,7 +2966,7 @@ function EditorOverlay(props: {
       zIndex={40}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.accent}><b>EDITOR</b></text>
+        <text height={1} fg={theme.accent}><b>{nerdIcons.editor} EDITOR</b></text>
         <text height={1} fg={props.dirty ? theme.warn : theme.good}>{statusText()}</text>
       </box>
       <text height={1} fg={theme.text}>{props.pageTitle}</text>
@@ -3010,7 +3035,7 @@ export function StagedChangesOverlay(props: {
       zIndex={60}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.warn}><b>OVERVIEW</b></text>
+        <text height={1} fg={theme.warn}><b>{nerdIcons.overview} OVERVIEW</b></text>
         <text height={1} fg={theme.muted}>{props.activeSpaceName}</text>
       </box>
       <text height={1} fg={theme.subtle}>{props.applying ? "Applying selected staged changes..." : "space select  a apply selected  d discard selected  esc close"}</text>
@@ -3057,8 +3082,8 @@ export function StagedChangesOverlay(props: {
 }
 
 function StagedChangeRow(props: { change: TuiStagedChange; active: boolean; checked: boolean }) {
-  const marker = () => (props.active ? "▶" : " ")
-  const checkbox = () => (props.checked ? "[x]" : "[ ]")
+  const marker = () => (props.active ? nerdIcons.selected : " ")
+  const checkbox = () => (props.checked ? nerdIcons.selected : nerdIcons.unchecked)
   const kind = () => props.change.kind
   const identifier = () => props.change.kind === "create" ? `parent ${props.change.parentPage?.pageId ?? "space root"}` : props.change.page.pageId
 
@@ -3109,7 +3134,7 @@ export function NewPageOverlay(props: { visible: boolean; title: string; parentP
       zIndex={70}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.accent}><b>NEW PAGE</b></text>
+        <text height={1} fg={theme.accent}><b>{nerdIcons.newPage} NEW PAGE</b></text>
         <text height={1} fg={theme.muted}>type: page</text>
       </box>
       <text height={1} fg={theme.subtle}>Parent: {props.parentPage ? props.parentPage.title : "Space root"}</text>
@@ -3146,7 +3171,7 @@ export function PageSearchOverlay(props: { visible: boolean; query: string; resu
       zIndex={20}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.accent}><b>{props.scope === "all" ? "ALL-SPACE SEARCH" : "PAGE SEARCH"}</b></text>
+        <text height={1} fg={theme.accent}><b>{props.scope === "all" ? `${nerdIcons.spaces} ALL-SPACE SEARCH` : `${nerdIcons.search} PAGE SEARCH`}</b></text>
         <text height={1} fg={theme.muted}>{props.scope === "all" ? `local index · ${props.viewMode}` : `${props.activeSpaceName} · ${props.viewMode}`}</text>
       </box>
       <SearchInput visible={props.visible} prefix={props.scope === "all" ? "S" : "/"} value={props.query} placeholder="type title, path, or content" onInput={props.onQueryChange} onKeyDown={props.onKeyDown} />
@@ -3230,7 +3255,7 @@ export function DocumentFindOverlay(props: { visible: boolean; query: string; ma
       zIndex={25}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.accent}><b>FIND IN DOCUMENT</b></text>
+        <text height={1} fg={theme.accent}><b>{nerdIcons.find} FIND IN DOCUMENT</b></text>
         <text height={1} fg={theme.muted}>{props.pageTitle}</text>
       </box>
       <SearchInput visible={props.visible} prefix="f" value={props.query} placeholder="type text to find" onInput={props.onQueryChange} onKeyDown={props.onKeyDown} />
@@ -3279,7 +3304,7 @@ function SpaceSwitcherOverlay(props: { visible: boolean; query: string; results:
       zIndex={30}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.accent}><b>SWITCH SPACE</b></text>
+        <text height={1} fg={theme.accent}><b>{nerdIcons.spaces} SWITCH SPACE</b></text>
         <text height={1} fg={theme.muted}>active: {props.activeSpaceKey}</text>
       </box>
       <SearchInput visible={props.visible} prefix="s" value={props.query} placeholder="type space key or name" onInput={props.onQueryChange} onKeyDown={props.onKeyDown} />
@@ -3328,7 +3353,7 @@ export function CommandPaletteOverlay(props: { visible: boolean; query: string; 
       zIndex={35}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.accent}><b>COMMAND PALETTE</b></text>
+        <text height={1} fg={theme.accent}><b>{nerdIcons.palette} COMMAND PALETTE</b></text>
         <text height={1} fg={theme.muted}>p · ; · : actions</text>
       </box>
       <SearchInput visible={props.visible} prefix="p" value={props.query} placeholder="type an action, key, or description" onInput={props.onQueryChange} onKeyDown={props.onKeyDown} />
@@ -3394,7 +3419,7 @@ export function HelpOverlay(props: { visible: boolean; commands: readonly TuiCom
       zIndex={80}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.accent}><b>KEYBOARD HELP</b></text>
+        <text height={1} fg={theme.accent}><b>{nerdIcons.keyboard} KEYBOARD HELP</b></text>
         <text height={1} fg={theme.muted}>j/k scroll · u/d page · ?/Esc/q close</text>
       </box>
       <text height={1} fg={theme.subtle}>Available commands reflect the current reader and overlays. Muted commands are planned but unavailable.</text>
@@ -3434,7 +3459,7 @@ function HelpCommandRow(props: { command: TuiCommand }) {
 }
 
 function SearchResultRow(props: { id: string; result: SearchResult; selected: boolean; showSpace?: boolean }) {
-  const marker = () => (props.selected ? "▶" : " ")
+  const marker = () => (props.selected ? nerdIcons.selected : " ")
 
   return (
     <box id={props.id} height={3} width="100%" backgroundColor={props.selected ? theme.accentSoft : undefined} paddingX={1} flexDirection="column">
@@ -3472,7 +3497,7 @@ function EmptySearchState(props: { query: string }) {
 }
 
 function SpaceResultRow(props: { id: string; result: SpaceSearchResult; selected: boolean; active: boolean }) {
-  const marker = () => (props.selected ? "▶" : props.active ? "●" : " ")
+  const marker = () => (props.selected ? nerdIcons.selected : props.active ? nerdIcons.active : " ")
   const syncColor = () => (props.result.space.syncState === "fresh" ? theme.good : props.result.space.syncState === "stale" ? theme.warn : theme.danger)
 
   return (

@@ -38,7 +38,7 @@
     "start": "bun run src/main.tsx",
     "start:dev": "bun run src/main.tsx dev",
     "start:prod": "bun run src/main.tsx prod",
-    "build": "bun build src/main.tsx --target=bun --packages=external --splitting --outdir=dist",
+    "build": "bun run scripts/build.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun --conditions=browser test",
     "lint": "bun run typecheck",

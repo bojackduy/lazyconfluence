@@ -2,7 +2,8 @@ import { readFile } from "node:fs/promises"
 import { createInterface } from "node:readline/promises"
 import { stdin as input, stdout as output } from "node:process"
 import packageJson from "../package.json" with { type: "json" }
-import { ATLASSIAN_API_TOKEN_URL, createLocalConfig, loadAtlassianAuth, parseSpaceKeys, saveLocalAuth } from "./config"
+import { ATLASSIAN_API_TOKEN_URL, createLocalConfig, loadAtlassianAuth, loadCredentialStatus, parseSpaceKeys, saveLocalAuth, type CredentialStatus, type LocalConfig } from "./config"
+import { checkAtlassianCredentials } from "./onboarding"
 import { editPageDraftInExternalEditor, formatMarkdownDiff, readEditableDraftInput, savePageDraft } from "./editing"
 import { openIndexRepository, type IndexRepository, type PageDraftStatus } from "./index/repository"
 import { formatRepairReport, repairBodyArtifacts, RepairServiceError } from "./repair"
@@ -10,12 +11,12 @@ import { defaultRuntimeEnv, parseRuntimeEnv, type RuntimeEnv } from "./runtime/e
 import { formatSyncReport, syncConfluence, SyncServiceError, type SyncProgressEvent, type SyncReport } from "./sync"
 import { renderTui } from "./tui/app"
 
-export async function runCli(args: string[]) {
+export async function runCli(args: string[], options: { interactive?: boolean } = {}) {
   const command = args[0]
 
   switch (command) {
     case undefined:
-      await renderTui({ env: defaultRuntimeEnv() })
+      await runDefaultCommand(options.interactive ?? (input.isTTY && output.isTTY))
       return
     case "tui":
       await runTuiCommand(args.slice(1))
@@ -37,7 +38,7 @@ export async function runCli(args: string[]) {
       await runInit()
       return
     case "doctor":
-      await printLocalConfigSummary()
+      await runDoctorCommand(args.slice(1))
       return
     case "sync":
       await runSyncCommand(args.slice(1))
@@ -97,6 +98,28 @@ async function runTuiCommand(args: string[]) {
   await renderTui({ env })
 }
 
+async function runDefaultCommand(interactive: boolean) {
+  if (defaultRuntimeEnv() === "dev") {
+    await renderTui({ env: "dev" })
+    return
+  }
+
+  const status = await loadCredentialStatus()
+  if (status.kind === "ready") {
+    await renderTui({ env: "prod" })
+    return
+  }
+
+  printOnboardingNeeded(status)
+  if (!interactive) {
+    console.log("\nRun `lazyconfluence init` in an interactive terminal to start setup.")
+    return
+  }
+
+  console.log("\nStarting setup now. Your details are checked with Confluence before they are saved.")
+  await runInit()
+}
+
 async function runSyncCommand(args: string[]) {
   try {
     const options = parseSyncArgs(args)
@@ -107,6 +130,21 @@ async function runSyncCommand(args: string[]) {
     console.error(error instanceof SyncServiceError ? error.message : error instanceof Error ? error.message : "Unknown sync error.")
     process.exitCode = 1
   }
+}
+
+async function runDoctorCommand(args: string[]) {
+  if (args.length === 0) {
+    await printLocalConfigSummary()
+    return
+  }
+
+  if (args.length === 1 && args[0] === "--remote") {
+    await printLocalConfigSummary(true)
+    return
+  }
+
+  console.error("Usage: lazyconfluence doctor [--remote]")
+  process.exitCode = 1
 }
 
 async function runRepairCommand(args: string[]) {
@@ -349,38 +387,59 @@ async function runInit() {
   console.log("The token is stored in a local env file, not in the repository.\n")
 
   const existing = await loadAtlassianAuth()
-  const rl = createInterface({ input, output })
-  let rlClosed = false
-  const closeRl = () => {
-    if (rlClosed) return
-    rl.close()
-    rlClosed = true
-  }
+  let defaults: LocalConfig | undefined = existing?.config
 
-  try {
-    const siteUrl = await askRequired(rl, "Atlassian site URL", existing?.config.atlassian.siteUrl)
-    const email = await askRequired(rl, "Atlassian account email", existing?.config.atlassian.email)
-    const defaultSpaceKeys = existing?.config.atlassian.spaceKeys.join(",")
-    const spaceKeysInput = await askRequired(rl, "Space keys to configure (comma-separated, first is default)", defaultSpaceKeys)
-    const spaceKeys = parseSpaceKeys(spaceKeysInput)
-
-    closeRl()
+  while (true) {
+    let config: LocalConfig
+    try {
+      config = await promptForConfig(defaults)
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : "Invalid setup details.")
+      console.error("Correct the details below, or press Ctrl+C to cancel.")
+      continue
+    }
 
     const token = await askHidden("Atlassian API token")
-    const config = createLocalConfig({ siteUrl, email, spaceKeys })
-    const paths = await saveLocalAuth(config, token)
+    if (!token) {
+      console.error("Atlassian API token is required. Paste the token value, not its label or URL.")
+      defaults = config
+      continue
+    }
 
-    console.log("\nSaved lazyconfluence auth config.")
-    console.log(`Config: ${paths.configFile}`)
-    console.log(`Credentials: ${paths.credentialFile}`)
-    console.log(`Default space: ${config.atlassian.defaultSpaceKey}`)
-    console.log("Run `lazyconfluence sync` to fetch configured spaces into the local index.")
-  } finally {
-    closeRl()
+    const validation = await checkAtlassianCredentials({ config, apiToken: token })
+
+    if (validation.kind === "ready") {
+      const paths = await saveLocalAuth(config, token)
+      console.log("\nConnection verified and lazyconfluence auth config saved.")
+      console.log(`Config: ${paths.configFile}`)
+      console.log(`Credentials: ${paths.credentialFile}`)
+      console.log(`Verified spaces: ${validation.resolvedSpaceKeys.join(", ")}`)
+      console.log("Next: run `lazyconfluence sync` to fetch configured spaces into the local index.")
+      return
+    }
+
+    console.error(`\nCould not verify the connection: ${validation.message}`)
+    for (const hint of validation.help) console.error(`- ${hint}`)
+    console.error("\nCorrect the details below, or press Ctrl+C to cancel.")
+    defaults = config
   }
 }
 
-async function printLocalConfigSummary() {
+async function promptForConfig(defaults?: LocalConfig) {
+  const rl = createInterface({ input, output })
+
+  try {
+    const siteUrl = await askRequired(rl, "Atlassian site URL", defaults?.atlassian.siteUrl)
+    const email = await askRequired(rl, "Atlassian account email", defaults?.atlassian.email)
+    const defaultSpaceKeys = defaults?.atlassian.spaceKeys.join(",")
+    const spaceKeysInput = await askRequired(rl, "Space keys to configure (comma-separated, first is default)", defaultSpaceKeys)
+    return createLocalConfig({ siteUrl, email, spaceKeys: parseSpaceKeys(spaceKeysInput) })
+  } finally {
+    rl.close()
+  }
+}
+
+async function printLocalConfigSummary(remote = false) {
   const auth = await loadAtlassianAuth()
   const repository = openIndexRepository()
 
@@ -415,10 +474,41 @@ async function printLocalConfigSummary() {
       }
     }
 
-    console.log("No remote doctor check was run.")
+    if (!remote) {
+      console.log("No remote doctor check was run. Use `lazyconfluence doctor --remote` to verify credentials and configured spaces.")
+      return
+    }
+
+    if (!auth) {
+      console.error("Remote check skipped: no local config. Run `lazyconfluence init` first.")
+      process.exitCode = 1
+      return
+    }
+
+    if (!auth.apiToken) {
+      console.error(`Remote check skipped: API token missing. Set ${auth.config.atlassian.apiTokenEnv} or run \`lazyconfluence init\`.`)
+      process.exitCode = 1
+      return
+    }
+
+    const validation = await checkAtlassianCredentials({ config: auth.config, apiToken: auth.apiToken })
+    if (validation.kind === "ready") {
+      console.log(`Remote check: connected. Verified spaces: ${validation.resolvedSpaceKeys.join(", ")}`)
+      return
+    }
+
+    console.error(`Remote check failed: ${validation.message}`)
+    for (const hint of validation.help) console.error(`- ${hint}`)
+    process.exitCode = 1
   } finally {
     repository.close()
   }
+}
+
+function printOnboardingNeeded(status: Exclude<CredentialStatus, { kind: "ready" }>) {
+  console.log("lazyconfluence needs setup before it can open your local Confluence reader.")
+  console.log(status.detail)
+  for (const hint of status.help) console.log(`- ${hint}`)
 }
 
 function parseSyncArgs(args: string[]) {

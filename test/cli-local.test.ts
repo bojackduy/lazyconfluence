@@ -9,6 +9,24 @@ import { runCli } from "../src/cli"
 import type { IndexedPage, SpaceSummary } from "../src/model"
 
 describe("local CLI integration", () => {
+  test("guides an unconfigured non-interactive launch into setup", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lazyconfluence-cli-empty-"))
+    const env = {
+      LAZYCONFLUENCE_CONFIG_HOME: join(dir, "config"),
+      LAZYCONFLUENCE_DB_PATH: join(dir, "index.sqlite3"),
+    } as NodeJS.ProcessEnv
+
+    try {
+      const output = await captureCli(() => withProcessEnv(env, () => runCli([], { interactive: false })))
+
+      expect(output.exitCode).toBeUndefined()
+      expect(output.stdout).toContain("lazyconfluence needs setup")
+      expect(output.stdout).toContain("lazyconfluence init")
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   test("reports the packaged version without opening the TUI", async () => {
     const output = await captureCli(() => runCli(["--version"]))
 
@@ -35,6 +53,27 @@ describe("local CLI integration", () => {
       expect(output.stdout).toContain("Configured space ENG: 2 local pages")
       expect(output.stdout).toContain("Configured space OPS: 1 local pages")
       expect(output.stdout).toContain("No remote doctor check was run.")
+    } finally {
+      await setup.cleanup()
+    }
+  })
+
+  test("doctor --remote verifies the configured account and spaces", async () => {
+    const setup = await createCliSetup()
+
+    try {
+      const output = await withMockFetch(jsonGlobalFetch({
+        "/wiki/api/v2/spaces?limit=1": { results: [{ id: "10", key: "ENG", name: "Engineering" }] },
+        "/wiki/api/v2/spaces?keys=ENG&keys=OPS&limit=250": {
+          results: [
+            { id: "10", key: "ENG", name: "Engineering" },
+            { id: "20", key: "OPS", name: "Operations" },
+          ],
+        },
+      }), () => captureCli(() => withProcessEnv(setup.env, () => runCli(["doctor", "--remote"])) ))
+
+      expect(output.exitCode).toBeUndefined()
+      expect(output.stdout).toContain("Remote check: connected. Verified spaces: ENG, OPS")
     } finally {
       await setup.cleanup()
     }

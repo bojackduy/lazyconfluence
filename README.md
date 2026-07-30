@@ -45,6 +45,8 @@ Run it:
 lazyconfluence
 ```
 
+On a first run, the CLI detects missing or incomplete setup and starts the connection wizard instead of opening an empty reader. The wizard checks the site, account, token, and configured spaces with Confluence before saving them.
+
 To open the safe synthetic demo mode:
 
 ```bash
@@ -93,10 +95,24 @@ The setup prompt asks for:
 
 Credentials are stored in your local user config directory, not in this repository or in the synced page index.
 
+Setup verifies the connection before saving. Common failures are explained directly:
+
+- `401 Unauthorized`: the account email and API token do not match, or the token is expired, revoked, or copied incorrectly.
+- `403 Forbidden`: the account authenticated but does not have access to Confluence on that site.
+- Site not found: use the site root such as `https://example.atlassian.net`, not a page, space, or REST API URL.
+- Configured spaces unavailable: verify each space key and that the account can browse it.
+- Timeout or network failure: check connectivity and retry when the site is reachable.
+
 Check local config and index state:
 
 ```bash
 lazyconfluence doctor
+```
+
+Check credentials and configured space access explicitly:
+
+```bash
+lazyconfluence doctor --remote
 ```
 
 Sync configured spaces:
@@ -128,6 +144,7 @@ lazyconfluence demo            # open the TUI with synthetic demo data only
 lazyconfluence tui --demo      # same demo mode through a flag
 lazyconfluence init            # configure Atlassian credentials
 lazyconfluence doctor          # inspect local config and index state
+lazyconfluence doctor --remote # verify credentials and configured spaces
 lazyconfluence sync            # fetch configured spaces into the local index
 lazyconfluence sync --space ENG
 lazyconfluence search runbook

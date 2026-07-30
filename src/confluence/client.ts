@@ -129,6 +129,10 @@ export class ConfluenceClient {
     return spaces
   }
 
+  async validateConnection() {
+    await this.requestJson("/api/v2/spaces", { limit: 1 })
+  }
+
   async fetchPagesBySpace(spaceId: string, options: { bodyFormat?: "storage" | "atlas_doc_format"; limit?: number; status?: "current" | "archived" } = {}) {
     const params: QueryParams = {
       "space-id": [spaceId],

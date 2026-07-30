@@ -146,8 +146,8 @@ export async function loadCredentialStatus(env: NodeJS.ProcessEnv = process.env)
     if (!auth) {
       return {
         kind: "missing-config",
-        title: "Mock mode: no Atlassian credentials configured",
-        detail: "You can keep using mock data. Run setup when you are ready to connect Confluence.",
+        title: "Confluence setup is required",
+        detail: "Set up an Atlassian connection before opening the local Confluence reader.",
         help: [`Run: lazyconfluence init`, `Generate API token: ${ATLASSIAN_API_TOKEN_URL}`, `Config will be saved at: ${paths.configFile}`],
         paths,
       }
@@ -156,7 +156,7 @@ export async function loadCredentialStatus(env: NodeJS.ProcessEnv = process.env)
     if (!auth.apiToken) {
       return {
         kind: "missing-token",
-        title: "Mock mode: Atlassian API token missing",
+        title: "Atlassian API token missing",
         detail: "Config exists, but remote Confluence calls will fail until the token is available.",
         help: [`Run: lazyconfluence init`, `Or set env var: ${auth.config.atlassian.apiTokenEnv}`, `Credential file: ${auth.paths.credentialFile}`],
         auth,
@@ -167,7 +167,7 @@ export async function loadCredentialStatus(env: NodeJS.ProcessEnv = process.env)
   } catch (error) {
     return {
       kind: "invalid-config",
-      title: "Mock mode: credential config could not be read",
+        title: "Credential config could not be read",
       detail: error instanceof Error ? error.message : "Unknown config error.",
       help: [`Run: lazyconfluence init`, `Generate API token: ${ATLASSIAN_API_TOKEN_URL}`, `Config path: ${paths.configFile}`],
       paths,

@@ -148,6 +148,7 @@ YYYY-MM-DD  ID  Result  Verification  Follow-up
 2026-07-30  bundled-keyboard-reactivity  The package bootstrap now loads OpenTUI's Solid preload before dynamically importing the CLI chunk. Split npm builds retain reactive overlays and normal `useKeyboard` routing outside the source repository.  bun run typecheck; bun test (168 pass, 0 fail, 768 assertions); `npm pack` smoke verified `p`, `Esc`, and `q`; git diff --check.  Next: media and image polish.
 2026-07-30  cli-version  Added `lazyconfluence --version`, `-v`, and `version`, reporting the version embedded in the installed package without opening the TUI.  bun run typecheck; bun test (168 pass, 0 fail, 768 assertions); git diff --check.  Next: media and image polish.
 2026-07-30  input-diagnostics  Added opt-in JSONL input tracing through bootstrap, raw terminal bytes, OpenTUI parsing, app routing, command resolution, and teardown. Enable it with `LAZYCONFLUENCE_INPUT_DEBUG_LOG=/path/to/input.jsonl`.  bun run typecheck; bun test (168 pass, 0 fail, 768 assertions); git diff --check.  Next: media and image polish.
+2026-07-30  onboarding-validation  Normal production startup now detects absent, malformed, or incomplete credentials and starts guided setup instead of opening an empty reader. Setup validates credentials and configured spaces before saving; `doctor --remote` reports actionable connection failures.  bun run typecheck; bun test; bun run build; git diff --check.  Next: media and image polish.
 ```
 
 ## Contract Changes

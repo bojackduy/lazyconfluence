@@ -1530,14 +1530,8 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     if (focusPane() === "navigator") {
       if (command === "move-down") moveSelection(1, treeRows(), selectedIndex(), setSelectedPageId)
       if (command === "move-up") moveSelection(-1, treeRows(), selectedIndex(), setSelectedPageId)
-      if (command === "move-right") {
-        if (isPlainKey(key, "l")) setFocusPane(nextFocusPaneForKey(focusPane(), key))
-        else expandSelectedPage()
-      }
-      if (command === "move-left") {
-        if (isPlainKey(key, "h")) setFocusPane(nextFocusPaneForKey(focusPane(), key))
-        else collapseSelectedPage()
-      }
+      if (command === "move-right") expandSelectedPage()
+      if (command === "move-left") collapseSelectedPage()
       if (command === "activate") {
         if (navigatorEnterAction(selectedRow())) toggleSelectedPageExpansion()
         else setFocusPane(nextFocusPaneForKey(focusPane(), key))
@@ -1942,7 +1936,7 @@ function ImagePreviewCard(props: { part: Extract<ReaderContentPart, { kind: "ima
       <Show when={image()} fallback={<ImagePreviewFallback part={props.part} message={fallbackMessage()} />}>
         {(decoded) => (
           <box flexDirection="column" width="100%">
-            <text height={1} fg={theme.subtle}>cached {decoded().format.toUpperCase()} {decoded().width}x{decoded().height} · {imageRenderModeLabel(props.renderMode)}</text>
+            <text height={1} fg={theme.subtle}>{imagePreviewDetails(decoded())} · {imageRenderModeLabel(props.renderMode)}</text>
             <box width="100%" height={size().height} backgroundColor={theme.bg} buffered renderAfter={(buffer: OptimizedBuffer) => renderPreview(buffer, decoded())} />
           </box>
         )}
@@ -2265,7 +2259,7 @@ export function ImageViewerOverlay(props: { visible: boolean; pageTitle: string;
             <Show when={image()} fallback={<ImagePreviewFallback part={part()} message={fallbackMessage()} />}>
               {(decoded) => (
                 <box flexDirection="column" width="100%">
-                  <text height={1} fg={theme.subtle}>cached {decoded().format.toUpperCase()} {decoded().width}x{decoded().height}</text>
+                  <text height={1} fg={theme.subtle}>{imagePreviewDetails(decoded())}</text>
                   <box ref={(renderable: BoxRenderable) => { nativePreviewRenderable = renderable }} width="100%" height={previewHeight()} backgroundColor={theme.bg} buffered renderAfter={(buffer: OptimizedBuffer) => renderPreview(buffer, decoded())} />
                 </box>
               )}
@@ -2560,6 +2554,8 @@ function containedNativeImageCells(image: DecodedImage, columns: number, rows: n
 }
 
 function iterm2NativeCommandForImage(input: NativeViewerImage): NativeImageCommandResult {
+  if (input.image.format === "gif") return sixelNativeCommandForImage(input)
+
   const bytes = input.asset?.cachePath ? readFileSync(input.asset.cachePath) : null
   if (!bytes) return sixelNativeCommandForImage(input)
 
@@ -2567,6 +2563,10 @@ function iterm2NativeCommandForImage(input: NativeViewerImage): NativeImageComma
   const command = iterm2ImageCommand({ bytes, name, columns: input.columns, rows: input.rows })
 
   return { command, width: input.image.width, height: input.image.height, chunks: 1, cached: false, transfer: "direct-file" }
+}
+
+function imagePreviewDetails(image: DecodedImage) {
+  return image.format === "gif" ? `cached GIF first frame ${image.width}x${image.height}` : `cached ${image.format.toUpperCase()} ${image.width}x${image.height}`
 }
 
 function sixelNativeCommandForImage(input: NativeViewerImage): NativeImageCommandResult {
@@ -3646,8 +3646,8 @@ export function pageSearchKeyAction(key: SearchKeyLike): PageSearchKeyAction {
 export function nextFocusPaneForKey(current: FocusPane, key: SearchKeyLike): FocusPane {
   if (isShiftTabKey(key)) return current === "navigator" ? "related" : current === "related" ? "outline" : current === "outline" ? "document" : "navigator"
   if (isTabKey(key)) return current === "navigator" ? "document" : current === "document" ? "outline" : current === "outline" ? "related" : "navigator"
-  if (current === "navigator" && isPlainKey(key, "h")) return "related"
-  if (current === "navigator" && isPlainKey(key, "l")) return "document"
+  if (isPlainKey(key, "h")) return current === "navigator" ? "document" : current === "document" ? "outline" : current === "outline" ? "related" : "navigator"
+  if (isPlainKey(key, "l")) return current === "navigator" ? "related" : current === "related" ? "outline" : current === "outline" ? "document" : "navigator"
   if (current === "navigator" && key.name === "return") return "document"
   return current
 }

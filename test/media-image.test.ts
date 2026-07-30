@@ -33,9 +33,19 @@ describe("cached image decoding", () => {
     })
   })
 
+  test("decodes the first GIF frame as a static preview", async () => {
+    await withFixture("preview.gif", tinyGifBase64, (path) => {
+      const image = decodeImageFile(path)
+
+      expect(image).toMatchObject({ format: "gif", width: 1, height: 1 })
+      expect(image.rgba).toHaveLength(4)
+      expect(image.grayscale).toHaveLength(1)
+    })
+  })
+
   test("leaves SVG decoding to the sync-time rasterizers", async () => {
     await withBytes("diagram.svg", Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10" />'), (path) => {
-      expect(() => decodeImageFile(path)).toThrow("PNG and JPEG are supported")
+      expect(() => decodeImageFile(path)).toThrow("PNG, JPEG, and GIF are supported")
     })
   })
 
@@ -60,7 +70,7 @@ describe("cached image decoding", () => {
 
   test("reports unsupported cached image formats", async () => {
     await withBytes("preview.gif", Buffer.from("not an image"), (path) => {
-      expect(() => decodeImageFile(path)).toThrow("PNG and JPEG are supported")
+      expect(() => decodeImageFile(path)).toThrow("PNG, JPEG, and GIF are supported")
     })
   })
 })
@@ -86,6 +96,7 @@ function tinyJpegBytes() {
 }
 
 const tinyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+const tinyGifBase64 = "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="
 const safeSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10" viewBox="0 0 20 10"><defs><linearGradient id="blue"><stop stop-color="#38bdf8" /></linearGradient></defs><rect width="20" height="10" fill="url(#blue)" /></svg>'
 
 function decodePngDimensions(bytes: Uint8Array) {

@@ -46,7 +46,7 @@ Current execution checklist: `docs/NEXT_STEPS.md`.
 - TUI date rendering is defensive: existing rows with missing or invalid timestamps display `unknown`, and future syncs use the sync timestamp when Confluence omits page dates.
 - TUI focus keys are polished for the current reader slice: `Tab` and `Shift+Tab` cycle between the navigator and document panes, navigator `h/l` fold/unfold without selecting missing detached parents, and document `h/l` scroll wide content horizontally.
 - Keymap and command registry are done: command metadata and context-aware key resolution cover the reader, overlays, editing, and image viewer; `?` renders a discoverable Help overlay. Future product intents such as document find, browser open, refresh, history, and command palette are listed as unavailable until implemented.
-- PNG/JPEG/SVG media handling is done: `jpeg-js` decodes cached JPEG attachments, while explicit sync/reload rasterizes bounded SVGs into cached PNG previews. Local Chromium through `playwright-core` is preferred and runs with JavaScript disabled and network requests blocked, preserving browser-rendered `foreignObject` labels without reader lag; resvg is the portable fallback when Chromium is unavailable.
+- PNG/JPEG/GIF/SVG media handling is done: `jpeg-js` decodes cached JPEG attachments and `gifuct-js` renders static first-frame GIF previews, while explicit sync/reload rasterizes bounded SVGs into cached PNG previews. Local Chromium through `playwright-core` is preferred and runs with JavaScript disabled and network requests blocked, preserving browser-rendered `foreignObject` labels without reader lag; resvg is the portable fallback when Chromium is unavailable.
 - Quality and integration are not started.
 
 ## Parallel Plan

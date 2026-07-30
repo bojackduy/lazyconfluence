@@ -76,6 +76,8 @@ export function resolveKeyCommand(key: TuiKey, context: CommandContext): Command
   if (isPlainKey(key, "D")) return "stage-delete"
   if (isShiftTabKey(key)) return "focus-previous-pane"
   if (isTabKey(key)) return "focus-next-pane"
+  if (isPlainKey(key, "h")) return "focus-next-pane"
+  if (isPlainKey(key, "l")) return "focus-previous-pane"
   if (key.name === "d") return "page-down"
   if (key.name === "u") return "page-up"
 
@@ -84,24 +86,24 @@ export function resolveKeyCommand(key: TuiKey, context: CommandContext): Command
     if (isPlainKey(key, "n")) return "create-child-page"
     if (matchesAny(key, ["j", "down"])) return "move-down"
     if (matchesAny(key, ["k", "up"])) return "move-up"
-    if (matchesAny(key, ["l", "right"])) return "move-right"
-    if (matchesAny(key, ["h", "left"])) return "move-left"
+    if (key.name === "right") return "move-right"
+    if (key.name === "left") return "move-left"
     if (key.name === "return") return "activate"
   }
 
   if (context === "outline" || context === "related") {
     if (matchesAny(key, ["j", "down"])) return "move-down"
     if (matchesAny(key, ["k", "up"])) return "move-up"
-    if (matchesAny(key, ["l", "right"])) return "move-right"
-    if (matchesAny(key, ["h", "left"])) return "move-left"
+    if (key.name === "right") return "move-right"
+    if (key.name === "left") return "move-left"
     if (key.name === "return") return "activate"
   }
 
   if (context === "document") {
     if (matchesAny(key, ["j", "down"])) return "move-down"
     if (matchesAny(key, ["k", "up"])) return "move-up"
-    if (matchesAny(key, ["l", "right"])) return "move-right"
-    if (matchesAny(key, ["h", "left"])) return "move-left"
+    if (key.name === "right") return "move-right"
+    if (key.name === "left") return "move-left"
   }
 
   return null

@@ -10,7 +10,7 @@ Last updated: 2026-07-29
 - [x] Document reader, navigator, Current/Archived views, local drafts, staged create/update/delete, and Overview review/apply flow.
 - [x] Active-space page search and space switcher.
 - [x] Command registry, context-aware keymap, and scrollable Help overlay.
-- [x] Cached PNG/JPEG inline previews, sync-time Chromium-rasterized SVG previews, and native image viewer support for Kitty, Ghostty, WezTerm, and configured tmux passthrough.
+- [x] Cached PNG/JPEG inline previews, static first-frame GIF previews, sync-time Chromium-rasterized SVG previews, and native image viewer support for Kitty, Ghostty, WezTerm, and configured tmux passthrough.
 - [x] Document find, command palette, browser open, navigation history, and navigable related links and outline entries.
 - [x] Explicit current-page reload from Confluence with `r`.
 - [ ] All-space search UI.

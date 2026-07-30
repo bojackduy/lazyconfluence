@@ -4,7 +4,7 @@
 [![GitHub Pages](https://img.shields.io/badge/site-GitHub%20Pages-9dffcb)](https://bojackduy.github.io/lazyconfluence/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
 
-`lazyconfluence` is a terminal-first Confluence document browser. It syncs the Confluence spaces you choose into a local index, then lets you browse and read pages from the terminal without making remote calls during normal navigation. The reader renders headings, tables, code blocks, links, and cached PNG, JPEG, and SVG previews, with progressive placeholders when a terminal or media asset cannot show an image preview.
+`lazyconfluence` is a terminal-first Confluence document browser. It syncs the Confluence spaces you choose into a local index, then lets you browse and read pages from the terminal without making remote calls during normal navigation. The reader renders headings, tables, code blocks, links, and cached PNG, JPEG, GIF first-frame, and SVG previews, with progressive placeholders when a terminal or media asset cannot show an image preview.
 
 Website: <https://bojackduy.github.io/lazyconfluence/>
 
@@ -22,7 +22,7 @@ The demo above uses synthetic data from `lazyconfluence demo`, not real company 
 - Current and archived page views, an ordered page tree, outlines, related links, backlinks, and bounded navigation history.
 - Intent-specific search for the active space, all synced spaces, and text in the current rendered document.
 - Readable terminal rendering for headings, lists, tables, links, and code blocks.
-- Cached PNG and JPEG attachment previews plus SVGs safely rasterized to PNG during sync or page reload.
+- Cached PNG and JPEG attachment previews, static first-frame GIF previews, plus SVGs safely rasterized to PNG during sync or page reload.
 - Native image viewers for Kitty/Ghostty, WezTerm/iTerm2, and Sixel-capable terminals, with a readable color-cell fallback that needs no image protocol.
 - Progressive image handling keeps terminals without image preview support and unsupported media readable through labeled placeholders.
 - Local drafts, staged creates, updates, and deletes, plus a review/apply flow that keeps remote Confluence write-back explicit.

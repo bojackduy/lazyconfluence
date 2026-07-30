@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs"
 import { inflateSync } from "node:zlib"
+import { decompressFrames, parseGIF } from "gifuct-js"
 import { decode as decodeJpegBytes } from "jpeg-js"
 
 export interface DecodedImage {
@@ -7,18 +8,21 @@ export interface DecodedImage {
   height: number
   rgba: Uint8Array
   grayscale: Float32Array
-  format: "png" | "jpeg"
+  format: "png" | "jpeg" | "gif"
 }
 
 const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+const maxGifDimensions = 4096
+const maxGifPixels = 16 * 1024 * 1024
 
 export function decodeImageFile(filePath: string): DecodedImage {
   const bytes = readFileSync(filePath)
 
   if (isPng(bytes)) return decodePng(bytes)
   if (isJpeg(bytes)) return decodeJpeg(bytes)
+  if (isGif(bytes)) return decodeGif(bytes)
 
-  throw new Error("Unsupported cached image format. PNG and JPEG are supported in this preview renderer.")
+  throw new Error("Unsupported cached image format. PNG, JPEG, and GIF are supported in this preview renderer.")
 }
 
 function isPng(bytes: Uint8Array) {
@@ -27,6 +31,10 @@ function isPng(bytes: Uint8Array) {
 
 function isJpeg(bytes: Uint8Array) {
   return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+}
+
+function isGif(bytes: Uint8Array) {
+  return Buffer.from(bytes.subarray(0, 6)).toString("ascii") === "GIF87a" || Buffer.from(bytes.subarray(0, 6)).toString("ascii") === "GIF89a"
 }
 
 function decodePng(bytes: Uint8Array): DecodedImage {
@@ -106,6 +114,38 @@ function decodeJpeg(bytes: Uint8Array): DecodedImage {
     const message = error instanceof Error ? error.message : String(error)
 
     throw new Error(`Invalid JPEG: ${message}`)
+  }
+}
+
+function decodeGif(bytes: Uint8Array): DecodedImage {
+  try {
+    const gif = parseGIF(Uint8Array.from(bytes).buffer as ArrayBuffer)
+    const width = gif.lsd.width
+    const height = gif.lsd.height
+    if (!width || !height || width > maxGifDimensions || height > maxGifDimensions || width * height > maxGifPixels) {
+      throw new Error("dimensions exceed the preview limit")
+    }
+
+    const frame = decompressFrames(gif, true)[0]
+    if (!frame?.patch) throw new Error("missing image frames")
+
+    const rgba = new Uint8Array(width * height * 4)
+    for (let y = 0; y < frame.dims.height; y += 1) {
+      for (let x = 0; x < frame.dims.width; x += 1) {
+        const targetX = frame.dims.left + x
+        const targetY = frame.dims.top + y
+        if (targetX < 0 || targetY < 0 || targetX >= width || targetY >= height) continue
+
+        const sourceOffset = (y * frame.dims.width + x) * 4
+        const targetOffset = (targetY * width + targetX) * 4
+        rgba.set(frame.patch.subarray(sourceOffset, sourceOffset + 4), targetOffset)
+      }
+    }
+
+    return { width, height, rgba, grayscale: grayscaleFromRgba(rgba), format: "gif" }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    throw new Error(`Invalid GIF: ${message}`)
   }
 }
 

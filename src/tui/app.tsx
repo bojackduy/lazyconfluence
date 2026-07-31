@@ -24,6 +24,7 @@ import { decodeImageFile, type DecodedImage } from "../media/image"
 import { openBrowserUrl, type BrowserOpenResult } from "../browser"
 import type { FocusPane, IndexedPage, MediaAsset, PageLink, PageViewMode, ReaderPage, SearchResult, SpaceSearchResult } from "../model"
 import { loadCredentialStatus, type CredentialStatus } from "../config"
+import { RemoteSpacePicker } from "./remote-space-picker"
 import type { PageDraftStatus } from "../index/repository"
 import type { ApplyPageDraftResult } from "../apply"
 import { defaultRuntimeEnv, runtimeEnvFromLegacyDemo, type RuntimeEnv } from "../runtime/env"
@@ -169,6 +170,8 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
   const [spaceSwitcherOpen, setSpaceSwitcherOpen] = createSignal(false)
   const [spaceSwitcherQuery, setSpaceSwitcherQuery] = createSignal("")
   const [spaceSwitcherSelectedIndex, setSpaceSwitcherSelectedIndex] = createSignal(0)
+  const [remoteSpacePickerOpen, setRemoteSpacePickerOpen] = createSignal(false)
+  const [spaceRevision, setSpaceRevision] = createSignal(0)
   const [commandPaletteOpen, setCommandPaletteOpen] = createSignal(false)
   const [commandPaletteQuery, setCommandPaletteQuery] = createSignal("")
   const [commandPaletteSelectedIndex, setCommandPaletteSelectedIndex] = createSignal(0)
@@ -239,7 +242,10 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     return dataSource.searchPagesAcrossSpaces(allSpaceSearchQuery(), pageViewMode())
   })
   const documentFindMatches = createMemo(() => findDocumentMatches(readerPage().contentMarkdown, documentFindQuery()))
-  const spaceSwitcherResults = createMemo(() => dataSource.searchSpaces(spaceSwitcherQuery()))
+  const spaceSwitcherResults = createMemo(() => {
+    spaceRevision()
+    return dataSource.searchSpaces(spaceSwitcherQuery())
+  })
   const commandPaletteResults = createMemo(() => searchPaletteCommands(commandsForContext(["main"]), commandPaletteQuery()))
   const stagedChanges = createMemo(() => {
     draftRevision()
@@ -259,6 +265,10 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     const status = credentialStatus()
     if (!status || status.kind === "ready") return null
     return status
+  })
+  const configuredSpaceKeys = createMemo(() => {
+    const status = credentialStatus()
+    return status?.kind === "ready" ? status.auth.config.atlassian.spaceKeys : []
   })
 
   onMount(() => {
@@ -703,12 +713,14 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     setNewPageOpen(false)
     setCommandPaletteOpen(false)
     setSpaceSwitcherOpen(true)
+    setRemoteSpacePickerOpen(false)
     setSpaceSwitcherQuery("")
     setSpaceSwitcherSelectedIndex(Math.max(0, dataSource.searchSpaces("").findIndex((result) => result.space.key === activeSpaceKey())))
   }
 
   const closeSpaceSwitcher = () => {
     setSpaceSwitcherOpen(false)
+    setRemoteSpacePickerOpen(false)
     setSpaceSwitcherQuery("")
     setSpaceSwitcherSelectedIndex(0)
   }
@@ -783,6 +795,10 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
   }
 
   const handleSpaceSwitcherInputKey = (key: SearchKeyLike) => {
+    if (key.name === "a" && !spaceSwitcherQuery()) {
+      setRemoteSpacePickerOpen(true)
+      return true
+    }
     const action = pageSearchKeyAction(key)
 
     if (action === "close") closeSpaceSwitcher()
@@ -1702,6 +1718,22 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
         height={Math.max(10, dimensions().height - 4)}
         onQueryChange={setSpaceSwitcherQuery}
         onKeyDown={handleSpaceSwitcherInputKey}
+        />
+      ) : <box height={0} />}
+      {remoteSpacePickerOpen() ? (
+        <RemoteSpacePicker
+          configuredSpaceKeys={configuredSpaceKeys()}
+          loadPage={dataSource.listRemoteSpacesPage}
+          saveSpaceKeys={async (spaceKeys) => {
+            for (const spaceKey of spaceKeys) await dataSource.configureAndSyncSpace(spaceKey)
+          }}
+          onClose={() => setRemoteSpacePickerOpen(false)}
+          onComplete={() => {
+            setRemoteSpacePickerOpen(false)
+            setSpaceSwitcherQuery("")
+            setSpaceSwitcherSelectedIndex(0)
+            setSpaceRevision((current) => current + 1)
+          }}
         />
       ) : <box height={0} />}
       {commandPaletteOpen() ? (
@@ -3386,11 +3418,12 @@ function SpaceSwitcherOverlay(props: { visible: boolean; query: string; results:
       zIndex={30}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.accent}><b>{nerdIcons.spaces} SWITCH SPACE</b></text>
+        <text height={1} fg={theme.accent}><b>{nerdIcons.spaces} SWITCH LOCAL SPACE</b></text>
         <text height={1} fg={theme.muted}>active: {props.activeSpaceKey}</text>
       </box>
       <SearchInput visible={props.visible} prefix="s" value={props.query} placeholder="type space key or name" onInput={props.onQueryChange} onKeyDown={props.onKeyDown} />
-      <text height={1} fg={theme.subtle}>{props.results.length} space{props.results.length === 1 ? "" : "s"}  type to filter  up/down move  enter switch  esc close</text>
+      <text height={1} fg={theme.subtle}>Enter switch local space  ·  a browse remote spaces  ·  Esc close</text>
+      <text height={1} fg={theme.subtle}>{props.results.length} local space{props.results.length === 1 ? "" : "s"}  type to filter  up/down move</text>
       <box height={1} />
       <Show when={props.results.length > 0} fallback={<EmptySpaceState query={props.query} />}>
         <scrollbox flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>

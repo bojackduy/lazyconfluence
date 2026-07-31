@@ -79,6 +79,8 @@ Find a space key:
 2. Look at the URL. Space URLs commonly include `/wiki/spaces/SPACEKEY/...`.
 3. Use the `SPACEKEY` value when `lazyconfluence init` asks for space keys.
 
+After opening the TUI, press `s` and then `a` to browse remote spaces your account can access.
+
 The API token uses your own Confluence permissions. If your account cannot read a page in Confluence, `lazyconfluence` cannot sync it either.
 
 ## First Sync
@@ -124,6 +126,8 @@ Sync configured spaces:
 lazyconfluence sync
 ```
 
+In the TUI space switcher, press `a` to browse remote spaces. The remote picker loads one API page at a time; use `Shift+L` to load another page, `/` to filter loaded spaces, `Space` to mark spaces, and `Enter` to configure and sync marked spaces before returning to the local switcher.
+
 Sync one space explicitly:
 
 ```bash
@@ -159,7 +163,7 @@ lazyconfluence search --all runbook
 - `/`: search pages in the active space.
 - `S`: search pages across all synced spaces.
 - `f`: find text in the current document.
-- `s`: switch spaces.
+- `s`: switch locally indexed spaces; press `a` in this picker to browse, configure, and sync remote spaces.
 - `p`, `;`, or `:`: open the command palette.
 - `r`: reload only the selected Confluence page.
 - `b` or `Esc`: return through local navigation history.

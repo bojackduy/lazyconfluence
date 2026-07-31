@@ -69,6 +69,18 @@ export function createLocalConfig(input: { siteUrl: string; email: string; space
   }
 }
 
+export function mergeConfiguredSpaceKeys(config: LocalConfig, spaceKeys: string[]): LocalConfig {
+  const merged = createLocalConfig({
+    siteUrl: config.atlassian.siteUrl,
+    email: config.atlassian.email,
+    spaceKeys: [...config.atlassian.spaceKeys, ...spaceKeys],
+    apiTokenEnv: config.atlassian.apiTokenEnv,
+  })
+
+  merged.atlassian.defaultSpaceKey = config.atlassian.defaultSpaceKey
+  return merged
+}
+
 export function parseSpaceKeys(value: string): string[] {
   return uniqueSpaceKeys(value.split(/[\s,]+/).map((part) => part.trim()).filter(Boolean))
 }
@@ -100,10 +112,16 @@ export async function saveLocalAuth(config: LocalConfig, apiToken: string, env: 
   if (!token) throw new Error("API token is required.")
 
   const paths = resolveConfigPaths(env)
-  await mkdir(paths.configDir, { recursive: true, mode: 0o700 })
-  await writeFile(paths.configFile, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 })
+  await saveLocalConfig(config, env)
   await writeFile(paths.credentialFile, credentialEnvContent(config.atlassian.apiTokenEnv, token), { mode: 0o600 })
 
+  return paths
+}
+
+export async function saveLocalConfig(config: LocalConfig, env: NodeJS.ProcessEnv = process.env): Promise<ConfigPaths> {
+  const paths = resolveConfigPaths(env)
+  await mkdir(paths.configDir, { recursive: true, mode: 0o700 })
+  await writeFile(paths.configFile, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 })
   return paths
 }
 

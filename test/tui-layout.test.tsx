@@ -20,7 +20,7 @@ describe("main TUI layout", () => {
 
     try {
       const output = await withProcessEnv(setup.env, async () => {
-        const rendered = await testRender(() => <App credentialStatus={readyStatus} />, { width: 120, height: 36 })
+        const rendered = await testRender(() => <App credentialStatus={readyStatus} disableTreeSitter />, { width: 120, height: 36 })
 
         await rendered.renderOnce()
 
@@ -196,7 +196,7 @@ describe("main TUI layout", () => {
 
     try {
       const output = await withProcessEnv(setup.env, async () => {
-        const rendered = await testRender(() => <App credentialStatus={readyStatus} />, { width: 120, height: 36 })
+        const rendered = await testRender(() => <App credentialStatus={readyStatus} disableTreeSitter />, { width: 120, height: 36 })
 
         await rendered.renderOnce()
 
@@ -218,7 +218,7 @@ describe("main TUI layout", () => {
 
     try {
       const output = await withProcessEnv(setup.env, async () => {
-        const rendered = await testRender(() => <App credentialStatus={readyStatus} />, { width: 120, height: 36 })
+        const rendered = await testRender(() => <App credentialStatus={readyStatus} disableTreeSitter />, { width: 120, height: 36 })
 
         await rendered.renderOnce()
 
@@ -886,7 +886,7 @@ describe("main TUI layout", () => {
 
     try {
       const output = await withProcessEnv(setup.env, async () => {
-        const rendered = await testRender(() => <App credentialStatus={readyStatus} />, { width: 120, height: 36 })
+        const rendered = await testRender(() => <App credentialStatus={readyStatus} disableTreeSitter />, { width: 120, height: 36 })
 
         await rendered.renderOnce()
 
@@ -914,7 +914,7 @@ describe("main TUI layout", () => {
       expect(repository.getPageDraft("local-home")).toMatchObject({ status: "draft", draftMarkdown: "# Local Engineering Home\n\nEdited from TUI.\n" })
 
       const output = await withProcessEnv(setup.env, async () => {
-        const rendered = await testRender(() => <App credentialStatus={readyStatus} dataSource={dataSource} />, { width: 120, height: 36 })
+        const rendered = await testRender(() => <App credentialStatus={readyStatus} dataSource={dataSource} disableTreeSitter />, { width: 120, height: 36 })
 
         try {
           await rendered.renderOnce()
@@ -1308,7 +1308,7 @@ describe("main TUI layout", () => {
       dataSource.savePageDraft("local-home", "# Local Engineering Home\n\nDraft preview from local editor.")
 
       const output = await withProcessEnv(setup.env, async () => {
-        const rendered = await testRender(() => <App credentialStatus={readyStatus} dataSource={dataSource} />, { width: 120, height: 36 })
+        const rendered = await testRender(() => <App credentialStatus={readyStatus} dataSource={dataSource} disableTreeSitter />, { width: 120, height: 36 })
 
         try {
           await rendered.renderOnce()

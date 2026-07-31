@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
-import { ATLASSIAN_API_TOKEN_URL, createLocalConfig, loadAtlassianAuth, loadConfiguredDefaultSpaceKey, loadCredentialStatus, normalizeAtlassianSiteUrl, parseSpaceKeys, saveLocalAuth } from "../src/config"
+import { ATLASSIAN_API_TOKEN_URL, createLocalConfig, loadAtlassianAuth, loadConfiguredDefaultSpaceKey, loadCredentialStatus, mergeConfiguredSpaceKeys, normalizeAtlassianSiteUrl, parseSpaceKeys, saveLocalAuth, saveLocalConfig } from "../src/config"
 
 describe("local auth config", () => {
   test("normalizes Atlassian site URLs", () => {
@@ -56,6 +56,28 @@ describe("local auth config", () => {
       const loaded = await loadAtlassianAuth({ ...env, ATLASSIAN_API_TOKEN: "env-token" })
 
       expect(loaded?.apiToken).toBe("env-token")
+    } finally {
+      await rm(configHome, { recursive: true, force: true })
+    }
+  })
+
+  test("merges configured spaces without rewriting credentials", async () => {
+    const configHome = await mkdtemp(join(tmpdir(), "lazyconfluence-config-"))
+    const env = { LAZYCONFLUENCE_CONFIG_HOME: configHome } as NodeJS.ProcessEnv
+
+    try {
+      const config = createLocalConfig({ siteUrl: "https://example.atlassian.net", email: "you@example.com", spaceKeys: ["ENG"] })
+      const paths = await saveLocalAuth(config, "secret-token", env)
+      const credentialsBefore = await readFile(paths.credentialFile, "utf8")
+
+      const merged = mergeConfiguredSpaceKeys(config, ["OPS", "ENG", "ARCH"])
+      await saveLocalConfig(merged, env)
+
+      expect((await loadAtlassianAuth(env))?.config.atlassian).toMatchObject({
+        spaceKeys: ["ENG", "OPS", "ARCH"],
+        defaultSpaceKey: "ENG",
+      })
+      expect(await readFile(paths.credentialFile, "utf8")).toBe(credentialsBefore)
     } finally {
       await rm(configHome, { recursive: true, force: true })
     }

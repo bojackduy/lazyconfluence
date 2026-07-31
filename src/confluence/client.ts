@@ -31,6 +31,11 @@ export interface ConfluenceSpace {
   homepageId?: string
 }
 
+export interface ConfluenceSpacePage {
+  spaces: ConfluenceSpace[]
+  nextPath: string | null
+}
+
 export interface ConfluencePage {
   id: string
   title: string
@@ -127,6 +132,15 @@ export class ConfluenceClient {
     if (missingKeys.length) throw new ConfluenceClientError(`Confluence space key(s) not found: ${missingKeys.join(", ")}`)
 
     return spaces
+  }
+
+  async listSpacesPage(options: { nextPath?: string | null; limit?: number } = {}): Promise<ConfluenceSpacePage> {
+    const payload = await this.requestJson(options.nextPath ?? "/api/v2/spaces", options.nextPath ? {} : { limit: options.limit ?? 50 })
+
+    return {
+      spaces: readResults(payload).map(spaceFromPayload),
+      nextPath: readNextPath(payload),
+    }
   }
 
   async validateConnection() {

@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto"
 import { applyPageCreateToConfluence, applyPageDeleteToConfluence, applyPageDraftToConfluence, type ApplyPageDraftResult } from "../apply"
-import { loadConfiguredDefaultSpaceKey } from "../config"
-import type { FetchLike } from "../confluence/client"
+import { loadAtlassianAuth, loadConfiguredDefaultSpaceKey, mergeConfiguredSpaceKeys, saveLocalConfig } from "../config"
+import { ConfluenceClient, type ConfluenceSpacePage, type FetchLike } from "../confluence/client"
 import { formatMarkdownDiff, readEditableDraftInput, savePageDraft, type EditableDraftInput } from "../editing"
 import { openIndexRepository, type IndexRepository, type PageBodyArtifact, type PageCreate, type PageDelete, type PageDraft, type PageDraftStatus } from "../index/repository"
 import { compareSearchResults, pageUrlKey, scorePageSearchResult } from "../index/search"
-import { reloadConfluencePage } from "../sync"
+import { reloadConfluencePage, syncConfluence } from "../sync"
 import { getDefaultPageId as getDefaultMockPageId, getPagesForSpace as getMockPagesForSpace, getReaderPage as getMockReaderPage, mockPages, mockSpaces, searchPagesInSpace as searchMockPagesInSpace, searchSpaces as searchMockSpaces } from "../mock-data"
 import type { IndexedPage, PageViewMode, ReaderPage, SearchResult, SpaceSearchResult, SpaceSummary } from "../model"
 
@@ -21,6 +21,7 @@ export interface TuiDataSource {
   discardStagedChanges: (changeKeys: string[]) => number
   formatPageDraftDiff: (pageId: string, draftMarkdown: string) => string
   getDefaultSpaceKey: () => string | null
+  listRemoteSpacesPage: (nextPath?: string | null) => Promise<ConfluenceSpacePage>
   getDefaultPageId: (spaceKey?: string, view?: PageViewMode) => string | null
   getEditableDraftInput: (pageId: string) => EditableDraftInput
   getEditablePageInput: (pageId: string) => TuiEditablePageInput
@@ -33,6 +34,7 @@ export interface TuiDataSource {
   listStagedChanges: (spaceKey: string) => TuiStagedChange[]
   listSpaces: () => SpaceSummary[]
   reloadPage: (pageId: string) => Promise<ReloadTuiPageResult>
+  configureAndSyncSpace: (spaceKey: string) => Promise<void>
   savePageDraft: (pageId: string, draftMarkdown: string) => SaveTuiPageDraftResult
   searchPagesAcrossSpaces: (query: string, view?: PageViewMode) => SearchResult[]
   searchPagesInSpace: (spaceKey: string, query: string, view?: PageViewMode) => SearchResult[]
@@ -205,6 +207,10 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
         .filter((change): change is TuiDeleteChange => change !== null && change.page.spaceKey === spaceKey),
     ].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.title.localeCompare(right.title)),
     listSpaces: () => repository.listSpaces(),
+    listRemoteSpacesPage: async (nextPath) => {
+      const auth = await requiredRemoteAuth(options.env)
+      return new ConfluenceClient({ siteUrl: auth.config.atlassian.siteUrl, email: auth.config.atlassian.email, apiToken: auth.apiToken, fetch: options.fetch }).listSpacesPage({ nextPath })
+    },
     reloadPage: async (pageId) => {
       const page = repository.getPage(pageId)
       if (!page) throw new Error(`Page ${pageId} is not in the local index.`)
@@ -212,6 +218,12 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
 
       const result = await reloadConfluencePage(pageId, { repository, env: options.env, fetch: options.fetch, now })
       return { status: "reloaded", pageTitle: result.page.title }
+    },
+    configureAndSyncSpace: async (spaceKey) => {
+      const auth = await requiredRemoteAuth(options.env)
+      await saveLocalConfig(mergeConfiguredSpaceKeys(auth.config, [spaceKey]), options.env)
+      const report = await syncConfluence({ spaceKeys: [spaceKey], fetch: options.fetch, now })
+      if (report.spacesSynced !== 1) throw new Error(`Unable to sync ${spaceKey}: ${report.failures.map((failure) => failure.message).join("; ") || "unknown sync failure"}`)
     },
     savePageDraft: (pageId, draftMarkdown) => saveTuiPageDraft(repository, pageId, draftMarkdown, now),
     searchPagesAcrossSpaces: (query, view = "current") => searchPagesAcrossSpacesWithCreates(repository, query, 20, view),
@@ -298,6 +310,13 @@ export function createRepositoryTuiDataSource(repository: IndexRepository = open
 
 export const createProdTuiSource = createRepositoryTuiDataSource
 
+async function requiredRemoteAuth(env?: NodeJS.ProcessEnv) {
+  const auth = await loadAtlassianAuth(env)
+  if (!auth) throw new Error("Remote space browsing requires local credentials. Run lazyconfluence init first.")
+  if (!auth.apiToken) throw new Error(`Remote space browsing requires ${auth.config.atlassian.apiTokenEnv}.`)
+  return { ...auth, apiToken: auth.apiToken }
+}
+
 export function createMockTuiDataSource(): TuiDataSource {
   return {
     applyPageDraft: async (pageId) => demoBlockedResult(pageId),
@@ -326,7 +345,13 @@ export function createMockTuiDataSource(): TuiDataSource {
     listStagedDraftChanges: () => [],
     listStagedChanges: () => [],
     listSpaces: () => mockSpaces,
+    listRemoteSpacesPage: async () => {
+      throw demoReadOnlyError()
+    },
     reloadPage: async (pageId) => ({ status: "blocked", pageTitle: mockPageTitle(pageId), reason: "demo-mode" }),
+    configureAndSyncSpace: async () => {
+      throw demoReadOnlyError()
+    },
     savePageDraft: (pageId) => ({ status: "unchanged", pageTitle: mockPageTitle(pageId) }),
     searchPagesAcrossSpaces: (query, view = "current") => view === "archived" ? [] : mockPages.map((page) => scorePageSearchResult(page, query)).filter((result): result is SearchResult => result !== null).sort(compareSearchResults),
     searchPagesInSpace: (spaceKey, query, view = "current") => view === "archived" ? [] : searchMockPagesInSpace(spaceKey, query),

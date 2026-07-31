@@ -38,6 +38,37 @@ describe("Confluence client", () => {
     expect(spaces[0]?.homepageId).toBe("100")
   })
 
+  test("lists one remote space page at a time", async () => {
+    const calls: string[] = []
+    const client = new ConfluenceClient({
+      siteUrl: "https://example.atlassian.net",
+      email: "reader@example.com",
+      apiToken: "token",
+      fetch: jsonFetch(calls, {
+        "/wiki/api/v2/spaces?limit=2": {
+          results: [{ id: "10", key: "ENG", name: "Engineering" }],
+          _links: { next: "/wiki/api/v2/spaces?cursor=next" },
+        },
+        "/wiki/api/v2/spaces?cursor=next": {
+          results: [{ id: "20", key: "OPS", name: "Operations" }],
+          _links: {},
+        },
+      }),
+    })
+
+    const first = await client.listSpacesPage({ limit: 2 })
+    const second = await client.listSpacesPage({ nextPath: first.nextPath })
+
+    expect(first.spaces.map((space) => space.key)).toEqual(["ENG"])
+    expect(first.nextPath).toBe("/wiki/api/v2/spaces?cursor=next")
+    expect(second.spaces.map((space) => space.key)).toEqual(["OPS"])
+    expect(second.nextPath).toBeNull()
+    expect(calls).toEqual([
+      "https://example.atlassian.net/wiki/api/v2/spaces?limit=2",
+      "https://example.atlassian.net/wiki/api/v2/spaces?cursor=next",
+    ])
+  })
+
   test("fetches pages by space with pagination", async () => {
     const calls: string[] = []
     const client = new ConfluenceClient({

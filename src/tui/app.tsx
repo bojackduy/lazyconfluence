@@ -11,7 +11,6 @@ import {
   TextAttributes,
   TextRenderable,
   type TextareaRenderable,
-  destroyTreeSitterClient,
   getTreeSitterClient,
   infoStringToFiletype,
   type MarkdownOptions,
@@ -361,7 +360,6 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
 
     onCleanup(() => {
       cancelled = true
-      void destroyTreeSitterClient()
     })
   })
 
@@ -1599,7 +1597,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
         <Reader page={readerPage()} focused={focusPane() === "document"} focusedSideRailPanel={focusPane() === "outline" ? "outline" : focusPane() === "related" ? "related" : null} sideRailSelectedIndex={sideRailSelectedIndex()} outlineItems={outlineNavigationItems()} relatedItems={relatedNavigationItems()} narrow={isNarrow()} treeSitterClient={treeSitterClient()} imageRenderMode={inlineImageRenderMode()} setDocumentScrollbox={(scrollbox) => { documentScrollbox = scrollbox }} setImageRenderable={setReaderImageRenderable} />
       </box>
       <StatusBar focusPane={focusPane()} editorOpen={editorOpen()} editorDirty={editorDirty()} editMessage={editStatusMessage()} reloading={pageReloading()} hasStagedChanges={stagedChanges().length > 0} width={dimensions().width} />
-      <Show when={editorOpen()} fallback={<box height={0} />}>
+      {editorOpen() ? (
         <EditorOverlay
           pageTitle={editorPageTitle()}
           pageId={editorPageId() ?? ""}
@@ -1614,9 +1612,10 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
           height={Math.max(10, dimensions().height - 4)}
           onMarkdownChange={setEditorMarkdownFromTextarea}
         />
-      </Show>
-      <StagedChangesOverlay
-        visible={changesOpen()}
+      ) : <box height={0} />}
+      {changesOpen() ? (
+        <StagedChangesOverlay
+        visible
         activeSpaceName={space().name}
         changes={stagedChanges()}
         selectedIndex={changesSelectedIndex()}
@@ -1631,16 +1630,20 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
         onApply={applySelectedChanges}
         onDiscard={discardSelectedChanges}
         onClose={closeChanges}
-      />
-      <NewPageOverlay
-        visible={newPageOpen()}
+        />
+      ) : <box height={0} />}
+      {newPageOpen() ? (
+        <NewPageOverlay
+        visible
         title={newPageTitle()}
         parentPage={newPageParentPage()}
         left={dimensions().width < 72 ? 2 : 8}
         width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 4 : 16))}
-      />
-      <PageSearchOverlay
-        visible={pageSearchOpen()}
+        />
+      ) : <box height={0} />}
+      {pageSearchOpen() ? (
+        <PageSearchOverlay
+        visible
         query={pageSearchQuery()}
         results={pageSearchResults()}
         selectedIndex={pageSearchSelectedIndex()}
@@ -1653,9 +1656,11 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
         height={Math.max(10, dimensions().height - 4)}
         onQueryChange={setPageSearchQuery}
         onKeyDown={handlePageSearchInputKey}
-      />
-      <PageSearchOverlay
-        visible={allSpaceSearchOpen()}
+        />
+      ) : <box height={0} />}
+      {allSpaceSearchOpen() ? (
+        <PageSearchOverlay
+        visible
         query={allSpaceSearchQuery()}
         results={allSpaceSearchResults()}
         selectedIndex={allSpaceSearchSelectedIndex()}
@@ -1668,9 +1673,11 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
         height={Math.max(10, dimensions().height - 4)}
         onQueryChange={setAllSpaceSearchQuery}
         onKeyDown={handleAllSpaceSearchInputKey}
-      />
-      <DocumentFindOverlay
-        visible={documentFindOpen()}
+        />
+      ) : <box height={0} />}
+      {documentFindOpen() ? (
+        <DocumentFindOverlay
+        visible
         query={documentFindQuery()}
         matches={documentFindMatches()}
         selectedIndex={documentFindSelectedIndex()}
@@ -1680,9 +1687,11 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
         height={Math.min(18, Math.max(10, dimensions().height - 8))}
         onQueryChange={updateDocumentFindQuery}
         onKeyDown={handleDocumentFindInputKey}
-      />
-      <SpaceSwitcherOverlay
-        visible={spaceSwitcherOpen()}
+        />
+      ) : <box height={0} />}
+      {spaceSwitcherOpen() ? (
+        <SpaceSwitcherOverlay
+        visible
         query={spaceSwitcherQuery()}
         results={spaceSwitcherResults()}
         selectedIndex={spaceSwitcherSelectedIndex()}
@@ -1693,9 +1702,11 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
         height={Math.max(10, dimensions().height - 4)}
         onQueryChange={setSpaceSwitcherQuery}
         onKeyDown={handleSpaceSwitcherInputKey}
-      />
-      <CommandPaletteOverlay
-        visible={commandPaletteOpen()}
+        />
+      ) : <box height={0} />}
+      {commandPaletteOpen() ? (
+        <CommandPaletteOverlay
+        visible
         query={commandPaletteQuery()}
         commands={commandPaletteResults()}
         selectedIndex={commandPaletteSelectedIndex()}
@@ -1708,17 +1719,20 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
           setCommandPaletteSelectedIndex(0)
         }}
         onKeyDown={handleCommandPaletteInputKey}
-      />
-      <HelpOverlay
-        visible={helpOpen()}
+        />
+      ) : <box height={0} />}
+      {helpOpen() ? (
+        <HelpOverlay
+        visible
         commands={helpCommands}
         left={dimensions().width < 72 ? 1 : 4}
         top={2}
         width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 2 : 8))}
         height={Math.max(10, dimensions().height - 4)}
         setScrollbox={(scrollbox) => { helpScrollbox = scrollbox }}
-      />
-      <Show when={imageViewerOpen()} fallback={<box height={0} />}>
+        />
+      ) : <box height={0} />}
+      {imageViewerOpen() ? (
         <ImageViewerOverlay
           visible
           pageTitle={readerPage().title}
@@ -1732,7 +1746,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
           cellPixels={terminalCellPixels()}
           onClose={closeImageViewer}
         />
-      </Show>
+      ) : <box height={0} />}
     </box>
   )
 }
@@ -1869,7 +1883,7 @@ function navigatorDocumentKind(row: TreeRow): NavigatorDocumentKind {
 
 function Reader(props: { page: ReaderPage; focused: boolean; focusedSideRailPanel: SideRailPanel | null; sideRailSelectedIndex: number; outlineItems: OutlineNavigationItem[]; relatedItems: RelatedNavigationItem[]; narrow: boolean; treeSitterClient?: TreeSitterClient; imageRenderMode: ImageRenderMode; setDocumentScrollbox: (scrollbox: ScrollBoxRenderable) => void; setImageRenderable: (nodeId: string, renderable: BoxRenderable) => void }) {
   const renderer = useRenderer()
-  const renderMarkdownNode = createReaderMarkdownNodeRenderer(renderer)
+  const renderMarkdownNode = createReaderMarkdownNodeRenderer(renderer, props.treeSitterClient)
   const contentParts = createMemo(() => splitReaderImagePlaceholders(props.page.contentMarkdown, props.page.mediaAssets ?? []))
 
   return (
@@ -2807,8 +2821,8 @@ function imageRenderModeLabel(mode: ImageRenderMode) {
   return "placeholder"
 }
 
-function createReaderMarkdownNodeRenderer(renderer: RenderContext): NonNullable<MarkdownOptions["renderNode"]> {
-  const renderCodeBlock = createReadableCodeBlockRenderer(renderer)
+function createReaderMarkdownNodeRenderer(renderer: RenderContext, treeSitterClient?: TreeSitterClient): NonNullable<MarkdownOptions["renderNode"]> {
+  const renderCodeBlock = createReadableCodeBlockRenderer(renderer, treeSitterClient)
 
   return (token, context) => {
     if (token.type === "code") return renderCodeBlock(token, context)
@@ -2827,7 +2841,7 @@ function createReaderMarkdownNodeRenderer(renderer: RenderContext): NonNullable<
   }
 }
 
-function createReadableCodeBlockRenderer(renderer: RenderContext): NonNullable<MarkdownOptions["renderNode"]> {
+function createReadableCodeBlockRenderer(renderer: RenderContext, treeSitterClient?: TreeSitterClient): NonNullable<MarkdownOptions["renderNode"]> {
   return (token, context) => {
     if (token.type !== "code") return undefined
 
@@ -2845,18 +2859,23 @@ function createReadableCodeBlockRenderer(renderer: RenderContext): NonNullable<M
     })
 
     card.add(new TextRenderable(renderer, { height: 1, width: "100%", content: language, fg: theme.subtle, attributes: TextAttributes.DIM }))
-    card.add(new CodeRenderable(renderer, {
+    const codeOptions = {
       content: token.text || " ",
-      filetype,
-      syntaxStyle: context.syntaxStyle,
       fg: theme.codeText,
       bg: theme.codeBg,
-      conceal: context.concealCode,
-      drawUnstyledText: true,
-      treeSitterClient: context.treeSitterClient,
-      width: "100%",
-      wrapMode: "word",
-    }))
+      width: "100%" as const,
+      wrapMode: "word" as const,
+    }
+    card.add(treeSitterClient
+      ? new CodeRenderable(renderer, {
+        ...codeOptions,
+        filetype,
+        syntaxStyle: context.syntaxStyle,
+        conceal: context.concealCode,
+        drawUnstyledText: true,
+        treeSitterClient,
+      })
+      : new TextRenderable(renderer, codeOptions))
 
     return card
   }
@@ -3686,8 +3705,8 @@ export function nextNavigatorSelectionForCollapse(row: NavigatorCollapseRow | un
 }
 
 export function documentHorizontalScrollDeltaForKey(key: SearchKeyLike): number {
-  if (key.name === "l" || key.name === "right") return documentHorizontalScrollColumns
-  if (key.name === "h" || key.name === "left") return -documentHorizontalScrollColumns
+  if (key.name === "right") return documentHorizontalScrollColumns
+  if (key.name === "left") return -documentHorizontalScrollColumns
   return 0
 }
 

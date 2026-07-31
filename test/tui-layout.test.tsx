@@ -1066,7 +1066,7 @@ describe("main TUI layout", () => {
   })
 
 
-  test("focus keys keep h/l document-local and cycle all panes", () => {
+  test("Tab and l cycle forward while Shift+Tab and h cycle backward", () => {
     expect(nextFocusPaneForKey("navigator", key("tab", "\t"))).toBe("document")
     expect(nextFocusPaneForKey("document", key("tab", "\t"))).toBe("outline")
     expect(nextFocusPaneForKey("outline", key("tab", "\t"))).toBe("related")
@@ -1113,10 +1113,10 @@ describe("main TUI layout", () => {
     expect(nextPageViewModeForKey("current", key("j", "j"))).toBeNull()
   })
 
-  test("document h/l keys scroll horizontally", () => {
-    expect(documentHorizontalScrollDeltaForKey(key("h", "h"))).toBe(-8)
+  test("document arrow keys scroll horizontally while h/l cycle panes", () => {
+    expect(documentHorizontalScrollDeltaForKey(key("h", "h"))).toBe(0)
     expect(documentHorizontalScrollDeltaForKey(key("left", "\x1B[D"))).toBe(-8)
-    expect(documentHorizontalScrollDeltaForKey(key("l", "l"))).toBe(8)
+    expect(documentHorizontalScrollDeltaForKey(key("l", "l"))).toBe(0)
     expect(documentHorizontalScrollDeltaForKey(key("right", "\x1B[C"))).toBe(8)
     expect(documentHorizontalScrollDeltaForKey(key("j", "j"))).toBe(0)
   })

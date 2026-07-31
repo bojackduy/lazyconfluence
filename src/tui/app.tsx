@@ -1869,7 +1869,7 @@ function navigatorDocumentKind(row: TreeRow): NavigatorDocumentKind {
 
 function Reader(props: { page: ReaderPage; focused: boolean; focusedSideRailPanel: SideRailPanel | null; sideRailSelectedIndex: number; outlineItems: OutlineNavigationItem[]; relatedItems: RelatedNavigationItem[]; narrow: boolean; treeSitterClient?: TreeSitterClient; imageRenderMode: ImageRenderMode; setDocumentScrollbox: (scrollbox: ScrollBoxRenderable) => void; setImageRenderable: (nodeId: string, renderable: BoxRenderable) => void }) {
   const renderer = useRenderer()
-  const renderCodeBlock = createReadableCodeBlockRenderer(renderer)
+  const renderMarkdownNode = createReaderMarkdownNodeRenderer(renderer)
   const contentParts = createMemo(() => splitReaderImagePlaceholders(props.page.contentMarkdown, props.page.mediaAssets ?? []))
 
   return (
@@ -1906,7 +1906,7 @@ function Reader(props: { page: ReaderPage; focused: boolean; focusedSideRailPane
                   conceal
                   concealCode={false}
                   treeSitterClient={props.treeSitterClient}
-                  renderNode={renderCodeBlock}
+                  renderNode={renderMarkdownNode}
                   tableOptions={{ style: "grid", widthMode: "full", columnFitter: "balanced", wrapMode: "word", cellPaddingX: 1, borderStyle: "rounded", borderColor: theme.codeBorder, selectable: true }}
                 />
               ) : <ImagePreviewCard part={part} narrow={props.narrow} renderMode={props.imageRenderMode} setRenderable={props.setImageRenderable} />}</For>
@@ -2805,6 +2805,26 @@ function imageRenderModeLabel(mode: ImageRenderMode) {
   if (mode === "cell-color") return "color cells"
   if (mode === "cell-mono") return "mono cells"
   return "placeholder"
+}
+
+function createReaderMarkdownNodeRenderer(renderer: RenderContext): NonNullable<MarkdownOptions["renderNode"]> {
+  const renderCodeBlock = createReadableCodeBlockRenderer(renderer)
+
+  return (token, context) => {
+    if (token.type === "code") return renderCodeBlock(token, context)
+    if (!["paragraph", "heading", "list", "blockquote", "table", "hr"].includes(token.type)) return undefined
+
+    const content = context.defaultRender()
+    if (!content) return content
+
+    const block = new BoxRenderable(renderer, {
+      width: "100%",
+      flexDirection: "column",
+      marginBottom: 1,
+    })
+    block.add(content)
+    return block
+  }
 }
 
 function createReadableCodeBlockRenderer(renderer: RenderContext): NonNullable<MarkdownOptions["renderNode"]> {

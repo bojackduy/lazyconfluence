@@ -126,7 +126,7 @@ export async function renderTui(options: RenderTuiOptions = {}) {
   })
 }
 
-export function App(props: { browserOpener?: (url: string) => BrowserOpenResult; credentialStatus?: CredentialStatus; dataSource?: TuiSource; disableTreeSitter?: boolean; initialPageViewMode?: PageViewMode; runtime?: TuiRuntime; runtimeLabel?: string } = {}) {
+export function App(props: { browserOpener?: (url: string) => BrowserOpenResult; credentialStatus?: CredentialStatus; dataSource?: TuiSource; disableTreeSitter?: boolean; initialDocumentFocusMode?: boolean; initialPageViewMode?: PageViewMode; runtime?: TuiRuntime; runtimeLabel?: string } = {}) {
   const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
   logInputDebug("tui_render_start", {
@@ -156,7 +156,9 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
   const [selectedPageId, setSelectedPageId] = createSignal(initialSelectedPageId)
   const [expandedPageIds, setExpandedPageIds] = createSignal(new Set(initialSelectedPageId === emptyPageId ? [] : [initialSelectedPageId]))
   const [navigationHistory, setNavigationHistory] = createSignal<NavigationLocation[]>([])
-  const [focusPane, setFocusPane] = createSignal<FocusPane>("navigator")
+  const [focusPane, setFocusPane] = createSignal<FocusPane>(props.initialDocumentFocusMode ? "document" : "navigator")
+  const [documentFocusMode, setDocumentFocusMode] = createSignal(Boolean(props.initialDocumentFocusMode))
+  const [focusPaneBeforeDocumentFocus, setFocusPaneBeforeDocumentFocus] = createSignal<FocusPane>("navigator")
   const [sideRailSelectedIndex, setSideRailSelectedIndex] = createSignal(0)
   const [pageSearchOpen, setPageSearchOpen] = createSignal(false)
   const [pageSearchQuery, setPageSearchQuery] = createSignal("")
@@ -782,6 +784,13 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     setThemePickerOpen(true)
   }
 
+  const toggleDocumentFocus = () => {
+    const next = nextDocumentFocusState({ enabled: documentFocusMode(), focusPane: focusPane(), previousFocusPane: focusPaneBeforeDocumentFocus() })
+    setDocumentFocusMode(next.enabled)
+    setFocusPane(next.focusPane)
+    setFocusPaneBeforeDocumentFocus(next.previousFocusPane)
+  }
+
   const closeThemePicker = (restore = true) => {
     if (restore) setActiveTheme(themePickerOriginal())
     setThemePickerOpen(false)
@@ -844,6 +853,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     else if (command.id === "open-browser") openSelectedPageInBrowser()
     else if (command.id === "report-bug") openBugReport()
     else if (command.id === "open-theme-picker") openThemePicker()
+    else if (command.id === "toggle-document-focus") toggleDocumentFocus()
     else if (command.id === "go-back") goBack()
     else if (command.id === "open-overview") openChanges()
     else if (command.id === "toggle-page-view") togglePageView()
@@ -1645,6 +1655,10 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
       openThemePicker()
       return
     }
+    if (command === "toggle-document-focus") {
+      toggleDocumentFocus()
+      return
+    }
 
     if (command === "go-back") {
       goBack()
@@ -1717,6 +1731,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     }
 
     if (command === "focus-next-pane" || command === "focus-previous-pane") {
+      if (documentFocusMode()) return
       setFocusPane(nextFocusPaneForKey(focusPane(), key))
       return
     }
@@ -1798,11 +1813,11 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.bg}>
       <Header page={readerPage()} spaceName={space().name} syncState={space().syncState} draftStatus={draftStatus()} stagedCount={stagedChanges().length} runtimeLabel={runtimeLabel} reloading={pageReloading()} onOpenOverview={() => openChanges()} onReportBug={openBugReport} />
       <Show when={credentialWarning()} fallback={<box height={0} />}>{(status) => <CredentialNotice status={status()} />}</Show>
-      <box flexGrow={1} minHeight={0} flexDirection={isNarrow() ? "column" : "row"} paddingX={1}>
-        <Navigator rows={treeRows()} selectedPageId={selectedPageId()} focused={focusPane() === "navigator"} viewMode={pageViewMode()} onSetViewMode={switchPageView} />
-        <Reader page={readerPage()} focused={focusPane() === "document"} focusedSideRailPanel={focusPane() === "outline" ? "outline" : focusPane() === "related" ? "related" : null} sideRailSelectedIndex={sideRailSelectedIndex()} outlineItems={outlineNavigationItems()} relatedItems={relatedNavigationItems()} narrow={isNarrow()} treeSitterClient={treeSitterClient()} imageRenderMode={inlineImageRenderMode()} setDocumentScrollbox={(scrollbox) => { documentScrollbox = scrollbox }} setImageRenderable={setReaderImageRenderable} />
+      <box flexGrow={1} minHeight={0} flexDirection={isNarrow() && !documentFocusMode() ? "column" : "row"} paddingX={1}>
+        <Show when={!documentFocusMode()} fallback={<box width={0} />}><Navigator rows={treeRows()} selectedPageId={selectedPageId()} focused={focusPane() === "navigator"} viewMode={pageViewMode()} onSetViewMode={switchPageView} /></Show>
+        <Reader page={readerPage()} focused={focusPane() === "document"} focusMode={documentFocusMode()} focusedSideRailPanel={focusPane() === "outline" ? "outline" : focusPane() === "related" ? "related" : null} sideRailSelectedIndex={sideRailSelectedIndex()} outlineItems={outlineNavigationItems()} relatedItems={relatedNavigationItems()} narrow={isNarrow() && !documentFocusMode()} treeSitterClient={treeSitterClient()} imageRenderMode={inlineImageRenderMode()} setDocumentScrollbox={(scrollbox) => { documentScrollbox = scrollbox }} setImageRenderable={setReaderImageRenderable} />
       </box>
-      <StatusBar focusPane={focusPane()} editorOpen={editorOpen()} editorDirty={editorDirty()} editMessage={editStatusMessage()} reloading={pageReloading()} hasStagedChanges={stagedChanges().length > 0} width={dimensions().width} />
+      <StatusBar focusPane={focusPane()} documentFocusMode={documentFocusMode()} editorOpen={editorOpen()} editorDirty={editorDirty()} editMessage={editStatusMessage()} reloading={pageReloading()} hasStagedChanges={stagedChanges().length > 0} width={dimensions().width} />
       {editorOpen() ? (
         <EditorOverlay
           pageTitle={editorPageTitle()}
@@ -2107,7 +2122,7 @@ function navigatorDocumentKind(row: TreeRow): NavigatorDocumentKind {
   return "page"
 }
 
-function Reader(props: { page: ReaderPage; focused: boolean; focusedSideRailPanel: SideRailPanel | null; sideRailSelectedIndex: number; outlineItems: OutlineNavigationItem[]; relatedItems: RelatedNavigationItem[]; narrow: boolean; treeSitterClient?: TreeSitterClient; imageRenderMode: ImageRenderMode; setDocumentScrollbox: (scrollbox: ScrollBoxRenderable) => void; setImageRenderable: (nodeId: string, renderable: BoxRenderable) => void }) {
+function Reader(props: { page: ReaderPage; focused: boolean; focusMode: boolean; focusedSideRailPanel: SideRailPanel | null; sideRailSelectedIndex: number; outlineItems: OutlineNavigationItem[]; relatedItems: RelatedNavigationItem[]; narrow: boolean; treeSitterClient?: TreeSitterClient; imageRenderMode: ImageRenderMode; setDocumentScrollbox: (scrollbox: ScrollBoxRenderable) => void; setImageRenderable: (nodeId: string, renderable: BoxRenderable) => void }) {
   const renderer = useRenderer()
   const renderMarkdownNode = createReaderMarkdownNodeRenderer(renderer, props.treeSitterClient)
   const contentParts = createMemo(() => splitReaderImagePlaceholders(props.page.contentMarkdown, props.page.mediaAssets ?? []))
@@ -2116,7 +2131,7 @@ function Reader(props: { page: ReaderPage; focused: boolean; focusedSideRailPane
     <box
       flexGrow={1}
       minWidth={0}
-      marginLeft={props.narrow ? 0 : 1}
+      marginLeft={props.narrow || props.focusMode ? 0 : 1}
       height="100%"
       border
       borderStyle="rounded"
@@ -2128,7 +2143,10 @@ function Reader(props: { page: ReaderPage; focused: boolean; focusedSideRailPane
     >
       <box flexDirection={props.narrow ? "column" : "row"} flexGrow={1} minHeight={0}>
         <box flexGrow={1} minWidth={0} height="100%" flexDirection="column">
-          <text height={1} fg={props.focused ? theme.accent : theme.muted}><b>DOCUMENT</b></text>
+          <box height={1} width="100%" flexDirection="row" justifyContent="space-between">
+            <text height={1} fg={props.focused ? theme.accent : theme.muted}><b>DOCUMENT</b></text>
+            <Show when={props.focusMode} fallback={<box width={0} />}><text height={1} fg={theme.accent}><b>FOCUS</b> · z restore panes</text></Show>
+          </box>
           <text height={1} fg={theme.subtle}>{props.page.snippet}</text>
           <Show when={isArchivedPage(props.page)} fallback={<box height={0} />}>
             <text height={1} fg={theme.warn}>Archived in Confluence · read-only</text>
@@ -2153,7 +2171,7 @@ function Reader(props: { page: ReaderPage; focused: boolean; focusedSideRailPane
             </box>
           </scrollbox>
         </box>
-        <SideRail narrow={props.narrow} focusedPanel={props.focusedSideRailPanel} selectedIndex={props.sideRailSelectedIndex} outlineItems={props.outlineItems} relatedItems={props.relatedItems} />
+        <Show when={!props.focusMode} fallback={<box width={0} />}><SideRail narrow={props.narrow} focusedPanel={props.focusedSideRailPanel} selectedIndex={props.sideRailSelectedIndex} outlineItems={props.outlineItems} relatedItems={props.relatedItems} /></Show>
       </box>
     </box>
   )
@@ -3161,13 +3179,13 @@ function sideRailRowId(panel: SideRailPanel, index: number) {
   return `side-rail-${panel}-${index}`
 }
 
-export function StatusBar(props: { focusPane: string; editorOpen: boolean; editorDirty: boolean; editMessage: string; reloading: boolean; hasStagedChanges: boolean; width: number }) {
+export function StatusBar(props: { focusPane: string; documentFocusMode?: boolean; editorOpen: boolean; editorDirty: boolean; editMessage: string; reloading: boolean; hasStagedChanges: boolean; width: number }) {
   const status = () => {
     if (props.editorOpen) return props.editMessage || `editing transient buffer: ${props.editorDirty ? "modified" : "unchanged"}`
     if (props.reloading) return props.editMessage || "Reloading current page from Confluence..."
-    return props.editMessage ? props.editMessage : `focus: ${props.focusPane}`
+    return props.editMessage ? props.editMessage : props.documentFocusMode ? "FOCUS · document-only reader" : `focus: ${props.focusPane}`
   }
-  const hints = () => statusBarHints(props.focusPane, props.editorOpen, props.width, status().length, props.hasStagedChanges && !props.editMessage && !props.reloading)
+  const hints = () => statusBarHints(props.focusPane, props.editorOpen, props.width, status().length, props.hasStagedChanges && !props.editMessage && !props.reloading, props.documentFocusMode)
 
   return (
     <box height={1} backgroundColor={theme.accentSoft} paddingX={1} flexDirection="row" justifyContent="space-between">
@@ -3181,8 +3199,15 @@ export function StatusBar(props: { focusPane: string; editorOpen: boolean; edito
 
 type StatusHintItem = { key: string; label: string }
 
-export function statusBarHints(focusPane: string, editorOpen: boolean, width: number, statusWidth = 0, hasStagedChanges = false): StatusHintItem[] {
+export function statusBarHints(focusPane: string, editorOpen: boolean, width: number, statusWidth = 0, hasStagedChanges = false, documentFocusMode = false): StatusHintItem[] {
   if (editorOpen) return [{ key: "Ctrl+T", label: "stage" }, { key: "Esc", label: "close" }]
+  if (documentFocusMode) return hintsWithinWidth([
+    { key: "z", label: "restore panes" },
+    { key: "←/→", label: "wide content" },
+    { key: "j/k", label: "scroll" },
+    { key: "d/u", label: "page" },
+    { key: "?", label: "help" },
+  ], width - statusWidth - 3)
   if (width < 80) return [
     { key: "S", label: "all spaces" },
     { key: "Esc", label: "back" },
@@ -4009,6 +4034,11 @@ export function nextFocusPaneForKey(current: FocusPane, key: SearchKeyLike): Foc
   if (isPlainKey(key, "h")) return current === "navigator" ? "related" : current === "related" ? "outline" : current === "outline" ? "document" : "navigator"
   if (current === "navigator" && key.name === "return") return "document"
   return current
+}
+
+export function nextDocumentFocusState(current: { enabled: boolean; focusPane: FocusPane; previousFocusPane: FocusPane }) {
+  if (current.enabled) return { enabled: false, focusPane: current.previousFocusPane, previousFocusPane: current.previousFocusPane }
+  return { enabled: true, focusPane: "document" as const, previousFocusPane: current.focusPane }
 }
 
 export function nextPageViewModeForKey(current: PageViewMode, key: SearchKeyLike): PageViewMode | null {

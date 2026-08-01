@@ -19,6 +19,7 @@ describe("TUI command registry", () => {
       "activate",
       "open-browser",
       "open-theme-picker",
+      "toggle-document-focus",
       "refresh",
       "move-left",
       "move-down",
@@ -52,6 +53,8 @@ describe("context-aware key resolution", () => {
     expect(resolveKeyCommand(key("o"), "navigator")).toBe("open-browser")
     expect(resolveKeyCommand(key("B"), "navigator")).toBe("report-bug")
     expect(resolveKeyCommand(key("T"), "navigator")).toBe("open-theme-picker")
+    expect(resolveKeyCommand(key("z"), "navigator")).toBe("toggle-document-focus")
+    expect(resolveKeyCommand(key("z"), "document")).toBe("toggle-document-focus")
     expect(resolveKeyCommand(key("r"), "navigator")).toBe("refresh")
     expect(resolveKeyCommand(key("escape", "\u001b"), "document")).toBe("go-back")
     expect(resolveKeyCommand(key("b"), "document")).toBeNull()

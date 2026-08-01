@@ -13,6 +13,7 @@ export type CommandId =
   | "open-browser"
   | "report-bug"
   | "open-theme-picker"
+  | "toggle-document-focus"
   | "refresh"
   | "go-back"
   | "focus-next-pane"
@@ -65,6 +66,7 @@ export const tuiCommands: readonly TuiCommand[] = [
   command("open-browser", "Open in browser", "Open the selected Confluence page in your browser.", "o", "Global", ["main"], true),
   command("report-bug", "Report a bug", "Open a prefilled GitHub issue report.", "B", "Global", ["main"], true),
   command("open-theme-picker", "Choose theme", "Preview and select a local terminal theme.", "T", "Appearance", ["main"], true),
+  command("toggle-document-focus", "Document focus mode", "Hide or restore supporting panes for wide document content.", "z", "Reader", ["main", "navigator", "document", "outline", "related"], true),
   command("refresh", "Reload current page", "Fetch the selected page from Confluence without syncing other pages.", "r", "Reader", ["main", "navigator", "document", "outline", "related"], true),
   command("go-back", "Go back", "Return to the previous page in navigation history.", "Esc", "Navigation", ["main"], true),
   command("focus-next-pane", "Next pane", "Move focus between navigator, document, outline, and related links.", "Tab", "Navigation", ["main", "navigator", "document", "outline", "related"], true),

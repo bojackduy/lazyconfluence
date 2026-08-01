@@ -4,7 +4,7 @@ import { dirname, join } from "node:path"
 import { Writable } from "node:stream"
 import { describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
-import { App, CommandPaletteOverlay, DocumentFindOverlay, Header, HelpOverlay, ImageViewerOverlay, NewPageOverlay, PageSearchOverlay, StagedChangesOverlay, StatusBar, documentHorizontalScrollDeltaForKey, documentOutlineItems, findDocumentMatches, imageRenderModeForCapabilities, navigatorEnterAction, nearestImageIndexForViewport, nextDocumentFindIndex, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, parseTerminalCellPixels, relatedNavigationItemsForPage, searchPaletteCommands, statusBarHints, type SearchKeyLike } from "../src/tui/app"
+import { App, CommandPaletteOverlay, DocumentFindOverlay, Header, HelpOverlay, ImageViewerOverlay, NewPageOverlay, PageSearchOverlay, StagedChangesOverlay, StatusBar, documentHorizontalScrollDeltaForKey, documentOutlineItems, findDocumentMatches, imageRenderModeForCapabilities, navigatorEnterAction, nearestImageIndexForViewport, nextDocumentFindIndex, nextDocumentFocusState, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, parseTerminalCellPixels, relatedNavigationItemsForPage, searchPaletteCommands, statusBarHints, type SearchKeyLike } from "../src/tui/app"
 import { commandsForContext } from "../src/tui/commands"
 import { createLocalConfig } from "../src/config"
 import type { CredentialStatus } from "../src/config"
@@ -55,6 +55,40 @@ describe("main TUI layout", () => {
     } finally {
       await setup.cleanup()
     }
+  })
+
+  test("document focus mode renders only the reader and wide-content controls", async () => {
+    const setup = await createTuiTestSetup({ bodyArtifacts: [homeBody] })
+    const repository = openIndexRepository({ path: setup.dbPath })
+    const dataSource = createRepositoryTuiDataSource(repository)
+
+    try {
+      const rendered = await testRender(() => <App credentialStatus={readyStatus} dataSource={dataSource} disableTreeSitter initialDocumentFocusMode />, { width: 120, height: 36 })
+
+      try {
+        await rendered.renderOnce()
+        const focusFrame = rendered.captureCharFrame()
+
+        expect(focusFrame).toContain("DOCUMENT")
+        expect(focusFrame).toContain("FOCUS · z restore panes")
+        expect(focusFrame).not.toContain("NAVIGATOR")
+        expect(focusFrame).not.toContain("OUTLINE")
+        expect(focusFrame).not.toContain("RELATED")
+        expect(focusFrame).toContain("z restore panes")
+        expect(focusFrame).toContain("←/→ wide content")
+      } finally {
+        rendered.renderer.destroy()
+      }
+    } finally {
+      dataSource.close?.()
+      await setup.cleanup()
+    }
+  })
+
+  test("document focus transitions remember and restore the previous pane", () => {
+    const focused = nextDocumentFocusState({ enabled: false, focusPane: "related", previousFocusPane: "navigator" })
+    expect(focused).toEqual({ enabled: true, focusPane: "document", previousFocusPane: "related" })
+    expect(nextDocumentFocusState(focused)).toEqual({ enabled: false, focusPane: "related", previousFocusPane: "related" })
   })
 
   test("renders an explicit current-page reload state", async () => {
@@ -1119,6 +1153,10 @@ describe("main TUI layout", () => {
     expect(documentHorizontalScrollDeltaForKey(key("l", "l"))).toBe(0)
     expect(documentHorizontalScrollDeltaForKey(key("right", "\x1B[C"))).toBe(8)
     expect(documentHorizontalScrollDeltaForKey(key("j", "j"))).toBe(0)
+  })
+
+  test("focus-mode status hints prioritize restoring panes and wide-content scrolling", () => {
+    expect(statusBarHints("document", false, 120, 28, false, true).map((hint) => hint.key)).toEqual(["z", "←/→", "j/k", "d/u", "?"])
   })
 
   test("image viewer starts from nearest image to document viewport center", () => {

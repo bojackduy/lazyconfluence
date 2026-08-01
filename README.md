@@ -174,6 +174,7 @@ lazyconfluence search --all runbook
 - `o`: open the selected page in the browser.
 - `B`: open a prefilled GitHub bug report.
 - `T`: preview and choose an installed theme.
+- `z`: toggle document focus mode for wide tables and content; Left/Right scroll horizontally.
 - `e`: edit the selected current page locally.
 - `n` / `N`: stage a child / root page create.
 - `D`: stage deletion of a synced leaf page.

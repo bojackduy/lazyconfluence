@@ -122,6 +122,7 @@ Use lazy-family keyboard muscle memory only where it serves document browsing.
 - `l` drills into or follows the selected thing.
 - `b` goes back in navigation history.
 - `tab` moves to the next pane or mode.
+- `z` toggles document focus mode for wide content.
 - `esc` exits overlays, find, or search.
 
 ## First Useful Milestone
@@ -145,6 +146,8 @@ The first useful product milestone should let a user:
 - `HANDOFF.md` is a historical handoff; prefer `NEXT_STEPS.md` and `TASK_TRACKER.md` for current status.
 - `OPENTUI_REFERENCE.md` explains how future agents should use the `opentui` skill and OpenCode reference material.
 - `TASK_TRACKER.md` tracks task state and integration order.
+- `WIDE_CONTENT_PLAN.md` defines the phased reader strategy for wide tables and document blocks.
+- `WIDE_CONTENT_TASKS.md` tracks implementation of that strategy with checkboxes.
 - `subagents/*.md` are copy-pasteable task briefs for parallel agents.
 
 ## Read-Only References

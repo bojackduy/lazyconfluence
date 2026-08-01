@@ -28,6 +28,7 @@ import type { ConfluenceSpace } from "../confluence/client"
 import type { PageDraftStatus } from "../index/repository"
 import type { ApplyPageDraftResult } from "../apply"
 import { defaultRuntimeEnv, runtimeEnvFromLegacyDemo, type RuntimeEnv } from "../runtime/env"
+import { loadSelectedTheme, loadThemeCatalog, selectTheme, type AvailableTheme } from "../themes"
 import { popNavigationLocation, pushNavigationLocation, type NavigationLocation } from "./history"
 import { emptyPageId, emptyReaderPage, emptySpaceSummary } from "./data"
 import { commandForId, commandsForContext, type CommandContext, type TuiCommand } from "./commands"
@@ -39,7 +40,7 @@ import { splitReaderImagePlaceholders, type ReaderContentPart } from "./media"
 import { createTuiRuntime, type TuiRuntime } from "./runtime"
 import { sixelImageCommand } from "./sixel"
 import type { TuiSource, TuiStagedChange } from "./source"
-import { markdownStyle, theme } from "./theme"
+import { currentTheme, markdownStyle, setActiveTheme, theme } from "./theme"
 import { isPlainKey, isShiftTabKey, isTabKey, resolveKeyCommand, textInputKeyAction, type TextInputAction, type TuiKey } from "./keymap"
 
 type TreeRow = {
@@ -114,11 +115,13 @@ export interface RenderTuiOptions {
 
 export async function renderTui(options: RenderTuiOptions = {}) {
   const runtime = createTuiRuntime({ env: options.env ?? (options.demo === undefined ? defaultRuntimeEnv() : runtimeEnvFromLegacyDemo(options.demo)) })
+  const selectedTheme = await loadSelectedTheme()
+  setActiveTheme(selectedTheme.selected)
 
   render(() => <App runtime={runtime} />, {
     targetFps: 30,
     exitOnCtrlC: true,
-    backgroundColor: theme.bg,
+    backgroundColor: selectedTheme.selected.colors.bg,
     consoleMode: "disabled",
   })
 }
@@ -182,6 +185,11 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
   const [commandPaletteOpen, setCommandPaletteOpen] = createSignal(false)
   const [commandPaletteQuery, setCommandPaletteQuery] = createSignal("")
   const [commandPaletteSelectedIndex, setCommandPaletteSelectedIndex] = createSignal(0)
+  const [themePickerOpen, setThemePickerOpen] = createSignal(false)
+  const [availableThemes, setAvailableThemes] = createSignal<AvailableTheme[]>([])
+  const [themePickerSelectedIndex, setThemePickerSelectedIndex] = createSignal(0)
+  const [themePickerOriginal, setThemePickerOriginal] = createSignal(currentTheme())
+  const [themePickerMessage, setThemePickerMessage] = createSignal("")
   const [draftRevision, setDraftRevision] = createSignal(0)
   const [pageReloading, setPageReloading] = createSignal(false)
   const [editorOpen, setEditorOpen] = createSignal(false)
@@ -290,6 +298,18 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     onCleanup(() => {
       cancelled = true
     })
+  })
+
+  onMount(() => {
+    void loadThemeCatalog().then((catalog) => {
+      setAvailableThemes(catalog.themes)
+      setThemePickerSelectedIndex(Math.max(0, catalog.themes.findIndex((theme) => theme.id === currentTheme().id)))
+      if (catalog.errors.length) setThemePickerMessage(`Ignored ${catalog.errors.length} invalid local theme${catalog.errors.length === 1 ? "" : "s"}.`)
+    }).catch(() => setThemePickerMessage("Could not load local themes."))
+  })
+
+  createEffect(() => {
+    renderer.setBackgroundColor(currentTheme().colors.bg)
   })
 
   onMount(() => {
@@ -751,6 +771,43 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     setCommandPaletteOpen(true)
   }
 
+  const openThemePicker = () => {
+    setPageSearchOpen(false)
+    setAllSpaceSearchOpen(false)
+    setDocumentFindOpen(false)
+    setSpaceSwitcherOpen(false)
+    setCommandPaletteOpen(false)
+    setThemePickerOriginal(currentTheme())
+    setThemePickerSelectedIndex(Math.max(0, availableThemes().findIndex((theme) => theme.id === currentTheme().id)))
+    setThemePickerOpen(true)
+  }
+
+  const closeThemePicker = (restore = true) => {
+    if (restore) setActiveTheme(themePickerOriginal())
+    setThemePickerOpen(false)
+  }
+
+  const moveThemePickerSelection = (direction: number) => {
+    const themes = availableThemes()
+    if (!themes.length) return
+    const nextIndex = Math.max(0, Math.min(themes.length - 1, themePickerSelectedIndex() + direction))
+    setThemePickerSelectedIndex(nextIndex)
+    setActiveTheme(themes[nextIndex])
+  }
+
+  const applyThemePickerSelection = () => {
+    const selected = availableThemes()[themePickerSelectedIndex()]
+    if (!selected) return
+    void selectTheme(selected.id).then(() => {
+      setActiveTheme(selected)
+      setThemePickerOriginal(selected)
+      closeThemePicker(false)
+      setEditStatusMessage(`Theme changed to ${selected.name}.`)
+    }).catch((error) => {
+      setThemePickerMessage(error instanceof Error ? error.message : "Could not save theme selection.")
+    })
+  }
+
   const closeCommandPalette = () => {
     setCommandPaletteOpen(false)
     setCommandPaletteQuery("")
@@ -786,6 +843,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     else if (command.id === "open-space-switcher") openSpaceSwitcher()
     else if (command.id === "open-browser") openSelectedPageInBrowser()
     else if (command.id === "report-bug") openBugReport()
+    else if (command.id === "open-theme-picker") openThemePicker()
     else if (command.id === "go-back") goBack()
     else if (command.id === "open-overview") openChanges()
     else if (command.id === "toggle-page-view") togglePageView()
@@ -1485,6 +1543,16 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
       return
     }
 
+    if (themePickerOpen()) {
+      const command = resolveKeyCommand(key, "theme-picker")
+      logInputDebug("command_resolved", { route, command: command ?? "unmatched" })
+      if (command === "close-overlay") closeThemePicker()
+      else if (command === "move-down") moveThemePickerSelection(1)
+      else if (command === "move-up") moveThemePickerSelection(-1)
+      else if (command === "search-submit") applyThemePickerSelection()
+      return
+    }
+
     if (changesOpen()) {
       const command = resolveKeyCommand(key, "changes")
       logInputDebug("command_resolved", { route, command: command ?? "unmatched" })
@@ -1571,6 +1639,10 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     }
     if (command === "report-bug") {
       openBugReport()
+      return
+    }
+    if (command === "open-theme-picker") {
+      openThemePicker()
       return
     }
 
@@ -1864,6 +1936,18 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
         onKeyDown={handleCommandPaletteInputKey}
         />
       ) : <box height={0} />}
+      {themePickerOpen() ? (
+        <ThemePickerOverlay
+          visible
+          themes={availableThemes()}
+          selectedIndex={themePickerSelectedIndex()}
+          message={themePickerMessage()}
+          left={commandPaletteLeft()}
+          top={2}
+          width={commandPaletteWidth()}
+          height={Math.min(18, Math.max(10, dimensions().height - 8))}
+        />
+      ) : <box height={0} />}
       {helpOpen() ? (
         <HelpOverlay
         visible
@@ -1896,7 +1980,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
 
 function CredentialNotice(props: { status: CredentialWarning }) {
   return (
-    <box height={4} backgroundColor="#1f1607" paddingX={1} flexDirection="column">
+    <box height={4} backgroundColor={theme.warningBg} paddingX={1} flexDirection="column">
       <text height={1} fg={theme.warn}><b>{props.status.title}</b></text>
       <text height={1} fg={theme.text}>{props.status.detail}</text>
       <For each={props.status.help.slice(0, 2)}>{(item) => <text height={1} fg={theme.subtle}>{item}</text>}</For>
@@ -1985,7 +2069,7 @@ function NavigatorRow(props: { row: TreeRow; selected: boolean }) {
   const prefix = () => `${"  ".repeat(props.row.depth)}${indicator()} `
   const documentKind = () => navigatorDocumentKind(props.row)
   const symbol = () => navigatorDocumentKindSymbols[documentKind()]
-  const symbolColor = () => props.row.detached ? theme.warn : navigatorDocumentKindColors[documentKind()]
+  const symbolColor = () => props.row.detached ? theme.warn : navigatorDocumentKindColor(documentKind())
   const titleColor = () => props.selected ? theme.text : isArchivedPage(props.row.page) ? theme.subtle : props.row.detached ? theme.warn : theme.muted
   const title = () => isArchivedPage(props.row.page) ? `${props.row.page.title} [archived]` : props.row.page.title
 
@@ -2008,12 +2092,8 @@ const navigatorDocumentKindSymbols: Record<NavigatorDocumentKind, string> = {
   unknown: nerdIcons.unknown,
 }
 
-const navigatorDocumentKindColors: Record<NavigatorDocumentKind, string> = {
-  folder: theme.accent,
-  page: theme.muted,
-  live: theme.good,
-  canvas: "#c4b5fd",
-  unknown: theme.danger,
+function navigatorDocumentKindColor(kind: NavigatorDocumentKind) {
+  return ({ folder: theme.folder, page: theme.page, live: theme.live, canvas: theme.canvas, unknown: theme.danger })[kind]
 }
 
 function navigatorDocumentKind(row: TreeRow): NavigatorDocumentKind {
@@ -2059,7 +2139,7 @@ function Reader(props: { page: ReaderPage; focused: boolean; focusedSideRailPane
               <For each={contentParts()}>{(part) => part.kind === "markdown" ? (
                 <markdown
                   content={part.content}
-                  syntaxStyle={markdownStyle}
+                  syntaxStyle={markdownStyle()}
                   fg={theme.text}
                   bg={theme.panelAlt}
                   width="100%"
@@ -2090,8 +2170,8 @@ function ImagePreviewCard(props: { part: Extract<ReaderContentPart, { kind: "ima
   }
 
   return (
-    <box ref={(renderable: BoxRenderable) => props.setRenderable?.(props.part.nodeId, renderable)} width="100%" height={image() ? size().height + 5 : 6} border borderStyle="rounded" borderColor={image() ? theme.good : theme.border} backgroundColor={theme.panel} paddingX={1} marginBottom={1} flexDirection="column">
-      <text height={1} fg={image() ? theme.good : theme.warn}>{image() ? <b>IMAGE PREVIEW</b> : <b>IMAGE PLACEHOLDER</b>}</text>
+    <box ref={(renderable: BoxRenderable) => props.setRenderable?.(props.part.nodeId, renderable)} width="100%" height={image() ? size().height + 5 : 6} border borderStyle="rounded" borderColor={image() ? theme.imageReady : theme.border} backgroundColor={theme.panel} paddingX={1} marginBottom={1} flexDirection="column">
+      <text height={1} fg={image() ? theme.imageReady : theme.imageMissing}>{image() ? <b>IMAGE PREVIEW</b> : <b>IMAGE PLACEHOLDER</b>}</text>
       <text height={1} fg={theme.text}>{props.part.label}</text>
       <Show when={image()} fallback={<ImagePreviewFallback part={props.part} message={fallbackMessage()} />}>
         {(decoded) => (
@@ -2398,7 +2478,7 @@ export function ImageViewerOverlay(props: { visible: boolean; pageTitle: string;
       height={props.height}
       border
       borderStyle="rounded"
-      borderColor={image() ? theme.good : theme.warn}
+      borderColor={image() ? theme.imageReady : theme.imageMissing}
       backgroundColor={theme.bg}
       paddingX={2}
       paddingY={1}
@@ -2406,7 +2486,7 @@ export function ImageViewerOverlay(props: { visible: boolean; pageTitle: string;
       zIndex={80}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={image() ? theme.good : theme.warn}><b>IMAGE VIEWER</b></text>
+        <text height={1} fg={image() ? theme.imageReady : theme.imageMissing}><b>IMAGE VIEWER</b></text>
         <box height={1} width={8} onMouseDown={props.onClose}><text height={1} fg={theme.muted}>Close</text></box>
       </box>
       <text height={1} fg={theme.text}>{props.pageTitle}</text>
@@ -2595,7 +2675,9 @@ type ScaledImage = { width: number; height: number; rgba: Uint8Array }
 
 const scaledImageCache = new WeakMap<DecodedImage, Map<string, ScaledImage>>()
 const monoRamp = " .:-=+*#%@"
-const imagePreviewBackgroundInts = RGBA.fromHex(theme.bg).toInts()
+function imagePreviewBackgroundInts() {
+  return RGBA.fromHex(theme.bg).toInts()
+}
 
 function drawColorCellImage(buffer: OptimizedBuffer, image: DecodedImage) {
   const scaled = scaledImageForCells(image, buffer.width, buffer.height)
@@ -2879,11 +2961,12 @@ function resizeRgbaAverage(source: Uint8Array, sourceWidth: number, sourceHeight
 function pixelColor(image: ScaledImage, x: number, y: number) {
   const offset = (Math.min(image.height - 1, y) * image.width + x) * 4
   const alpha = image.rgba[offset + 3] / 255
+  const background = imagePreviewBackgroundInts()
 
   return RGBA.fromInts(
-    Math.round(image.rgba[offset] * alpha + imagePreviewBackgroundInts[0] * (1 - alpha)),
-    Math.round(image.rgba[offset + 1] * alpha + imagePreviewBackgroundInts[1] * (1 - alpha)),
-    Math.round(image.rgba[offset + 2] * alpha + imagePreviewBackgroundInts[2] * (1 - alpha)),
+    Math.round(image.rgba[offset] * alpha + background[0] * (1 - alpha)),
+    Math.round(image.rgba[offset + 1] * alpha + background[1] * (1 - alpha)),
+    Math.round(image.rgba[offset + 2] * alpha + background[2] * (1 - alpha)),
     255,
   )
 }
@@ -3256,7 +3339,7 @@ export function StagedChangesOverlay(props: {
       border
       borderStyle="rounded"
       borderColor={theme.warn}
-      backgroundColor="#07111f"
+      backgroundColor={theme.overlay}
       paddingX={1}
       paddingY={1}
       flexDirection="column"
@@ -3355,7 +3438,7 @@ export function NewPageOverlay(props: { visible: boolean; title: string; parentP
       border
       borderStyle="rounded"
       borderColor={theme.borderActive}
-      backgroundColor="#08111f"
+      backgroundColor={theme.overlay}
       paddingX={2}
       paddingY={1}
       flexDirection="column"
@@ -3392,7 +3475,7 @@ export function PageSearchOverlay(props: { visible: boolean; query: string; resu
       border
       borderStyle="rounded"
       borderColor={theme.borderActive}
-      backgroundColor="#08111f"
+      backgroundColor={theme.overlay}
       paddingX={2}
       paddingY={1}
       flexDirection="column"
@@ -3446,8 +3529,8 @@ function SearchInput(props: { visible: boolean; prefix: string; value: string; p
         ref={setInput}
         value={props.value}
         flexGrow={1}
-        backgroundColor="#08111f"
-        focusedBackgroundColor="#08111f"
+        backgroundColor={theme.overlayInput}
+        focusedBackgroundColor={theme.overlayInput}
         textColor={theme.text}
         focusedTextColor={theme.text}
         placeholder={props.placeholder}
@@ -3476,7 +3559,7 @@ export function DocumentFindOverlay(props: { visible: boolean; query: string; ma
       border
       borderStyle="rounded"
       borderColor={theme.borderActive}
-      backgroundColor="#08111f"
+      backgroundColor={theme.overlay}
       paddingX={2}
       paddingY={1}
       flexDirection="column"
@@ -3511,6 +3594,32 @@ function EmptyDocumentFindState(props: { query: string }) {
   )
 }
 
+export function ThemePickerOverlay(props: { visible: boolean; themes: AvailableTheme[]; selectedIndex: number; message: string; left: number; top: number; width: number; height: number }) {
+  return (
+    <box visible={props.visible} position="absolute" left={props.left} top={props.top} width={props.width} height={props.height} border borderStyle="rounded" borderColor={theme.borderActive} backgroundColor={theme.bg} paddingX={2} paddingY={1} flexDirection="column" zIndex={31}>
+      <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
+        <text height={1} fg={theme.accent}><b>CHOOSE THEME</b></text>
+        <text height={1} fg={theme.muted}>local files only</text>
+      </box>
+      <text height={1} fg={theme.subtle}>j/k preview  Enter save  Esc restore</text>
+      <Show when={props.message}><text height={1} fg={theme.warn}>{props.message}</text></Show>
+      <Show when={props.themes.length} fallback={<box flexGrow={1} alignItems="center" justifyContent="center"><text fg={theme.muted}>Loading local themes...</text></box>}>
+        <scrollbox flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
+          <For each={props.themes}>{(item, index) => (
+            <box height={2} width="100%" backgroundColor={index() === props.selectedIndex ? theme.accentSoft : undefined} paddingX={1} flexDirection="column">
+              <box height={1} width="100%" flexDirection="row" justifyContent="space-between">
+                <text height={1} fg={index() === props.selectedIndex ? theme.text : theme.muted}><b>{item.name}</b> ({item.id})</text>
+                <text height={1} fg={theme.subtle}>{item.source}</text>
+              </box>
+              <text height={1} fg={item.colors.accent}>accent {item.colors.accent}  background {item.colors.bg}</text>
+            </box>
+          )}</For>
+        </scrollbox>
+      </Show>
+    </box>
+  )
+}
+
 function SpacePickerOverlay(props: { visible: boolean; mode: "local" | "remote"; query: string; localResults: SpaceSearchResult[]; remoteResults: ConfluenceSpace[]; configuredSpaceKeys: string[]; markedRemoteSpaceKeys: Set<string>; remoteLoading: boolean; remoteSaving: boolean; remoteError: string; remoteHasMore: boolean; searching: boolean; selectedIndex: number; activeSpaceKey: string; left: number; top: number; width: number; height: number; onQueryChange: (query: string) => void; onKeyDown: (key: SearchKeyLike) => boolean }) {
   const localWindow = createMemo(() => searchResultWindow(props.localResults, props.selectedIndex, props.height))
   const remoteWindow = createMemo(() => remoteSpaceWindow(props.remoteResults, props.selectedIndex, props.height))
@@ -3527,7 +3636,7 @@ function SpacePickerOverlay(props: { visible: boolean; mode: "local" | "remote";
       border
       borderStyle="rounded"
       borderColor={theme.borderActive}
-      backgroundColor="#08111f"
+      backgroundColor={theme.overlay}
       paddingX={2}
       paddingY={1}
       flexDirection="column"
@@ -3605,7 +3714,7 @@ export function CommandPaletteOverlay(props: { visible: boolean; query: string; 
       border
       borderStyle="rounded"
       borderColor={theme.borderActive}
-      backgroundColor="#08111f"
+      backgroundColor={theme.overlay}
       paddingX={2}
       paddingY={1}
       flexDirection="column"
@@ -3658,7 +3767,7 @@ function EmptyCommandPaletteState(props: { query: string }) {
 }
 
 export function HelpOverlay(props: { visible: boolean; commands: readonly TuiCommand[]; left: number; top: number; width: number; height: number; setScrollbox?: (scrollbox: ScrollBoxRenderable) => void }) {
-  const groups = ["Global", "Navigation", "Reader", "Editing", "Images"] as const
+  const groups = ["Global", "Navigation", "Reader", "Appearance", "Editing", "Images"] as const
 
   return (
     <box
@@ -3671,7 +3780,7 @@ export function HelpOverlay(props: { visible: boolean; commands: readonly TuiCom
       border
       borderStyle="rounded"
       borderColor={theme.borderActive}
-      backgroundColor="#08111f"
+      backgroundColor={theme.overlay}
       paddingX={2}
       paddingY={1}
       flexDirection="column"
@@ -3709,7 +3818,7 @@ function HelpCommandRow(props: { command: TuiCommand }) {
   return (
     <box height={2} width="100%" flexDirection="column" paddingLeft={1}>
       <box height={1} flexDirection="row">
-        <text height={1} width={24} fg={props.command.available ? theme.good : theme.subtle}>{props.command.keys}</text>
+        <text height={1} width={24} fg={props.command.available ? theme.accent : theme.subtle}>{props.command.keys}</text>
         <text height={1} fg={color()}>{props.command.available ? <b>{props.command.label}</b> : props.command.label}</text>
       </box>
       <text height={1} paddingLeft={24} fg={props.command.available ? theme.subtle : theme.muted}>{detail()}</text>

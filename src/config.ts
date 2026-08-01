@@ -14,6 +14,9 @@ export interface LocalConfig {
     defaultSpaceKey: string
     apiTokenEnv: string
   }
+  ui?: {
+    themeId?: string
+  }
 }
 
 export interface LoadedAtlassianAuth {
@@ -49,7 +52,7 @@ export type CredentialStatus =
       paths: ConfigPaths
     }
 
-export function createLocalConfig(input: { siteUrl: string; email: string; spaceKeys: string[]; apiTokenEnv?: string }): LocalConfig {
+export function createLocalConfig(input: { siteUrl: string; email: string; spaceKeys: string[]; apiTokenEnv?: string; themeId?: string }): LocalConfig {
   const spaceKeys = uniqueSpaceKeys(input.spaceKeys)
 
   if (!spaceKeys.length) throw new Error("At least one Confluence space key is required.")
@@ -57,6 +60,7 @@ export function createLocalConfig(input: { siteUrl: string; email: string; space
   const email = input.email.trim()
   if (!email) throw new Error("Email is required.")
 
+  const themeId = input.themeId?.trim()
   return {
     version: 1,
     atlassian: {
@@ -66,6 +70,7 @@ export function createLocalConfig(input: { siteUrl: string; email: string; space
       defaultSpaceKey: spaceKeys[0],
       apiTokenEnv: input.apiTokenEnv?.trim() || DEFAULT_API_TOKEN_ENV,
     },
+    ...(themeId ? { ui: { themeId } } : {}),
   }
 }
 
@@ -75,10 +80,18 @@ export function mergeConfiguredSpaceKeys(config: LocalConfig, spaceKeys: string[
     email: config.atlassian.email,
     spaceKeys: [...config.atlassian.spaceKeys, ...spaceKeys],
     apiTokenEnv: config.atlassian.apiTokenEnv,
+    themeId: config.ui?.themeId,
   })
 
   merged.atlassian.defaultSpaceKey = config.atlassian.defaultSpaceKey
   return merged
+}
+
+export function withSelectedTheme(config: LocalConfig, themeId: string): LocalConfig {
+  return {
+    ...config,
+    ui: { themeId: themeId.trim() },
+  }
 }
 
 export function parseSpaceKeys(value: string): string[] {
@@ -155,6 +168,15 @@ export function loadConfiguredDefaultSpaceKey(env: NodeJS.ProcessEnv = process.e
   }
 }
 
+export function loadConfiguredThemeId(env: NodeJS.ProcessEnv = process.env): string | null {
+  try {
+    const configText = readFileSync(resolveConfigPaths(env).configFile, "utf8")
+    return parseLocalConfig(configText).ui?.themeId ?? null
+  } catch {
+    return null
+  }
+}
+
 export async function loadCredentialStatus(env: NodeJS.ProcessEnv = process.env): Promise<CredentialStatus> {
   const paths = resolveConfigPaths(env)
 
@@ -205,6 +227,7 @@ function parseLocalConfig(configText: string): LocalConfig {
     email: String(atlassian.email || ""),
     spaceKeys: atlassian.spaceKeys.map(String),
     apiTokenEnv: String(atlassian.apiTokenEnv || DEFAULT_API_TOKEN_ENV),
+    themeId: typeof value.ui?.themeId === "string" ? value.ui.themeId : undefined,
   })
   const defaultSpaceKey = String(atlassian.defaultSpaceKey || "").trim()
   if (config.atlassian.spaceKeys.includes(defaultSpaceKey)) config.atlassian.defaultSpaceKey = defaultSpaceKey

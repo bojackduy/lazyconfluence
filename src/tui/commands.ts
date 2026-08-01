@@ -1,6 +1,6 @@
-export type CommandContext = "main" | "navigator" | "document" | "outline" | "related" | "page-search" | "document-find" | "space-switcher" | "command-palette" | "new-page" | "editor" | "changes" | "image-viewer" | "help"
+export type CommandContext = "main" | "navigator" | "document" | "outline" | "related" | "page-search" | "document-find" | "space-switcher" | "command-palette" | "theme-picker" | "new-page" | "editor" | "changes" | "image-viewer" | "help"
 
-export type CommandGroup = "Global" | "Navigation" | "Reader" | "Editing" | "Images"
+export type CommandGroup = "Global" | "Navigation" | "Reader" | "Appearance" | "Editing" | "Images"
 
 export type CommandId =
   | "quit"
@@ -12,6 +12,7 @@ export type CommandId =
   | "open-space-switcher"
   | "open-browser"
   | "report-bug"
+  | "open-theme-picker"
   | "refresh"
   | "go-back"
   | "focus-next-pane"
@@ -63,6 +64,7 @@ export const tuiCommands: readonly TuiCommand[] = [
   command("open-space-switcher", "Switch space", "Choose another locally indexed space.", "s", "Global", ["main"], true),
   command("open-browser", "Open in browser", "Open the selected Confluence page in your browser.", "o", "Global", ["main"], true),
   command("report-bug", "Report a bug", "Open a prefilled GitHub issue report.", "B", "Global", ["main"], true),
+  command("open-theme-picker", "Choose theme", "Preview and select a local terminal theme.", "T", "Appearance", ["main"], true),
   command("refresh", "Reload current page", "Fetch the selected page from Confluence without syncing other pages.", "r", "Reader", ["main", "navigator", "document", "outline", "related"], true),
   command("go-back", "Go back", "Return to the previous page in navigation history.", "Esc", "Navigation", ["main"], true),
   command("focus-next-pane", "Next pane", "Move focus between navigator, document, outline, and related links.", "Tab", "Navigation", ["main", "navigator", "document", "outline", "related"], true),
@@ -81,7 +83,7 @@ export const tuiCommands: readonly TuiCommand[] = [
   command("stage-delete", "Delete page", "Stage deletion of the selected leaf page.", "D", "Editing", ["main"], true),
   command("page-down", "Half page down", "Scroll by one viewport.", "d", "Reader", ["main", "document", "help"], true),
   command("page-up", "Half page up", "Scroll by one viewport.", "u", "Reader", ["main", "document", "help"], true),
-  command("close-overlay", "Close", "Close the active overlay without applying changes.", "Esc · q", "Global", ["page-search", "document-find", "space-switcher", "command-palette", "new-page", "editor", "changes", "image-viewer", "help"], true),
+  command("close-overlay", "Close", "Close the active overlay without applying changes.", "Esc · q", "Global", ["page-search", "document-find", "space-switcher", "command-palette", "theme-picker", "new-page", "editor", "changes", "image-viewer", "help"], true),
   command("search-next", "Next result", "Select the next result.", "Down · Ctrl+N", "Navigation", ["page-search", "document-find", "space-switcher", "command-palette"], true),
   command("search-previous", "Previous result", "Select the previous result.", "Up · Ctrl+P", "Navigation", ["page-search", "document-find", "space-switcher", "command-palette"], true),
   command("search-submit", "Open result", "Open the selected search result.", "Enter", "Navigation", ["page-search", "space-switcher", "command-palette"], true),

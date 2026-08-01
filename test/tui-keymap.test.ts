@@ -18,6 +18,7 @@ describe("TUI command registry", () => {
       "open-command-palette",
       "activate",
       "open-browser",
+      "open-theme-picker",
       "refresh",
       "move-left",
       "move-down",
@@ -50,6 +51,7 @@ describe("context-aware key resolution", () => {
     expect(resolveKeyCommand(key("f"), "document")).toBe("open-document-find")
     expect(resolveKeyCommand(key("o"), "navigator")).toBe("open-browser")
     expect(resolveKeyCommand(key("B"), "navigator")).toBe("report-bug")
+    expect(resolveKeyCommand(key("T"), "navigator")).toBe("open-theme-picker")
     expect(resolveKeyCommand(key("r"), "navigator")).toBe("refresh")
     expect(resolveKeyCommand(key("escape", "\u001b"), "document")).toBe("go-back")
     expect(resolveKeyCommand(key("b"), "document")).toBeNull()
@@ -90,6 +92,12 @@ describe("context-aware key resolution", () => {
     expect(resolveKeyCommand(key("p"), "command-palette")).toBeNull()
     expect(resolveKeyCommand(key("p", "p", { ctrl: true }), "command-palette")).toBe("search-previous")
     expect(resolveKeyCommand(key("escape", "\u001b"), "command-palette")).toBe("close-overlay")
+  })
+
+  test("previews and confirms themes without leaking picker keys into the reader", () => {
+    expect(resolveKeyCommand(key("j"), "theme-picker")).toBe("move-down")
+    expect(resolveKeyCommand(key("return", "\r"), "theme-picker")).toBe("search-submit")
+    expect(resolveKeyCommand(key("escape", "\u001b"), "theme-picker")).toBe("close-overlay")
   })
 
   test("gives each overlay predictable close and movement commands", () => {

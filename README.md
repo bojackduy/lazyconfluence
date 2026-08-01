@@ -150,6 +150,10 @@ lazyconfluence tui             # open the TUI explicitly
 lazyconfluence demo            # open the TUI with synthetic demo data only
 lazyconfluence tui --demo      # same demo mode through a flag
 lazyconfluence init            # configure Atlassian credentials
+lazyconfluence theme list      # list built-in and locally installed themes
+lazyconfluence theme init my-theme
+lazyconfluence theme install ./catppuccin-mocha.json
+lazyconfluence theme use catppuccin-mocha
 lazyconfluence doctor          # inspect local config and index state
 lazyconfluence doctor --remote # verify credentials and configured spaces
 lazyconfluence sync            # fetch configured spaces into the local index
@@ -169,6 +173,7 @@ lazyconfluence search --all runbook
 - `b` or `Esc`: return through local navigation history.
 - `o`: open the selected page in the browser.
 - `B`: open a prefilled GitHub bug report.
+- `T`: preview and choose an installed theme.
 - `e`: edit the selected current page locally.
 - `n` / `N`: stage a child / root page create.
 - `D`: stage deletion of a synced leaf page.
@@ -176,6 +181,40 @@ lazyconfluence search --all runbook
 - `?`: open keyboard help.
 
 Use `Tab` and `Shift+Tab` to move between reader panes. Archived pages are read-only.
+
+## Themes
+
+Themes are local JSON files. `lazyconfluence` never downloads or executes theme code. Create a starter with `lazyconfluence theme init my-theme`, edit it locally, then select it with `lazyconfluence theme use my-theme`. To install a file shared by someone else, validate and copy it into the local theme directory with `lazyconfluence theme install ./my-theme.json`; installed files are never overwritten, so local adjustments remain safe.
+
+Use `lazyconfluence theme path` to print the directory. A theme can override any reader UI color and Markdown/code syntax color while inheriting unspecified values from a built-in base:
+
+```json
+{
+  "version": 1,
+  "id": "catppuccin-mocha",
+  "name": "Catppuccin Mocha",
+  "extends": "midnight",
+  "colors": {
+    "bg": "#1e1e2e",
+    "panel": "#181825",
+    "overlay": "#181825",
+    "overlayInput": "#11111b",
+    "warningBg": "#302d41",
+    "accent": "#cba6f7",
+    "borderActive": "#b4befe",
+    "folder": "#cba6f7",
+    "imageReady": "#a6e3a1",
+    "text": "#cdd6f4"
+  },
+  "syntax": {
+    "keyword": "#cba6f7",
+    "string": "#a6e3a1",
+    "function": "#cba6f7"
+  }
+}
+```
+
+Full-app UI tokens are `bg`, `panel`, `panelAlt`, `overlay`, `overlayInput`, `warningBg`, `codeBg`, `codeBorder`, `border`, `borderActive`, `text`, `codeText`, `muted`, `subtle`, `accent`, `accentSoft`, `folder`, `page`, `live`, `canvas`, `imageReady`, `imageMissing`, `good`, `warn`, and `danger`. Syntax tokens are `heading`, `heading2`, `heading3`, `heading4`, `italic`, `linkLabel`, `raw`, `rawBg`, `list`, `quote`, `comment`, `keyword`, `string`, `number`, `function`, `type`, `property`, `operator`, `tag`, and `attribute`. Unspecified tokens inherit from the built-in theme named by `extends`.
 
 ## Input Diagnostics
 

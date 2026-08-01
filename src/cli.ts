@@ -10,6 +10,7 @@ import { formatRepairReport, repairBodyArtifacts, RepairServiceError } from "./r
 import { defaultRuntimeEnv, parseRuntimeEnv, type RuntimeEnv } from "./runtime/env"
 import { formatSyncReport, syncConfluence, SyncServiceError, type SyncProgressEvent, type SyncReport } from "./sync"
 import { renderTui } from "./tui/app"
+import { initializeTheme, installTheme, loadThemeCatalog, selectTheme, themeDirectory } from "./themes"
 
 export async function runCli(args: string[], options: { interactive?: boolean } = {}) {
   const command = args[0]
@@ -36,6 +37,9 @@ export async function runCli(args: string[], options: { interactive?: boolean } 
       return
     case "init":
       await runInit()
+      return
+    case "theme":
+      await runThemeCommand(args.slice(1))
       return
     case "doctor":
       await runDoctorCommand(args.slice(1))
@@ -75,8 +79,43 @@ export async function runCli(args: string[], options: { interactive?: boolean } 
       return
     default:
       console.error(`Unknown command: ${command}`)
-      console.error("Usage: lazyconfluence [tui|dev|prod|demo|init|doctor|sync|repair|search|edit|draft|drafts|stage|unstage|discard|diff|preview|version]")
+      console.error("Usage: lazyconfluence [tui|dev|prod|demo|init|theme|doctor|sync|repair|search|edit|draft|drafts|stage|unstage|discard|diff|preview|version]")
       process.exitCode = 1
+  }
+}
+
+async function runThemeCommand(args: string[]) {
+  const [action, value] = args
+  try {
+    if (action === "list" && args.length === 1) {
+      const catalog = await loadThemeCatalog()
+      for (const theme of catalog.themes) console.log(`${theme.id}\t${theme.name}\t${theme.source}`)
+      for (const error of catalog.errors) console.error(`Ignored theme ${error}`)
+      return
+    }
+    if (action === "path" && args.length === 1) {
+      console.log(themeDirectory())
+      return
+    }
+    if (action === "install" && value && args.length === 2) {
+      const result = await installTheme(value)
+      console.log(`Installed ${result.theme.name} (${result.theme.id}) at ${result.destination}`)
+      return
+    }
+    if (action === "init" && value && args.length === 2) {
+      const destination = await initializeTheme(value)
+      console.log(`Created editable theme at ${destination}`)
+      return
+    }
+    if (action === "use" && value && args.length === 2) {
+      await selectTheme(value)
+      console.log(`Selected theme: ${value}`)
+      return
+    }
+    throw new Error("Usage: lazyconfluence theme [list|path|install <file>|init <id>|use <id>]")
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : "Theme command failed.")
+    process.exitCode = 1
   }
 }
 

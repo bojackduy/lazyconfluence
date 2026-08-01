@@ -56,6 +56,13 @@ export function resolveKeyCommand(key: TuiKey, context: CommandContext): Command
     if (key.name === "up" || (key.ctrl && (key.name === "k" || key.name === "p"))) return "search-previous"
     return null
   }
+  if (context === "theme-picker") {
+    if (key.name === "escape" || isPlainKey(key, "q")) return "close-overlay"
+    if (key.name === "return" || key.name === "enter") return "search-submit"
+    if (matchesAny(key, ["j", "down"])) return "move-down"
+    if (matchesAny(key, ["k", "up"])) return "move-up"
+    return null
+  }
   if (context === "page-search" || context === "space-switcher" || context === "new-page") return textInputCommand(key)
 
   if (key.name === "escape") return "go-back"
@@ -69,6 +76,7 @@ export function resolveKeyCommand(key: TuiKey, context: CommandContext): Command
   if (isPlainKey(key, "s")) return "open-space-switcher"
   if (isPlainKey(key, "o")) return "open-browser"
   if (isPlainKey(key, "B")) return "report-bug"
+  if (isPlainKey(key, "T")) return "open-theme-picker"
   if (isPlainKey(key, "r")) return "refresh"
   if (isPlainKey(key, "c")) return "open-overview"
   if (isPlainKey(key, "a")) return "toggle-page-view"

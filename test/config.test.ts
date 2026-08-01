@@ -66,7 +66,7 @@ describe("local auth config", () => {
     const env = { LAZYCONFLUENCE_CONFIG_HOME: configHome } as NodeJS.ProcessEnv
 
     try {
-      const config = createLocalConfig({ siteUrl: "https://example.atlassian.net", email: "you@example.com", spaceKeys: ["ENG"] })
+      const config = createLocalConfig({ siteUrl: "https://example.atlassian.net", email: "you@example.com", spaceKeys: ["ENG"], themeId: "catppuccin-mocha" })
       const paths = await saveLocalAuth(config, "secret-token", env)
       const credentialsBefore = await readFile(paths.credentialFile, "utf8")
 
@@ -77,6 +77,7 @@ describe("local auth config", () => {
         spaceKeys: ["ENG", "OPS", "ARCH"],
         defaultSpaceKey: "ENG",
       })
+      expect((await loadAtlassianAuth(env))?.config.ui?.themeId).toBe("catppuccin-mocha")
       expect(await readFile(paths.credentialFile, "utf8")).toBe(credentialsBefore)
     } finally {
       await rm(configHome, { recursive: true, force: true })

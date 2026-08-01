@@ -20,6 +20,7 @@ export const devCredentialStatus: CredentialStatus = {
       configDir: "dev://lazyconfluence",
       configFile: "dev://lazyconfluence/config.json",
       credentialFile: "dev://lazyconfluence/atlassian.env",
+      themesDir: "dev://lazyconfluence/themes",
     },
   },
 }

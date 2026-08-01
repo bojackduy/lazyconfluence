@@ -5,6 +5,7 @@ export interface ConfigPaths {
   configDir: string
   configFile: string
   credentialFile: string
+  themesDir: string
 }
 
 export function resolveConfigPaths(env: NodeJS.ProcessEnv = process.env): ConfigPaths {
@@ -14,6 +15,7 @@ export function resolveConfigPaths(env: NodeJS.ProcessEnv = process.env): Config
     configDir,
     configFile: join(configDir, "config.json"),
     credentialFile: join(configDir, "atlassian.env"),
+    themesDir: join(configDir, "themes"),
   }
 }
 

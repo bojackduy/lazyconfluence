@@ -1521,6 +1521,7 @@ const readyStatus: CredentialStatus = {
       configDir: "/tmp/lazyconfluence",
       configFile: "/tmp/lazyconfluence/config.json",
       credentialFile: "/tmp/lazyconfluence/atlassian.env",
+      themesDir: "/tmp/lazyconfluence/themes",
     },
   },
 }

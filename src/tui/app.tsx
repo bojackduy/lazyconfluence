@@ -24,7 +24,7 @@ import { decodeImageFile, type DecodedImage } from "../media/image"
 import { openBrowserUrl, type BrowserOpenResult } from "../browser"
 import type { FocusPane, IndexedPage, MediaAsset, PageLink, PageViewMode, ReaderPage, SearchResult, SpaceSearchResult } from "../model"
 import { loadCredentialStatus, type CredentialStatus } from "../config"
-import { RemoteSpacePicker } from "./remote-space-picker"
+import type { ConfluenceSpace } from "../confluence/client"
 import type { PageDraftStatus } from "../index/repository"
 import type { ApplyPageDraftResult } from "../apply"
 import { defaultRuntimeEnv, runtimeEnvFromLegacyDemo, type RuntimeEnv } from "../runtime/env"
@@ -168,9 +168,16 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
   const [newPageTitle, setNewPageTitle] = createSignal("")
   const [newPageParentPageId, setNewPageParentPageId] = createSignal<string | null>(null)
   const [spaceSwitcherOpen, setSpaceSwitcherOpen] = createSignal(false)
+  const [spacePickerMode, setSpacePickerMode] = createSignal<"local" | "remote">("local")
   const [spaceSwitcherQuery, setSpaceSwitcherQuery] = createSignal("")
   const [spaceSwitcherSelectedIndex, setSpaceSwitcherSelectedIndex] = createSignal(0)
-  const [remoteSpacePickerOpen, setRemoteSpacePickerOpen] = createSignal(false)
+  const [spacePickerSearching, setSpacePickerSearching] = createSignal(false)
+  const [remoteSpaces, setRemoteSpaces] = createSignal<ConfluenceSpace[]>([])
+  const [remoteSpacesNextPath, setRemoteSpacesNextPath] = createSignal<string | null | undefined>(undefined)
+  const [remoteSpaceKeys, setRemoteSpaceKeys] = createSignal(new Set<string>())
+  const [remoteSpacesLoading, setRemoteSpacesLoading] = createSignal(false)
+  const [remoteSpacesSaving, setRemoteSpacesSaving] = createSignal(false)
+  const [remoteSpacesError, setRemoteSpacesError] = createSignal("")
   const [spaceRevision, setSpaceRevision] = createSignal(0)
   const [commandPaletteOpen, setCommandPaletteOpen] = createSignal(false)
   const [commandPaletteQuery, setCommandPaletteQuery] = createSignal("")
@@ -246,6 +253,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     spaceRevision()
     return dataSource.searchSpaces(spaceSwitcherQuery())
   })
+  const remoteSpaceResults = createMemo(() => filterRemoteSpaces(remoteSpaces(), spaceSwitcherQuery()))
   const commandPaletteResults = createMemo(() => searchPaletteCommands(commandsForContext(["main"]), commandPaletteQuery()))
   const stagedChanges = createMemo(() => {
     draftRevision()
@@ -454,7 +462,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
   })
 
   createEffect(() => {
-    const maxIndex = Math.max(0, spaceSwitcherResults().length - 1)
+    const maxIndex = Math.max(0, (spacePickerMode() === "local" ? spaceSwitcherResults() : remoteSpaceResults()).length - 1)
 
     if (spaceSwitcherSelectedIndex() > maxIndex) setSpaceSwitcherSelectedIndex(maxIndex)
   })
@@ -713,14 +721,16 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     setNewPageOpen(false)
     setCommandPaletteOpen(false)
     setSpaceSwitcherOpen(true)
-    setRemoteSpacePickerOpen(false)
+    setSpacePickerMode("local")
+    setSpacePickerSearching(false)
     setSpaceSwitcherQuery("")
     setSpaceSwitcherSelectedIndex(Math.max(0, dataSource.searchSpaces("").findIndex((result) => result.space.key === activeSpaceKey())))
   }
 
   const closeSpaceSwitcher = () => {
     setSpaceSwitcherOpen(false)
-    setRemoteSpacePickerOpen(false)
+    setSpacePickerMode("local")
+    setSpacePickerSearching(false)
     setSpaceSwitcherQuery("")
     setSpaceSwitcherSelectedIndex(0)
   }
@@ -795,8 +805,17 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
   }
 
   const handleSpaceSwitcherInputKey = (key: SearchKeyLike) => {
-    if (key.name === "a" && !spaceSwitcherQuery()) {
-      setRemoteSpacePickerOpen(true)
+    if (key.name === "/") {
+      setSpacePickerSearching(true)
+      return true
+    }
+    if (spacePickerMode() === "local" && key.name === "a" && !spaceSwitcherQuery() && !spacePickerSearching()) {
+      openRemoteSpacePicker()
+      return true
+    }
+    if (spacePickerMode() === "remote") return handleRemoteSpacePickerKey(key)
+    if (!spacePickerSearching() && (key.name === "j" || key.name === "k")) {
+      moveSpaceSwitcherSelection(key.name === "j" ? 1 : -1)
       return true
     }
     const action = pageSearchKeyAction(key)
@@ -1053,6 +1072,95 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     setAllSpaceSearchSelectedIndex((current) => Math.max(0, Math.min(allSpaceSearchResults().length - 1, current + direction)))
   }
 
+  const openRemoteSpacePicker = () => {
+    setSpacePickerMode("remote")
+    setSpacePickerSearching(false)
+    setSpaceSwitcherQuery("")
+    setSpaceSwitcherSelectedIndex(0)
+    setRemoteSpacesError("")
+    if (!remoteSpaces().length) void loadRemoteSpacePage()
+  }
+
+  const closeRemoteSpacePicker = () => {
+    setSpacePickerMode("local")
+    setSpacePickerSearching(false)
+    setSpaceSwitcherQuery("")
+    setSpaceSwitcherSelectedIndex(Math.max(0, dataSource.searchSpaces("").findIndex((result) => result.space.key === activeSpaceKey())))
+  }
+
+  const loadRemoteSpacePage = async () => {
+    if (remoteSpacesLoading() || remoteSpacesNextPath() === null) return
+
+    setRemoteSpacesLoading(true)
+    setRemoteSpacesError("")
+    try {
+      const page = await dataSource.listRemoteSpacesPage(remoteSpacesNextPath())
+      setRemoteSpaces((current) => mergeRemoteSpaces(current, page.spaces))
+      setRemoteSpacesNextPath(page.nextPath)
+    } catch (error) {
+      setRemoteSpacesError(error instanceof Error ? error.message : "Unable to load remote spaces.")
+    } finally {
+      setRemoteSpacesLoading(false)
+    }
+  }
+
+  const handleRemoteSpacePickerKey = (key: SearchKeyLike) => {
+    if (key.name === "escape") {
+      if (spacePickerSearching()) {
+        setSpacePickerSearching(false)
+        return true
+      }
+      closeRemoteSpacePicker()
+      return true
+    }
+    if (key.name === "l" && key.shift) {
+      void loadRemoteSpacePage()
+      return true
+    }
+    if (key.name === "space") {
+      const space = remoteSpaceResults()[spaceSwitcherSelectedIndex()]
+      if (!space || configuredSpaceKeys().includes(space.key)) return true
+      setRemoteSpaceKeys((current) => {
+        const next = new Set(current)
+        if (next.has(space.key)) next.delete(space.key)
+        else next.add(space.key)
+        return next
+      })
+      return true
+    }
+    if (key.name === "return") {
+      void configureSelectedRemoteSpaces()
+      return true
+    }
+    if (!spacePickerSearching() && (key.name === "j" || key.name === "k")) {
+      moveSpaceSwitcherSelection(key.name === "j" ? 1 : -1)
+      return true
+    }
+
+    const action = pageSearchKeyAction(key)
+    if (action === "next") moveSpaceSwitcherSelection(1)
+    else if (action === "previous") moveSpaceSwitcherSelection(-1)
+    return action === "next" || action === "previous"
+  }
+
+  const configureSelectedRemoteSpaces = async () => {
+    const keys = [...remoteSpaceKeys()]
+    if (!keys.length || remoteSpacesSaving()) return
+
+    setRemoteSpacesSaving(true)
+    setRemoteSpacesError("")
+    try {
+      for (const key of keys) await dataSource.configureAndSyncSpace(key)
+      setRemoteSpaceKeys(new Set<string>())
+      setSpaceRevision((current) => current + 1)
+      closeRemoteSpacePicker()
+    } catch (error) {
+      setRemoteSpacesError(error instanceof Error ? error.message : "Unable to configure and sync selected spaces.")
+    } finally {
+      setRemoteSpacesSaving(false)
+    }
+  }
+
   const selectSpaceSwitcherResult = () => {
     const result = spaceSwitcherResults()[spaceSwitcherSelectedIndex()]
 
@@ -1070,7 +1178,8 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
   }
 
   const moveSpaceSwitcherSelection = (direction: number) => {
-    setSpaceSwitcherSelectedIndex((current) => Math.max(0, Math.min(spaceSwitcherResults().length - 1, current + direction)))
+    const results = spacePickerMode() === "local" ? spaceSwitcherResults() : remoteSpaceResults()
+    setSpaceSwitcherSelectedIndex((current) => Math.max(0, Math.min(results.length - 1, current + direction)))
   }
 
   const scrollDocumentBy = (lines: number) => {
@@ -1706,34 +1815,27 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
         />
       ) : <box height={0} />}
       {spaceSwitcherOpen() ? (
-        <SpaceSwitcherOverlay
+        <SpacePickerOverlay
         visible
+        mode={spacePickerMode()}
         query={spaceSwitcherQuery()}
-        results={spaceSwitcherResults()}
+        localResults={spaceSwitcherResults()}
+        remoteResults={remoteSpaceResults()}
+        configuredSpaceKeys={configuredSpaceKeys()}
+        markedRemoteSpaceKeys={remoteSpaceKeys()}
+        remoteLoading={remoteSpacesLoading()}
+        remoteSaving={remoteSpacesSaving()}
+        remoteError={remoteSpacesError()}
+        remoteHasMore={remoteSpacesNextPath() !== null}
+        searching={spacePickerSearching()}
         selectedIndex={spaceSwitcherSelectedIndex()}
         activeSpaceKey={activeSpaceKey()}
-        left={dimensions().width < 72 ? 1 : 4}
+        left={commandPaletteLeft()}
         top={2}
-        width={Math.max(32, dimensions().width - (dimensions().width < 72 ? 2 : 8))}
+        width={commandPaletteWidth()}
         height={Math.max(10, dimensions().height - 4)}
         onQueryChange={setSpaceSwitcherQuery}
         onKeyDown={handleSpaceSwitcherInputKey}
-        />
-      ) : <box height={0} />}
-      {remoteSpacePickerOpen() ? (
-        <RemoteSpacePicker
-          configuredSpaceKeys={configuredSpaceKeys()}
-          loadPage={dataSource.listRemoteSpacesPage}
-          saveSpaceKeys={async (spaceKeys) => {
-            for (const spaceKey of spaceKeys) await dataSource.configureAndSyncSpace(spaceKey)
-          }}
-          onClose={() => setRemoteSpacePickerOpen(false)}
-          onComplete={() => {
-            setRemoteSpacePickerOpen(false)
-            setSpaceSwitcherQuery("")
-            setSpaceSwitcherSelectedIndex(0)
-            setSpaceRevision((current) => current + 1)
-          }}
         />
       ) : <box height={0} />}
       {commandPaletteOpen() ? (
@@ -3397,8 +3499,10 @@ function EmptyDocumentFindState(props: { query: string }) {
   )
 }
 
-function SpaceSwitcherOverlay(props: { visible: boolean; query: string; results: SpaceSearchResult[]; selectedIndex: number; activeSpaceKey: string; left: number; top: number; width: number; height: number; onQueryChange: (query: string) => void; onKeyDown: (key: SearchKeyLike) => boolean }) {
-  const resultWindow = createMemo(() => searchResultWindow(props.results, props.selectedIndex, props.height))
+function SpacePickerOverlay(props: { visible: boolean; mode: "local" | "remote"; query: string; localResults: SpaceSearchResult[]; remoteResults: ConfluenceSpace[]; configuredSpaceKeys: string[]; markedRemoteSpaceKeys: Set<string>; remoteLoading: boolean; remoteSaving: boolean; remoteError: string; remoteHasMore: boolean; searching: boolean; selectedIndex: number; activeSpaceKey: string; left: number; top: number; width: number; height: number; onQueryChange: (query: string) => void; onKeyDown: (key: SearchKeyLike) => boolean }) {
+  const localWindow = createMemo(() => searchResultWindow(props.localResults, props.selectedIndex, props.height))
+  const remoteWindow = createMemo(() => remoteSpaceWindow(props.remoteResults, props.selectedIndex, props.height))
+  const title = () => props.mode === "local" ? `${nerdIcons.spaces} SWITCH LOCAL SPACE` : `${nerdIcons.spaces} BROWSE REMOTE SPACES`
 
   return (
     <box
@@ -3418,25 +3522,53 @@ function SpaceSwitcherOverlay(props: { visible: boolean; query: string; results:
       zIndex={30}
     >
       <box height={1} flexDirection="row" justifyContent="space-between" width="100%">
-        <text height={1} fg={theme.accent}><b>{nerdIcons.spaces} SWITCH LOCAL SPACE</b></text>
-        <text height={1} fg={theme.muted}>active: {props.activeSpaceKey}</text>
+        <text height={1} fg={theme.accent}><b>{title()}</b></text>
+        <text height={1} fg={theme.muted}>{props.mode === "local" ? `active: ${props.activeSpaceKey}` : props.remoteSaving ? "syncing selected spaces" : props.remoteHasMore ? `${props.remoteResults.length} loaded · more available` : `${props.remoteResults.length} loaded · complete`}</text>
       </box>
-      <SearchInput visible={props.visible} prefix="s" value={props.query} placeholder="type space key or name" onInput={props.onQueryChange} onKeyDown={props.onKeyDown} />
-      <text height={1} fg={theme.subtle}>Enter switch local space  ·  a browse remote spaces  ·  Esc close</text>
-      <text height={1} fg={theme.subtle}>{props.results.length} local space{props.results.length === 1 ? "" : "s"}  type to filter  up/down move</text>
-      <box height={1} />
-      <Show when={props.results.length > 0} fallback={<EmptySpaceState query={props.query} />}>
+      <SearchInput visible={props.searching} prefix="/" value={props.query} placeholder={props.mode === "local" ? "filter local spaces" : "filter loaded remote spaces"} onInput={props.onQueryChange} onKeyDown={props.onKeyDown} />
+      <SpacePickerHints mode={props.mode} />
+      {props.remoteError ? <text height={1} fg={theme.danger}>{props.remoteError}</text> : <text height={1} fg={theme.subtle}>{props.mode === "local" ? `${props.localResults.length} local space${props.localResults.length === 1 ? "" : "s"}  j/k browse  / filter` : props.remoteLoading ? "Loading remote spaces..." : `${props.remoteResults.length} loaded remote space${props.remoteResults.length === 1 ? "" : "s"}  j/k browse  / filter`}</text>}
+      <Show when={props.mode === "local" ? props.localResults.length > 0 : props.remoteResults.length > 0} fallback={<EmptySpaceState query={props.query} />}>
         <scrollbox flexGrow={1} minHeight={0} scrollbarOptions={{ showArrows: false }}>
           <box flexDirection="column" width="100%">
-            <For each={resultWindow()}>
-              {(result, index) => {
-                const resultIndex = () => searchResultWindowStart(props.results.length, props.selectedIndex, props.height) + index()
-                return <SpaceResultRow id={spaceSwitcherRowId(resultIndex())} result={result} selected={resultIndex() === props.selectedIndex} active={result.space.key === props.activeSpaceKey} />
-              }}
-            </For>
+            {props.mode === "local" ? <For each={localWindow()}>{(result, index) => {
+              const resultIndex = () => searchResultWindowStart(props.localResults.length, props.selectedIndex, props.height) + index()
+              return <SpaceResultRow id={spaceSwitcherRowId(resultIndex())} result={result} selected={resultIndex() === props.selectedIndex} active={result.space.key === props.activeSpaceKey} />
+            }}</For> : <For each={remoteWindow()}>{(space, index) => {
+              const resultIndex = () => remoteSpaceWindowStart(props.remoteResults.length, props.selectedIndex, props.height) + index()
+              return <RemoteSpacePickerRow id={spaceSwitcherRowId(resultIndex())} space={space} selected={resultIndex() === props.selectedIndex} configured={props.configuredSpaceKeys.includes(space.key)} marked={props.markedRemoteSpaceKeys.has(space.key)} />
+            }}</For>}
           </box>
         </scrollbox>
       </Show>
+    </box>
+  )
+}
+
+function SpacePickerHints(props: { mode: "local" | "remote" }) {
+  const hints = props.mode === "local"
+    ? [{ key: "Enter", label: "switch local" }, { key: "a", label: "browse remote" }, { key: "Esc", label: "close" }]
+    : [{ key: "Space", label: "mark" }, { key: "Enter", label: "configure and sync" }, { key: "Shift+L", label: "next page" }, { key: "Esc", label: "local" }]
+
+  return (
+    <box height={1} flexDirection="row">
+      <For each={hints}>{(hint, index) => (
+        <>
+          {index() > 0 ? <text height={1} fg={theme.subtle}> · </text> : null}
+          <text height={1} fg={theme.accent}>{hint.key}</text>
+          <text height={1} fg={theme.muted}> {hint.label}</text>
+        </>
+      )}</For>
+    </box>
+  )
+}
+
+function RemoteSpacePickerRow(props: { id: string; space: ConfluenceSpace; selected: boolean; configured: boolean; marked: boolean }) {
+  const marker = () => props.configured ? "=" : props.marked ? nerdIcons.selected : nerdIcons.unchecked
+
+  return (
+    <box id={props.id} height={1} width="100%" backgroundColor={props.selected ? theme.accentSoft : undefined} paddingX={1}>
+      <text height={1} fg={props.configured ? theme.subtle : props.selected ? theme.text : theme.muted}>{props.selected ? nerdIcons.selected : " "} {marker()} {props.space.key}  {props.space.name}{props.configured ? "  · configured" : ""}</text>
     </box>
   )
 }
@@ -3626,6 +3758,40 @@ function SpaceResultRow(props: { id: string; result: SpaceSearchResult; selected
 
 function spaceSwitcherRowId(index: number) {
   return `space-switcher-${index}`
+}
+
+export function filterRemoteSpaces(spaces: readonly ConfluenceSpace[], query: string) {
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  if (!terms.length) return [...spaces]
+
+  return spaces.filter((space) => {
+    const text = `${space.key} ${space.name}`.toLowerCase()
+    return terms.every((term) => text.includes(term))
+  })
+}
+
+export function mergeRemoteSpaces(existing: readonly ConfluenceSpace[], incoming: readonly ConfluenceSpace[]) {
+  const seen = new Set(existing.map((space) => space.key))
+  const merged = [...existing]
+
+  for (const space of incoming) {
+    if (seen.has(space.key)) continue
+    seen.add(space.key)
+    merged.push(space)
+  }
+
+  return merged
+}
+
+export function remoteSpaceWindow<T>(spaces: readonly T[], selectedIndex: number, height: number) {
+  const start = remoteSpaceWindowStart(spaces.length, selectedIndex, height)
+  const windowSize = Math.max(1, height - 8)
+  return spaces.slice(start, start + windowSize)
+}
+
+export function remoteSpaceWindowStart(spaceCount: number, selectedIndex: number, height: number) {
+  const windowSize = Math.max(1, height - 8)
+  return Math.min(Math.max(0, selectedIndex - windowSize + 1), Math.max(0, spaceCount - windowSize))
 }
 
 function EmptySpaceState(props: { query: string }) {

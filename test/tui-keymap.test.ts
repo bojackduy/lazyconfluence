@@ -49,6 +49,7 @@ describe("context-aware key resolution", () => {
     expect(resolveKeyCommand(key(":"), "document")).toBe("open-command-palette")
     expect(resolveKeyCommand(key("f"), "document")).toBe("open-document-find")
     expect(resolveKeyCommand(key("o"), "navigator")).toBe("open-browser")
+    expect(resolveKeyCommand(key("B"), "navigator")).toBe("report-bug")
     expect(resolveKeyCommand(key("r"), "navigator")).toBe("refresh")
     expect(resolveKeyCommand(key("escape", "\u001b"), "document")).toBe("go-back")
     expect(resolveKeyCommand(key("b"), "document")).toBeNull()

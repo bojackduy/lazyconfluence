@@ -68,6 +68,7 @@ export function resolveKeyCommand(key: TuiKey, context: CommandContext): Command
   if (isPlainKey(key, "f")) return "open-document-find"
   if (isPlainKey(key, "s")) return "open-space-switcher"
   if (isPlainKey(key, "o")) return "open-browser"
+  if (isPlainKey(key, "B")) return "report-bug"
   if (isPlainKey(key, "r")) return "refresh"
   if (isPlainKey(key, "c")) return "open-overview"
   if (isPlainKey(key, "a")) return "toggle-page-view"

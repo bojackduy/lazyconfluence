@@ -168,6 +168,7 @@ lazyconfluence search --all runbook
 - `r`: reload only the selected Confluence page.
 - `b` or `Esc`: return through local navigation history.
 - `o`: open the selected page in the browser.
+- `B`: open a prefilled GitHub bug report.
 - `e`: edit the selected current page locally.
 - `n` / `N`: stage a child / root page create.
 - `D`: stage deletion of a synced leaf page.

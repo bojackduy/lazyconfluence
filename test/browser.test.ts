@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { browserCommandForUrl, openBrowserUrl } from "../src/browser"
+import { browserCommandForUrl, bugReportUrl, openBrowserUrl } from "../src/browser"
 
 const pageUrl = "https://example.atlassian.net/wiki/spaces/ENG/pages/100/Engineering+Home?source=lazyconfluence"
 
@@ -26,6 +26,16 @@ describe("browser launcher", () => {
 
     expect(result).toEqual({ status: "opened", url: "https://example.atlassian.net/wiki" })
     expect(calls).toEqual([{ command: "xdg-open", args: ["https://example.atlassian.net/wiki"] }])
+  })
+
+  test("builds a prefilled GitHub bug report without user content", () => {
+    const url = new URL(bugReportUrl({ runtimeLabel: "PROD local" }))
+
+    expect(url.origin + url.pathname).toBe("https://github.com/bojackduy/lazyconfluence/issues/new")
+    expect(url.searchParams.get("title")).toBe("bug: ")
+    expect(url.searchParams.get("body")).toContain("## Steps to reproduce")
+    expect(url.searchParams.get("body")).toContain("runtime: PROD local")
+    expect(url.searchParams.get("body")).toContain("Do not include API tokens")
   })
 })
 

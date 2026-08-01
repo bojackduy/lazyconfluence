@@ -21,7 +21,7 @@ import {
 } from "@opentui/core"
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import { decodeImageFile, type DecodedImage } from "../media/image"
-import { openBrowserUrl, type BrowserOpenResult } from "../browser"
+import { bugReportUrl, openBrowserUrl, type BrowserOpenResult } from "../browser"
 import type { FocusPane, IndexedPage, MediaAsset, PageLink, PageViewMode, ReaderPage, SearchResult, SpaceSearchResult } from "../model"
 import { loadCredentialStatus, type CredentialStatus } from "../config"
 import type { ConfluenceSpace } from "../confluence/client"
@@ -541,6 +541,10 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     openUrlInBrowser(page.url, page.title)
   }
 
+  const openBugReport = () => {
+    openUrlInBrowser(bugReportUrl({ runtimeLabel }), "a prefilled bug report")
+  }
+
   const openUrlInBrowser = (url: string, label: string) => {
     const result = browserOpener(url)
     setEditStatusMessage(result.status === "opened" ? `Opened ${label} in your browser.` : result.reason)
@@ -781,6 +785,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     else if (command.id === "open-document-find") openDocumentFind()
     else if (command.id === "open-space-switcher") openSpaceSwitcher()
     else if (command.id === "open-browser") openSelectedPageInBrowser()
+    else if (command.id === "report-bug") openBugReport()
     else if (command.id === "go-back") goBack()
     else if (command.id === "open-overview") openChanges()
     else if (command.id === "toggle-page-view") togglePageView()
@@ -1564,6 +1569,10 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
       openSelectedPageInBrowser()
       return
     }
+    if (command === "report-bug") {
+      openBugReport()
+      return
+    }
 
     if (command === "go-back") {
       goBack()
@@ -1715,7 +1724,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
 
   return (
     <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.bg}>
-      <Header page={readerPage()} spaceName={space().name} syncState={space().syncState} draftStatus={draftStatus()} stagedCount={stagedChanges().length} runtimeLabel={runtimeLabel} reloading={pageReloading()} onOpenOverview={() => openChanges()} />
+      <Header page={readerPage()} spaceName={space().name} syncState={space().syncState} draftStatus={draftStatus()} stagedCount={stagedChanges().length} runtimeLabel={runtimeLabel} reloading={pageReloading()} onOpenOverview={() => openChanges()} onReportBug={openBugReport} />
       <Show when={credentialWarning()} fallback={<box height={0} />}>{(status) => <CredentialNotice status={status()} />}</Show>
       <box flexGrow={1} minHeight={0} flexDirection={isNarrow() ? "column" : "row"} paddingX={1}>
         <Navigator rows={treeRows()} selectedPageId={selectedPageId()} focused={focusPane() === "navigator"} viewMode={pageViewMode()} onSetViewMode={switchPageView} />
@@ -1895,7 +1904,7 @@ function CredentialNotice(props: { status: CredentialWarning }) {
   )
 }
 
-export function Header(props: { page: ReaderPage; spaceName: string; syncState: string; draftStatus: PageDraftStatus | null; stagedCount: number; runtimeLabel: string; reloading: boolean; onOpenOverview: () => void }) {
+export function Header(props: { page: ReaderPage; spaceName: string; syncState: string; draftStatus: PageDraftStatus | null; stagedCount: number; runtimeLabel: string; reloading: boolean; onOpenOverview: () => void; onReportBug?: () => void }) {
   const syncColor = () => (props.syncState === "fresh" ? theme.good : props.syncState === "stale" ? theme.warn : theme.danger)
   const statusColor = () => (props.draftStatus === "staged" ? theme.good : props.draftStatus === "draft" ? theme.warn : syncColor())
   const statusText = () => `${props.runtimeLabel} · ${props.draftStatus ? `${props.draftStatus} · ` : ""}${props.syncState}`
@@ -1912,6 +1921,9 @@ export function Header(props: { page: ReaderPage; spaceName: string; syncState: 
             <text height={1} fg={theme.warn}><b>RELOADING</b></text>
           </Show>
           <text height={1} fg={statusColor()}>{statusText()}</text>
+          <box height={1} width={14} onMouseDown={() => props.onReportBug?.()}>
+            <text height={1} fg={theme.accent}>B report bug</text>
+          </box>
         </box>
       </box>
       <text height={1} fg={theme.muted}>{props.spaceName} / {props.page.path.join(" / ")}</text>

@@ -13,6 +13,38 @@ export interface OpenBrowserOptions {
   launch?: BrowserLaunch
 }
 
+export const LAZYCONFLUENCE_ISSUES_URL = "https://github.com/bojackduy/lazyconfluence/issues/new"
+
+export function bugReportUrl(context: { runtimeLabel?: string } = {}) {
+  const url = new URL(LAZYCONFLUENCE_ISSUES_URL)
+  url.searchParams.set("title", "bug: ")
+  url.searchParams.set("body", [
+    "## What happened?",
+    "",
+    "Describe the unexpected behavior.",
+    "",
+    "## What did you expect?",
+    "",
+    "Describe the expected behavior.",
+    "",
+    "## Steps to reproduce",
+    "",
+    "1. ",
+    "2. ",
+    "3. ",
+    "",
+    "## Environment",
+    "",
+    "- lazyconfluence version:",
+    `- runtime: ${context.runtimeLabel ?? ""}`,
+    `- OS: ${process.platform}`,
+    "- Terminal:",
+    "",
+    "Do not include API tokens, credentials, or confidential Confluence content.",
+  ].join("\n"))
+  return url.toString()
+}
+
 export function openBrowserUrl(value: string, options: OpenBrowserOptions = {}): BrowserOpenResult {
   try {
     const url = normalizeBrowserUrl(value)

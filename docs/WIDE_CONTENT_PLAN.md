@@ -25,12 +25,15 @@ Add a `z` command that toggles a document-only reading layout.
 - Preserve vertical and horizontal document scroll offsets.
 - Show a visible `FOCUS` marker and `z restore panes` hint.
 - Keep existing Left/Right horizontal scrolling and Up/Down vertical scrolling.
+- Preserve intrinsic table column widths so widening the reader reveals additional columns instead of rescaling the same columns.
+- Report intrinsic table width to the document scrollbox so Left/Right movement is not clamped at zero.
 - Make the command available through Help and the Command Palette.
 
 Acceptance criteria:
 
 - `z` opens and closes focus mode from the normal reader.
 - The supporting panes disappear without recreating or resetting the document reader.
+- Wide tables expose more columns in focus mode and retain horizontal overflow when they still do not fit.
 - Closing focus mode restores the prior pane focus and scroll position.
 - Narrow-terminal behavior remains usable.
 

@@ -4,7 +4,8 @@ import { dirname, join } from "node:path"
 import { Writable } from "node:stream"
 import { describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
-import { App, CommandPaletteOverlay, DocumentFindOverlay, Header, HelpOverlay, ImageViewerOverlay, NewPageOverlay, PageSearchOverlay, StagedChangesOverlay, StatusBar, documentHorizontalScrollDeltaForKey, documentOutlineItems, findDocumentMatches, imageRenderModeForCapabilities, navigatorEnterAction, nearestImageIndexForViewport, nextDocumentFindIndex, nextDocumentFocusState, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, parseTerminalCellPixels, relatedNavigationItemsForPage, searchPaletteCommands, statusBarHints, type SearchKeyLike } from "../src/tui/app"
+import type { ScrollBoxRenderable } from "@opentui/core"
+import { App, CommandPaletteOverlay, DocumentFindOverlay, Header, HelpOverlay, ImageViewerOverlay, NewPageOverlay, PageSearchOverlay, StagedChangesOverlay, StatusBar, ThinHorizontalScrollbar, documentContentWidth, documentHorizontalScrollDeltaForKey, documentOutlineItems, findDocumentMatches, imageRenderModeForCapabilities, markdownTableIntrinsicWidth, navigatorEnterAction, nearestImageIndexForViewport, nextDocumentFindIndex, nextDocumentFocusState, nextFocusPaneForKey, nextNavigatorSelectionForCollapse, nextPageViewModeForKey, parseTerminalCellPixels, relatedNavigationItemsForPage, searchPaletteCommands, statusBarHints, thinHorizontalScrollbarSegments, type SearchKeyLike } from "../src/tui/app"
 import { commandsForContext } from "../src/tui/commands"
 import { createLocalConfig } from "../src/config"
 import type { CredentialStatus } from "../src/config"
@@ -38,6 +39,7 @@ describe("main TUI layout", () => {
       expect(output).toContain("S all spaces")
       expect(output).toContain("·")
       expect(output).toContain("Overview 0")
+      expect(output).toContain("B REPORT BUG")
       expect(output).toContain("r reload")
       expect(output).toContain("Esc back")
       expect(output).toContain("Tab panes")
@@ -89,6 +91,41 @@ describe("main TUI layout", () => {
     const focused = nextDocumentFocusState({ enabled: false, focusPane: "related", previousFocusPane: "navigator" })
     expect(focused).toEqual({ enabled: true, focusPane: "document", previousFocusPane: "related" })
     expect(nextDocumentFocusState(focused)).toEqual({ enabled: false, focusPane: "related", previousFocusPane: "related" })
+  })
+
+  test("focus mode reveals more intrinsic-width table columns instead of rescaling them", async () => {
+    const setup = await createTuiTestSetup({ bodyArtifacts: [wideTableBody] })
+    const repository = openIndexRepository({ path: setup.dbPath })
+    const dataSource = createRepositoryTuiDataSource(repository)
+
+    try {
+      const normal = await testRender(() => <App credentialStatus={readyStatus} dataSource={dataSource} disableTreeSitter />, { width: 120, height: 36 })
+      await normal.renderOnce()
+      await normal.waitForVisualIdle({ quietFrames: 2, maxFrames: 8 })
+      const normalFrame = normal.captureCharFrame()
+      normal.renderer.destroy()
+
+      const focused = await testRender(() => <App credentialStatus={readyStatus} dataSource={dataSource} disableTreeSitter initialDocumentFocusMode />, { width: 120, height: 36 })
+      await focused.renderOnce()
+      await focused.waitForVisualIdle({ quietFrames: 2, maxFrames: 8 })
+      const focusedFrame = focused.captureCharFrame()
+      const documentScrollbox = focused.renderer.root.findDescendantById("document-scrollbox") as ScrollBoxRenderable
+
+      expect(normalFrame).toContain("Case")
+      expect(normalFrame).not.toContain("Budget policy")
+      expect(focusedFrame).toContain("Budget policy")
+      expect(focusedFrame).not.toContain("Store policy")
+      expect(documentScrollbox.scrollWidth).toBeGreaterThan(documentScrollbox.viewport.width)
+      expect(documentScrollbox.horizontalScrollBar.visible).toBe(false)
+
+      focused.mockInput.pressArrow("right")
+      await focused.flush()
+      expect(documentScrollbox.scrollLeft).toBeGreaterThan(0)
+      focused.renderer.destroy()
+    } finally {
+      dataSource.close?.()
+      await setup.cleanup()
+    }
   })
 
   test("renders an explicit current-page reload state", async () => {
@@ -1155,6 +1192,31 @@ describe("main TUI layout", () => {
     expect(documentHorizontalScrollDeltaForKey(key("j", "j"))).toBe(0)
   })
 
+  test("wide Markdown tables expand the scroll surface to their intrinsic width", () => {
+    expect(markdownTableIntrinsicWidth(wideTableMarkdown)).toBeGreaterThan(120)
+    expect(documentContentWidth(wideTableMarkdown, 48)).toBe(markdownTableIntrinsicWidth(wideTableMarkdown))
+    expect(documentContentWidth("# Fits", 48)).toBe(48)
+  })
+
+  test("thin horizontal scrollbar tracks overflow and position", () => {
+    expect(thinHorizontalScrollbarSegments({ position: 0, viewport: 10, content: 20 })).toEqual({ before: 0, thumb: 5, after: 5 })
+    expect(thinHorizontalScrollbarSegments({ position: 10, viewport: 10, content: 20 })).toEqual({ before: 5, thumb: 5, after: 0 })
+    expect(thinHorizontalScrollbarSegments({ position: 0, viewport: 10, content: 10 })).toBeNull()
+  })
+
+  test("renders the horizontal overflow thumb as a thin line", async () => {
+    const rendered = await testRender(() => <ThinHorizontalScrollbar state={{ position: 5, viewport: 20, content: 40 }} />, { width: 20, height: 2 })
+    try {
+      await rendered.renderOnce()
+      const frame = rendered.captureCharFrame()
+      expect(frame).toContain("━")
+      expect(frame).toContain("─")
+      expect(frame).not.toContain("█")
+    } finally {
+      rendered.renderer.destroy()
+    }
+  })
+
   test("focus-mode status hints prioritize restoring panes and wide-content scrolling", () => {
     expect(statusBarHints("document", false, 120, 28, false, true).map((hint) => hint.key)).toEqual(["z", "←/→", "j/k", "d/u", "?"])
   })
@@ -1631,6 +1693,20 @@ const homeBody: PageBodyArtifact = {
   editableMarkdown: "# Local Engineering Home\n\nLocal synced content from SQLite.",
   renderedMarkdown: "# Local Engineering Home\n\nLocal synced content from SQLite.",
   updatedAt: "2026-07-21T10:00:00Z",
+}
+
+const wideTableMarkdown = [
+  "# HTTP Classification Matrix",
+  "",
+  "| Case | Detection examples | Classification | Provider call | Budget policy | Retry same run | Provider guard | Store policy |",
+  "| --- | --- | --- | --- | --- | --- | --- | --- |",
+  "| Invalid product | Malformed product identifier | INVALID_PRODUCT_ID | No provider call | Do not reserve budget | No retry | No guard failure | Keep configuration failure |",
+].join("\n")
+
+const wideTableBody: PageBodyArtifact = {
+  ...homeBody,
+  editableMarkdown: wideTableMarkdown,
+  renderedMarkdown: wideTableMarkdown,
 }
 
 const imageMarkdown = [

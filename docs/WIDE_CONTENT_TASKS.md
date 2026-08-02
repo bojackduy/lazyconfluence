@@ -9,15 +9,17 @@ Execution tracker for `WIDE_CONTENT_PLAN.md`. Update checkboxes as work is compl
 - [x] Add document focus-mode state and remember the previous pane focus.
 - [x] Hide navigator, outline, and related panes while focused.
 - [x] Preserve document horizontal and vertical scroll offsets by keeping the reader scrollbox mounted.
+- [x] Preserve intrinsic table widths so focus mode reveals additional columns instead of rescaling them.
+- [x] Expand the document scroll surface to the intrinsic table width so Left/Right changes horizontal position.
 - [x] Show a focus-mode marker and restore hint.
 - [x] Add keymap and layout tests.
 - [x] Run typecheck, full tests, build, and diff validation.
 
 ## Phase 2: Horizontal Overflow Affordance
 
-- [ ] Detect horizontal document overflow.
-- [ ] Show horizontal position and off-screen-content indication.
-- [ ] Add width-aware Left/Right footer guidance.
+- [x] Detect horizontal document overflow.
+- [x] Show a thin horizontal position and off-screen-content indicator.
+- [x] Add width-aware Left/Right footer guidance.
 - [ ] Test fitting content, overflowing content, and history restoration.
 
 ## Phase 3: Full-Screen Table Viewer

@@ -59,6 +59,7 @@ type NavigatorCollapseRow = {
 
 type ReaderImagePart = Extract<ReaderContentPart, { kind: "image" }>
 type CellPixelSize = { width: number; height: number }
+export type HorizontalScrollState = { position: number; viewport: number; content: number }
 type NavigationTarget = Pick<NavigationLocation, "spaceKey" | "pageViewMode" | "pageId" | "expandedPageIds"> & { focusPane?: FocusPane }
 type SideRailPanel = "outline" | "related"
 
@@ -213,12 +214,30 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
   const [terminalCapabilities, setTerminalCapabilities] = createSignal<TerminalCapabilities | null>(renderer.capabilities)
   const [terminalCellPixels, setTerminalCellPixels] = createSignal<CellPixelSize | null>(null)
   const [treeSitterClient, setTreeSitterClient] = createSignal<TreeSitterClient | undefined>()
+  const [documentHorizontalScroll, setDocumentHorizontalScroll] = createSignal<HorizontalScrollState>({ position: 0, viewport: 0, content: 0 })
   const readerImageRenderables = new Map<string, BoxRenderable>()
   let documentScrollbox: ScrollBoxRenderable | undefined
+  let documentHorizontalScrollBar: ScrollBoxRenderable["horizontalScrollBar"] | undefined
   let helpScrollbox: ScrollBoxRenderable | undefined
   let editorFocusTimer: ReturnType<typeof setTimeout> | undefined
   let historyRestoreTimer: ReturnType<typeof setTimeout> | undefined
   let transientStatusTimer: ReturnType<typeof setTimeout> | undefined
+
+  const syncDocumentHorizontalScroll = () => {
+    const scrollbox = documentScrollbox
+    if (!scrollbox || scrollbox.isDestroyed) return
+    const next = { position: scrollbox.scrollLeft, viewport: scrollbox.viewport.width, content: scrollbox.scrollWidth }
+    setDocumentHorizontalScroll((current) => current.position === next.position && current.viewport === next.viewport && current.content === next.content ? current : next)
+  }
+
+  const setDocumentScrollbox = (scrollbox: ScrollBoxRenderable) => {
+    if (documentHorizontalScrollBar) documentHorizontalScrollBar.off("change", syncDocumentHorizontalScroll)
+    documentScrollbox = scrollbox
+    documentHorizontalScrollBar = scrollbox.horizontalScrollBar
+    documentHorizontalScrollBar.visible = false
+    documentHorizontalScrollBar.on("change", syncDocumentHorizontalScroll)
+    queueMicrotask(syncDocumentHorizontalScroll)
+  }
 
   const spaces = createMemo(() => dataSource.listSpaces())
   const space = createMemo(() => spaces().find((candidate) => candidate.key === activeSpaceKey()) ?? emptySpaceSummary(activeSpaceKey()))
@@ -321,6 +340,11 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     onCleanup(() => renderer.off(CliRenderEvents.CAPABILITIES, updateCapabilities))
   })
 
+  onMount(() => {
+    renderer.on(CliRenderEvents.FRAME, syncDocumentHorizontalScroll)
+    onCleanup(() => renderer.off(CliRenderEvents.FRAME, syncDocumentHorizontalScroll))
+  })
+
   createEffect(() => {
     if (terminalCellPixels()) return
     if (viewerImageRenderMode() !== "sixel") return
@@ -407,6 +431,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
     clearEditorFocusTimer()
     clearHistoryRestoreTimer()
     clearTransientStatusTimer()
+    if (documentHorizontalScrollBar) documentHorizontalScrollBar.off("change", syncDocumentHorizontalScroll)
     if (!props.dataSource) dataSource.close?.()
   })
 
@@ -1815,7 +1840,7 @@ export function App(props: { browserOpener?: (url: string) => BrowserOpenResult;
       <Show when={credentialWarning()} fallback={<box height={0} />}>{(status) => <CredentialNotice status={status()} />}</Show>
       <box flexGrow={1} minHeight={0} flexDirection={isNarrow() && !documentFocusMode() ? "column" : "row"} paddingX={1}>
         <Show when={!documentFocusMode()} fallback={<box width={0} />}><Navigator rows={treeRows()} selectedPageId={selectedPageId()} focused={focusPane() === "navigator"} viewMode={pageViewMode()} onSetViewMode={switchPageView} /></Show>
-        <Reader page={readerPage()} focused={focusPane() === "document"} focusMode={documentFocusMode()} focusedSideRailPanel={focusPane() === "outline" ? "outline" : focusPane() === "related" ? "related" : null} sideRailSelectedIndex={sideRailSelectedIndex()} outlineItems={outlineNavigationItems()} relatedItems={relatedNavigationItems()} narrow={isNarrow() && !documentFocusMode()} treeSitterClient={treeSitterClient()} imageRenderMode={inlineImageRenderMode()} setDocumentScrollbox={(scrollbox) => { documentScrollbox = scrollbox }} setImageRenderable={setReaderImageRenderable} />
+        <Reader page={readerPage()} focused={focusPane() === "document"} focusMode={documentFocusMode()} horizontalScroll={documentHorizontalScroll()} focusedSideRailPanel={focusPane() === "outline" ? "outline" : focusPane() === "related" ? "related" : null} sideRailSelectedIndex={sideRailSelectedIndex()} outlineItems={outlineNavigationItems()} relatedItems={relatedNavigationItems()} narrow={isNarrow() && !documentFocusMode()} treeSitterClient={treeSitterClient()} imageRenderMode={inlineImageRenderMode()} setDocumentScrollbox={setDocumentScrollbox} setImageRenderable={setReaderImageRenderable} />
       </box>
       <StatusBar focusPane={focusPane()} documentFocusMode={documentFocusMode()} editorOpen={editorOpen()} editorDirty={editorDirty()} editMessage={editStatusMessage()} reloading={pageReloading()} hasStagedChanges={stagedChanges().length > 0} width={dimensions().width} />
       {editorOpen() ? (
@@ -2020,8 +2045,8 @@ export function Header(props: { page: ReaderPage; spaceName: string; syncState: 
             <text height={1} fg={theme.warn}><b>RELOADING</b></text>
           </Show>
           <text height={1} fg={statusColor()}>{statusText()}</text>
-          <box height={1} width={14} onMouseDown={() => props.onReportBug?.()}>
-            <text height={1} fg={theme.accent}>B report bug</text>
+          <box height={1} width={14} backgroundColor={theme.danger} alignItems="center" justifyContent="center" onMouseDown={() => props.onReportBug?.()}>
+            <text height={1} fg={theme.bg}><b>B REPORT BUG</b></text>
           </box>
         </box>
       </box>
@@ -2122,10 +2147,12 @@ function navigatorDocumentKind(row: TreeRow): NavigatorDocumentKind {
   return "page"
 }
 
-function Reader(props: { page: ReaderPage; focused: boolean; focusMode: boolean; focusedSideRailPanel: SideRailPanel | null; sideRailSelectedIndex: number; outlineItems: OutlineNavigationItem[]; relatedItems: RelatedNavigationItem[]; narrow: boolean; treeSitterClient?: TreeSitterClient; imageRenderMode: ImageRenderMode; setDocumentScrollbox: (scrollbox: ScrollBoxRenderable) => void; setImageRenderable: (nodeId: string, renderable: BoxRenderable) => void }) {
+function Reader(props: { page: ReaderPage; focused: boolean; focusMode: boolean; horizontalScroll: HorizontalScrollState; focusedSideRailPanel: SideRailPanel | null; sideRailSelectedIndex: number; outlineItems: OutlineNavigationItem[]; relatedItems: RelatedNavigationItem[]; narrow: boolean; treeSitterClient?: TreeSitterClient; imageRenderMode: ImageRenderMode; setDocumentScrollbox: (scrollbox: ScrollBoxRenderable) => void; setImageRenderable: (nodeId: string, renderable: BoxRenderable) => void }) {
   const renderer = useRenderer()
+  const dimensions = useTerminalDimensions()
   const renderMarkdownNode = createReaderMarkdownNodeRenderer(renderer, props.treeSitterClient)
   const contentParts = createMemo(() => splitReaderImagePlaceholders(props.page.contentMarkdown, props.page.mediaAssets ?? []))
+  const contentWidth = createMemo(() => documentContentWidth(props.page.contentMarkdown, readerDocumentViewportWidth(dimensions().width, props.focusMode, props.narrow)))
 
   return (
     <box
@@ -2152,7 +2179,7 @@ function Reader(props: { page: ReaderPage; focused: boolean; focusMode: boolean;
             <text height={1} fg={theme.warn}>Archived in Confluence · read-only</text>
           </Show>
           <box height={1} />
-          <scrollbox id="document-scrollbox" ref={props.setDocumentScrollbox} flexGrow={1} minHeight={0} scrollX scrollbarOptions={{ showArrows: false }} horizontalScrollbarOptions={{ showArrows: false }}>
+          <scrollbox id="document-scrollbox" ref={props.setDocumentScrollbox} flexGrow={1} minHeight={0} scrollX contentOptions={{ width: contentWidth(), minWidth: contentWidth(), flexShrink: 0 }} scrollbarOptions={{ showArrows: false }} horizontalScrollbarOptions={{ showArrows: false }}>
             <box flexDirection="column" width="100%">
               <For each={contentParts()}>{(part) => part.kind === "markdown" ? (
                 <markdown
@@ -2165,15 +2192,32 @@ function Reader(props: { page: ReaderPage; focused: boolean; focusMode: boolean;
                   concealCode={false}
                   treeSitterClient={props.treeSitterClient}
                   renderNode={renderMarkdownNode}
-                  tableOptions={{ style: "grid", widthMode: "full", columnFitter: "balanced", wrapMode: "word", cellPaddingX: 1, borderStyle: "rounded", borderColor: theme.codeBorder, selectable: true }}
+                  tableOptions={{ style: "grid", widthMode: "content", wrapMode: "none", cellPaddingX: 1, borderStyle: "rounded", borderColor: theme.codeBorder, selectable: true }}
                 />
               ) : <ImagePreviewCard part={part} narrow={props.narrow} renderMode={props.imageRenderMode} setRenderable={props.setImageRenderable} />}</For>
             </box>
           </scrollbox>
+          <ThinHorizontalScrollbar state={props.horizontalScroll} />
         </box>
         <Show when={!props.focusMode} fallback={<box width={0} />}><SideRail narrow={props.narrow} focusedPanel={props.focusedSideRailPanel} selectedIndex={props.sideRailSelectedIndex} outlineItems={props.outlineItems} relatedItems={props.relatedItems} /></Show>
       </box>
     </box>
+  )
+}
+
+export function ThinHorizontalScrollbar(props: { state: HorizontalScrollState }) {
+  const segments = createMemo(() => thinHorizontalScrollbarSegments(props.state))
+
+  return (
+    <Show when={segments()} fallback={<box height={0} />}>
+      {(value) => (
+        <box height={1} width="100%" flexDirection="row">
+          <text height={1} width={value().before} fg={theme.subtle}>{"─".repeat(value().before)}</text>
+          <text height={1} width={value().thumb} fg={theme.borderActive}>{"━".repeat(value().thumb)}</text>
+          <text height={1} width={value().after} fg={theme.subtle}>{"─".repeat(value().after)}</text>
+        </box>
+      )}
+    </Show>
   )
 }
 
@@ -4058,6 +4102,60 @@ export function documentHorizontalScrollDeltaForKey(key: SearchKeyLike): number 
   if (key.name === "right") return documentHorizontalScrollColumns
   if (key.name === "left") return -documentHorizontalScrollColumns
   return 0
+}
+
+export function documentContentWidth(markdown: string, viewportWidth: number) {
+  return Math.max(Math.max(1, Math.floor(viewportWidth)), markdownTableIntrinsicWidth(markdown))
+}
+
+export function thinHorizontalScrollbarSegments(state: HorizontalScrollState) {
+  const viewport = Math.max(0, Math.floor(state.viewport))
+  const content = Math.max(0, Math.floor(state.content))
+  if (viewport <= 0 || content <= viewport) return null
+
+  const thumb = Math.max(2, Math.min(viewport, Math.round(viewport * viewport / content)))
+  const available = Math.max(0, viewport - thumb)
+  const range = Math.max(1, content - viewport)
+  const before = Math.max(0, Math.min(available, Math.round(available * state.position / range)))
+  return { before, thumb, after: available - before }
+}
+
+export function markdownTableIntrinsicWidth(markdown: string) {
+  const lines = markdown.split("\n")
+  let widest = 0
+
+  for (let index = 0; index < lines.length - 1; index += 1) {
+    const header = markdownTableCells(lines[index])
+    const separator = markdownTableCells(lines[index + 1])
+    if (!header.length || header.length !== separator.length || !separator.every((cell) => /^:?-{3,}:?$/.test(cell))) continue
+
+    const widths = header.map((cell) => cell.length)
+    let rowIndex = index + 2
+    while (rowIndex < lines.length) {
+      const cells = markdownTableCells(lines[rowIndex])
+      if (!cells.length) break
+      for (let column = 0; column < widths.length; column += 1) widths[column] = Math.max(widths[column], (cells[column] ?? "").length)
+      rowIndex += 1
+    }
+
+    widest = Math.max(widest, widths.reduce((sum, width) => sum + width + 2, 1) + widths.length)
+    index = rowIndex - 1
+  }
+
+  return widest
+}
+
+function markdownTableCells(line: string) {
+  let value = line.trim()
+  if (!value.includes("|")) return []
+  if (value.startsWith("|")) value = value.slice(1)
+  if (value.endsWith("|")) value = value.slice(0, -1)
+  return value.split("|").map((cell) => cell.trim())
+}
+
+function readerDocumentViewportWidth(terminalWidth: number, focusMode: boolean, narrow: boolean) {
+  if (focusMode || narrow) return Math.max(24, terminalWidth - 6)
+  return Math.max(24, terminalWidth - 72)
 }
 
 function keyDebugData(key: SearchKeyLike) {
